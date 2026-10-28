@@ -44,6 +44,24 @@ return [
             'transaction_mode' => 'DEFERRED',
         ],
 
+        'pool_shared_1' => [
+            'driver' => env('DB_POOL1_CONNECTION', env('DB_CONNECTION', 'sqlite')),
+            'url' => env('DB_POOL1_URL'),
+            'host' => env('DB_POOL1_HOST', env('DB_HOST', '127.0.0.1')),
+            'port' => env('DB_POOL1_PORT', env('DB_PORT', '3306')),
+            'database' => env('DB_POOL1_DATABASE', database_path('pool_shared_1.sqlite')),
+            'username' => env('DB_POOL1_USERNAME', env('DB_USERNAME', 'root')),
+            'password' => env('DB_POOL1_PASSWORD', env('DB_PASSWORD', '')),
+            'unix_socket' => env('DB_POOL1_SOCKET', env('DB_SOCKET', '')),
+            'charset' => env('DB_POOL1_CHARSET', env('DB_CHARSET', 'utf8mb4')),
+            'collation' => env('DB_POOL1_COLLATION', env('DB_COLLATION', 'utf8mb4_unicode_ci')),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+            'strict' => true,
+            'engine' => null,
+        ],
+
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),
