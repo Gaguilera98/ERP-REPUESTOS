@@ -117,7 +117,7 @@ it('removes the deleted tenant rows and keeps the other tenant', function () {
 
 it('resolves the tenant domain on its pool and returns to the central connection', function () {
     $tenant = Tenant::factory()->create();
-    $tenant->domains()->create(['domain' => 'taller-norte.localhost']);
+    $tenant->domains()->create(['domain' => 'taller-norte']);
 
     $this->get('http://taller-norte.localhost/tenant/whoami')
         ->assertOk()
