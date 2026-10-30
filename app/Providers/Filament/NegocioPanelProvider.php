@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Paleta;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Facades\Filament as FilamentFacade;
 use Filament\Http\Middleware\Authenticate;
@@ -11,7 +12,7 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
-use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -31,9 +32,12 @@ class NegocioPanelProvider extends PanelProvider
             ->path('negocio')
             ->login()
             ->authGuard('tenant')
-            ->colors([
-                'primary' => Color::Blue,
-            ])
+            ->darkMode()
+            ->colors(Paleta::colors())
+            ->renderHook(
+                PanelsRenderHook::STYLES_AFTER,
+                fn (): string => view('filament.paleta')->render(),
+            )
             ->discoverResources(in: app_path('Filament/Negocio/Resources'), for: 'App\Filament\Negocio\Resources')
             ->discoverPages(in: app_path('Filament/Negocio/Pages'), for: 'App\Filament\Negocio\Pages')
             ->pages([
