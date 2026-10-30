@@ -2,9 +2,9 @@
 
 namespace App\Filament\Negocio\Resources\Almacens;
 
-use App\Filament\Negocio\Resources\Almacens\Pages\CreateAlmacen;
-use App\Filament\Negocio\Resources\Almacens\Pages\EditAlmacen;
 use App\Filament\Negocio\Resources\Almacens\Pages\ListAlmacens;
+// use App\Filament\Negocio\Resources\Almacens\Pages\CreateAlmacen;
+// use App\Filament\Negocio\Resources\Almacens\Pages\EditAlmacen;
 use App\Filament\Negocio\Resources\Almacens\Schemas\AlmacenForm;
 use App\Filament\Negocio\Resources\Almacens\Tables\AlmacensTable;
 use App\Models\Almacen;
@@ -53,8 +53,8 @@ class AlmacenResource extends Resource
     {
         return [
             'index' => ListAlmacens::route('/'),
-            'create' => CreateAlmacen::route('/create'),
-            'edit' => EditAlmacen::route('/{record}/edit'),
+            // 'create' => CreateAlmacen::route('/create'),
+            // 'edit' => EditAlmacen::route('/{record}/edit'),
         ];
     }
 }

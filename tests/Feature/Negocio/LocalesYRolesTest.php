@@ -1,5 +1,6 @@
 <?php
 
+use App\Filament\Negocio\Resources\Almacens\Pages\ListAlmacens;
 use App\Models\Almacen;
 use App\Models\NegocioConfiguracion;
 use App\Models\NegocioRole;
@@ -9,9 +10,11 @@ use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\ModoMoneda;
 use App\Moneda;
+use Filament\Facades\Filament;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
+use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
@@ -186,4 +189,27 @@ it('lets the supervisor manage roles and keeps the cashier out', function () {
 
     $this->get('http://sur.localhost/negocio/shield/roles')
         ->assertRedirect();
+});
+
+it('opens a warehouse from the list instead of its own page', function () {
+    $tenant = Tenant::factory()->create();
+    $tenant->domains()->create(['domain' => 'norte']);
+
+    tenancy()->initialize($tenant);
+    $supervisor = TenantUser::factory()->create();
+    $supervisor->assignRole('supervisor');
+
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($supervisor, 'tenant')
+        ->test(ListAlmacens::class)
+        ->assertActionExists('create')
+        ->mountAction('create')
+        ->assertActionMounted('create');
+
+    tenancy()->end();
+
+    $this->actingAs($supervisor, 'tenant')
+        ->get('http://norte.localhost/negocio/almacenes/create')
+        ->assertNotFound();
 });
