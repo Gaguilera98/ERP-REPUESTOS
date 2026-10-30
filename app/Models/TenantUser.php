@@ -11,15 +11,18 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Spatie\Permission\Traits\HasRoles;
 
 #[Fillable(['tenant_id', 'name', 'email', 'password', 'is_active'])]
 #[Hidden(['password', 'remember_token'])]
 class TenantUser extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<TenantUserFactory> */
-    use BelongsToTenantPool, HasFactory, Notifiable;
+    use BelongsToTenantPool, HasFactory, HasRoles, Notifiable;
 
     protected $table = 'users';
+
+    protected $guard_name = 'tenant';
 
     /**
      * @return array<string, string>

@@ -11,13 +11,16 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Spatie\Permission\Traits\HasRoles;
 
-#[Fillable(['name', 'email', 'password'])]
+#[Fillable(['name', 'email', 'password', 'is_active'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, HasRoles, Notifiable;
+
+    protected string $guard_name = 'web';
 
     /**
      * Get the attributes that should be cast.
@@ -29,11 +32,19 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_active' => 'boolean',
         ];
+    }
+
+    public function getConnectionName(): ?string
+    {
+        $connection = config('tenancy.database.central_connection');
+
+        return is_string($connection) && $connection !== '' ? $connection : parent::getConnectionName();
     }
 
     public function canAccessPanel(Panel $panel): bool
     {
-        return $panel->getId() === 'admin';
+        return $panel->getId() === 'admin' && $this->is_active;
     }
 }

@@ -2,6 +2,9 @@
 
 namespace App\Providers\Filament;
 
+use App\Http\Middleware\SetPlatformPermissionTeam;
+use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use Filament\Facades\Filament as FilamentFacade;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -41,10 +44,16 @@ class AdminPanelProvider extends PanelProvider
                 AccountWidget::class,
                 FilamentInfoWidget::class,
             ])
+            ->plugins([
+                FilamentShieldPlugin::make()
+                    ->centralApp(fn (): bool => FilamentFacade::getCurrentPanel()?->getId() === 'admin')
+                    ->navigationGroup('Administración'),
+            ])
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
+                SetPlatformPermissionTeam::class,
                 AuthenticateSession::class,
                 ShareErrorsFromSession::class,
                 PreventRequestForgery::class,
@@ -54,6 +63,9 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
+            ])
+            ->persistentMiddleware([
+                SetPlatformPermissionTeam::class,
             ]);
     }
 }

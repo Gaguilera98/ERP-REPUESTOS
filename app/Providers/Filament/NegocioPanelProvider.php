@@ -2,6 +2,8 @@
 
 namespace App\Providers\Filament;
 
+use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use Filament\Facades\Filament as FilamentFacade;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -44,8 +46,6 @@ class NegocioPanelProvider extends PanelProvider
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
-                PreventAccessFromCentralDomains::class,
-                InitializeTenancyBySubdomain::class,
                 StartSession::class,
                 AuthenticateSession::class,
                 ShareErrorsFromSession::class,
@@ -53,9 +53,17 @@ class NegocioPanelProvider extends PanelProvider
                 SubstituteBindings::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
+            ])
+            ->middleware([
+                InitializeTenancyBySubdomain::class,
+                PreventAccessFromCentralDomains::class,
             ], isPersistent: true)
             ->authMiddleware([
                 Authenticate::class,
+            ])
+            ->plugins([
+                FilamentShieldPlugin::make()
+                    ->centralApp(fn (): bool => FilamentFacade::getCurrentPanel()?->getId() === 'admin'),
             ]);
     }
 }

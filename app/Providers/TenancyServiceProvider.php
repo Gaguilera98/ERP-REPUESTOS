@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Tenancy\CleanTenantPoolData;
+use App\Tenancy\ClearPermissionTeam;
 use App\Tenancy\RestoreCentralDatabaseConnection;
+use App\Tenancy\SeedNegocioRoles;
+use App\Tenancy\SetPermissionTeam;
 use App\Tenancy\SwitchTenantPoolConnection;
 use App\Tenancy\TenantPoolManager;
 use Illuminate\Contracts\Http\Kernel;
@@ -27,7 +30,13 @@ class TenancyServiceProvider extends ServiceProvider
         return [
             // Tenant events
             Events\CreatingTenant::class => [],
-            Events\TenantCreated::class => [],
+            Events\TenantCreated::class => [
+                JobPipeline::make([
+                    SeedNegocioRoles::class,
+                ])->send(function (Events\TenantCreated $event) {
+                    return $event->tenant;
+                })->shouldBeQueued(false),
+            ],
             Events\SavingTenant::class => [],
             Events\TenantSaved::class => [],
             Events\UpdatingTenant::class => [],
@@ -63,12 +72,14 @@ class TenancyServiceProvider extends ServiceProvider
             Events\TenancyInitialized::class => [
                 Listeners\BootstrapTenancy::class,
                 SwitchTenantPoolConnection::class,
+                SetPermissionTeam::class,
             ],
 
             Events\EndingTenancy::class => [],
             Events\TenancyEnded::class => [
                 Listeners\RevertToCentralContext::class,
                 RestoreCentralDatabaseConnection::class,
+                ClearPermissionTeam::class,
             ],
 
             Events\BootstrappingTenancy::class => [],

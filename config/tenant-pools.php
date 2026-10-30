@@ -23,6 +23,14 @@ return [
     ],
 
     'tables' => [
+        'model_has_permissions',
+        'model_has_roles',
+        'role_has_permissions',
+        'roles',
+        'sucursal_almacenes',
+        'negocio_configuracion',
+        'sucursales',
+        'almacenes',
         'users',
     ],
 

@@ -1,0 +1,652 @@
+# ERP Repuestos v1 - Documento Maestro Unificado
+
+Este documento unificado contiene la arquitectura completa, las reglas de negocio estrictas (con su respectivo "Por qué" y "Para qué") y el diseño relacional de la base de datos para el sistema multi-negocio **ERP Repuestos v1**, diseñado para operar con alta velocidad en mostrador, control estricto de inventario por Costo Promedio Ponderado (PPP), talonarios fiscales físicos, sesiones de caja con candados de auditoría, gestión de devoluciones inmediatas y el protocolo de **Entrada Express por Faltante / Producto Nuevo con Proveedor Ocasional y Creación Al Vuelo**.
+
+---
+
+## PARTE 1: REGLAS DE NEGOCIO ESTRICTAS
+
+### 1. Diseño Técnico y Mapeo de Catálogo
+* **Identificación Única (SKU vs Código de Barras):** 
+  * *Por qué:* El SKU representa la designación técnica internacional del fabricante (ej: 6204-2RS) junto con sus variaciones. Es de control interno obligatorio y único por cada variante física dentro del negocio. Otro negocio puede usar el mismo código. El código de barras (EAN/UPC) es el número de la etiqueta para lectura rápida: dentro del negocio, si existe, también es único, para que el lector abra una sola variante.
+  * *Para qué:* Garantizar que la búsqueda técnica en mostrador sea precisa sin depender de etiquetas impresas genéricas.
+* **Búsqueda Técnica Avanzada por Atributos:** 
+  * *Por qué:* Los repuestos y rodamientos se identifican muchas veces por sus dimensiones físicas exactas.
+  * *Para qué:* Indexar por separado en milímetros los diámetros interno, externo y ancho dentro de columnas o formatos estructurados para permitir búsquedas cuando el cliente trae una muestra sin conocer el código.
+* **Herencia de Atributos por Categoría y Variantes:** 
+  * *Por qué:* Evitar errores de tipeo y estandarizar la creación de productos mediante plantillas JSON heredadas desde la categoría.
+  * *Para qué:* Generar variantes (hijos) automáticas a partir de atributos combinables manteniendo una estructura unificada de venta sobre la tabla `productos_variantes`.
+* **Ubicación Alfanumérica por Coordenadas Estrictas:** 
+  * *Por qué:* Las bodegas de repuestos manejan miles de piezas pequeñas.
+  * *Para qué:* Exigir una codificación estructurada (ej: `PASILLO-01-ESTANTE-04-ALTURA-02`) en el stock de cada almacén, para optimizar el tiempo de picking. La misma pieza puede estar en otro pasillo en otro depósito.
+
+### 2. Inventario Físico y Kardex Financiero (PPP)
+* **Cálculo Automático por Costo Promedio Ponderado (PPP):** 
+  * *Por qué:* Sobrescribir manualmente el precio de compra o aplicar precios arbitrarios arruina los costos y falsifica la utilidad bruta.
+  * *Para qué:* Cada entrada de mercancía (vía Órdenes de Compra o Entradas Express) calcula automáticamente el nuevo PPP combinando stock actual e inversión nueva, actualizando de forma inalterable el Kardex (`Movimientos_Inventario`) y congelando el costo al momento de vender (`precio_costo_snapshot`).
+* **Confirmación del costo al guardar la compra:**
+  * *Por qué:* Un 200 tipeado en vez de 20 sube el PPP del producto y la venta a 50 parece una pérdida.
+  * *Para qué:* Antes de que la entrada toque el kardex, la pantalla muestra el costo por unidad de cada producto de esa compra y pide confirmación. Ejemplo: «Este rodamiento te costó 200 por unidad. ¿Confirmas?». Si no confirman, no se guarda. Si confirman un número mal tipeado, la corrección de costo sigue disponible para lo que quede en el estante.
+* **Alerta si el precio de venta está por debajo del PPP:**
+  * *Por qué:* El precio de venta lo pone el negocio. Si el promedio ya quedó más alto que ese precio, vender es vender a pérdida según el sistema.
+  * *Para qué:* Al agregar el producto a la venta, o al aplicar el descuento, si `precio_costo` es mayor que el precio unitario que va a pagar el cliente, se muestra una alerta con los dos números. No bloquea la venta. El cajero puede seguir.
+* **Cálculo de Disponibilidad de Stock:** 
+  * *Por qué:* Las reservas de mercadería apartan stock sin descontarlo físicamente de inmediato.
+  * *Para qué:* Calcular el stock real apto para la venta mediante la fórmula en tiempo real: $\text{Stock Disponible} = \text{cantidad\_actual} - \text{cantidad\_reservada}$.
+* **Kardex Obligatorio e Inalterable:** 
+  * *Por qué:* Ninguna pieza puede entrar o salir de la bodega sin dejar rastro contable y físico.
+  * *Para qué:* Prohibir la alteración directa del stock sin generar un movimiento correlativo en el Kardex que registre el stock previo, el posterior y el responsable. La venta bloquea la fila de stock antes de descontar, para que dos cajeros no vendan la última unidad al mismo tiempo.
+* **Ajuste de unidades y conteo físico:**
+  * *Por qué:* Cambiar el número del estante sin motivo y sin supervisor hace desaparecer piezas y valor, y no queda por qué.
+  * *Para qué:* Un ajuste corrige cuántas hay. El precio de la pieza no cambia. Lleva motivo (`merma`, `rotura`, `hallazgo`, `uso_interno` o `diferencia_conteo`) y un texto. Lo autoriza un supervisor. El kardex inserta una línea `ajuste` con el stock previo, el posterior, quién lo cargó y quién autorizó. Si el ajuste estaba mal, se carga otro en sentido contrario. El primero no se edita.
+  * *Para qué, en el conteo:* Se cuenta el estante, incluidas las piezas de una seña, porque siguen ahí. Al cerrar se compara con el stock de ese momento. Si durante el conteo se vendió uno, ese uno ya salió por la venta. Cada diferencia es un ajuste `diferencia_conteo`. El cajero carga las cantidades. El supervisor cierra. Si la cantidad contada deja el stock por debajo de lo reservado, el cierre no pasa. La caja no se mueve.
+* **Corrección de un costo ya cargado:**
+  * *Por qué:* Si la compra se tipeó a 200 y el costo real era 20, el precio promedio queda mal. Borrar esa línea del kardex, o cambiar el costo de las ventas ya cerradas, falsifica el pasado.
+  * *Para qué:* Un supervisor anota el costo real, ligado a la línea de la compra. Las ventas ya hechas conservan su `precio_costo_snapshot`. Lo que todavía está en el estante toma el costo nuevo de ahí en adelante. El kardex inserta una línea `correccion_costo` con cantidad cero: no entran ni salen piezas. La compra vieja no se edita. La caja no se mueve.
+
+### 3. Ventas, Comprobantes y Control de Talonario Fiscal
+* **Emisión Dual de Comprobantes (`nota_venta` vs `factura_manual`):** 
+  * *Por qué:* En la práctica comercial, se requiere agilidad extrema en mostrador y cumplimiento fiscal ante Impuestos Nacionales (SIN) sin depender de integraciones electrónicas complejas desde el inicio.
+  * *Para qué:* El sistema emite un ticket comercial rápido (`nota_venta`) con todo el detalle de los repuestos para entregar al cliente o grapar al papel. Si requiere factura formal, se registra como `factura_manual`, exigiendo el `cliente_id` (con NIT/CI y Razón Social) y el `numero_comprobante` físico del talonario, facilitando al contador un reporte limpio y libre de errores de tipeo.
+* **Snapshot Fiscal Histórico:** 
+  * *Por qué:* Las leyes tributarias o porcentajes impositivos pueden cambiar en el futuro.
+  * *Para qué:* Congelar los valores de impuestos (`venta_impuestos`) como texto y número fijo durante la transacción para proteger las auditorías contables pasadas. El porcentaje vigente vive en `impuestos`. La venta copia nombre y porcentaje. Si la ley cambia, se edita el impuesto. Las ventas viejas no.
+* **Precio al por menor, al por mayor y descuento:**
+  * *Por qué:* El mostrador y el taller no pagan el mismo precio. Además el descuento a veces es un porcentaje y a veces es un monto en la moneda de la tienda. Hace falta en los dos precios.
+  * *Para qué:* `precio_venta` es el precio al por menor. `precio_mayor` es el de mayorista. El cliente tiene `tipo_precio`: `menor` o `mayor`. Si no tiene marca, paga el menor. Si es mayorista y el producto no tiene `precio_mayor`, paga el menor.
+  * *Para qué, el descuento:* Va en la línea. El tipo es `porcentaje` o `importe`. El porcentaje se calcula sobre el total de esa línea. El importe es un monto fijo en la moneda de la tienda, también sobre la línea. `ventas.descuento` es la suma de las líneas, no un descuento extra.
+  * *Para qué, el tope:* El cajero puede llegar hasta `descuento_max_porcentaje` (de partida 10) o hasta `descuento_max_importe` (de partida 0, o sea que un importe fijo lo autoriza el supervisor hasta que el negocio suba ese tope). Pasado el tope, en menor o en mayor, hace falta un supervisor. El descuento no puede dejar la línea en negativo.
+* **La moneda es de la tienda, y el dólar solo convierte:**
+  * *Por qué:* La caja, la factura y el costo promedio tienen que estar en la misma moneda. Una tienda en Bolivia cobra en bolivianos, una en Perú en soles y una en Brasil en reales. El cliente que entra de otro país no cambia esa moneda. El dólar sube y baja, y no todas las tiendas lo usan. No se cobra en dólares.
+  * *Para qué:* En la configuración, `moneda` nace en `BOB` (Bs). También puede ser `PEN` (S/) o `BRL` (R$). `modo_moneda` nace en `solo_moneda`. Si el negocio importa, lo pasa a `con_dolar`. Ahí hay una pantalla para poner el tipo de cambio del día: cuántas unidades de la moneda de la tienda vale un dólar. En Bolivia puede ser 11. En Perú puede ser 3,70. Cada cambio queda guardado con fecha. El anterior no se borra. Lo carga un supervisor.
+  * *Para qué, en la compra:* La línea puede anotarse en la moneda de la tienda o en dólares. Si es en dólares, guarda el monto en dólares, el tipo de cambio de ese momento y el resultado en la moneda de la tienda. Ese resultado es el que entra al promedio. Si mañana el dólar sube, esa compra no se mueve.
+  * *Para qué, en el precio:* `precio_venta` y `precio_mayor` siguen en la moneda de la tienda. Si la pieza tiene `precio_venta_dolar` o `precio_mayor_dolar`, al guardar un tipo de cambio nuevo el sistema calcula el precio en la moneda de la tienda de todas esas piezas, de una vez. Muestra cuántas cambian y pide una sola confirmación. No lo cambia solo y no pide confirmar producto por producto. Las que no tienen precio en dólares no se tocan. La venta ya cerrada conserva el precio que se cobró. El cliente no tiene moneda propia.
+* **Contado, seña, fiado y adelanto son el mismo dinero:**
+  * *Por qué:* El camino de todos los días es cobrar la venta completa en el momento. También existe dejar una seña para apartar, llevarse la mercadería y pagar después, y dejar plata a cuenta sin una pieza concreta. Armar una tabla para cada caso duplica la caja y el saldo deja de cuadrar entre negocios.
+  * *Para qué:* `pagos` registra solo la plata que entra o sale de la caja de ese turno. `pago_aplicaciones` dice a qué venta, a qué nota de crédito o a qué saldo a favor se aplica. El saldo no se guarda en el cliente: se calcula. El comprobante nace con la venta. Cada abono no es otra venta.
+  * *Para qué, en el mostrador:*
+    * **Contado.** `condicion = 'contado'` y `estado = 'completada'`. El pago cubre el total, entra a la caja de hoy y el stock sale. El cliente puede no existir.
+    * **Seña.** `estado = 'reserva'`, el cliente es obligatorio y la venta guarda `vence_en`. El plazo de partida del negocio es 48 horas. Al crearla se puede poner menos o más. Después, solo un supervisor puede cambiar `vence_en`. El pago de hoy entra a la caja de hoy y se aplica a esa venta. El stock no sale: sube `cantidad_reservada`. Lo que falta queda por cobrar sobre esa venta. Si el cliente vuelve a tiempo y paga el resto, pasa a `completada` y el stock sale. Si `vence_en` se cumple y no volvió, la venta pasa a `vencida`, `cantidad_reservada` baja y la pieza vuelve a estar disponible. No hay kardex, porque la pieza nunca salió. La seña queda como saldo a favor de ese cliente. La caja del día en que la dejó no se toca. Si quiere la plata de vuelta, es un reembolso en la caja del día en que la pide.
+    * **Fiado.** `condicion = 'credito'`, `estado = 'completada'` y el cliente es obligatorio. El stock sale hoy. La caja de hoy no se mueve si no dejó plata. Cuando pague, ese cobro entra a la caja del día en que paga.
+    * **Un pago, varias deudas.** Un solo `pagos` y varias filas de `pago_aplicaciones`, una por venta del mismo cliente.
+    * **Adelanto sin pieza.** Un cobro con cliente y una aplicación sin venta. Queda saldo a favor. Cuando compra, una aplicación nueva apunta a esa fila y a la venta. La caja no vuelve a sumar esa plata.
+  * *Para qué, al devolver:* Un reembolso es un `pagos` con `sentido = 'reembolso'` en la caja de hoy, aplicado a la nota de crédito. Si se devuelve una seña que sigue en reserva, además se libera `cantidad_reservada` y la venta pasa a `anulada`. Si el fiado se devuelve, la venta deja de contar como por cobrar. Se reembolsa solo la plata ya cobrada. Lo que nunca se pagó no sale de la caja.
+
+### 4. Protocolo de Anulaciones y Cambios Inmediatos en Mostrador
+* **Restricción de Edición en Caliente:** 
+  * *Por qué:* Permitir modificar una venta ya cerrada o pagada abre la puerta a fraudes y descuadres de caja.
+  * *Para qué:* Ninguna venta finalizada se edita directamente; toda corrección posterior exige un flujo controlado.
+* **Anulación con Autorización de Supervisor (`supervisor_id`):** 
+  * *Por qué:* Los cajeros u operadores rasos no pueden anular operaciones a libre albedrío.
+  * *Para qué:* Toda anulación exige credenciales de supervisor, revierte atómicamente el inventario al Kardex y, si involucra una `factura_manual`, exige la anulación física del papel en el talonario con observación obligatoria para el contador.
+* **Devoluciones Parciales y Cambios Cruzados (Mismo Día / Turno Abierto):** 
+  * *Por qué:* El cliente típico se va al auto, se da cuenta de que la medida era otra y regresa a los 5 minutos; anular todo el día es inviable.
+  * *Para qué:* Permitir mediante una *Nota de Cambio / Devolución* autorizada por supervisor reingresar la pieza al Kardex y compensar el saldo de manera cruzada sin destruir la venta original ni la caja del turno.
+
+### 5. Protocolo de Venta con Faltantes de Stock (Entrada Express de Emergencia)
+* **Gestión de Faltantes o Productos Nuevos sin Stock:**
+  * *Por qué:* En el mostrador de repuestos ocurren dos realidades: el producto existe pero está en stock 0, o el producto ni siquiera está creado en el sistema, pero se consigue al instante con un colega de la cuadra.
+  * *Para qué:* Permitir al operador registrar un alta exprés del producto (si no existe) y activar una **Entrada Express** que genere al vuelo una micro-compra de emergencia sin romper el Kardex ni permitir stock negativo.
+* **Proveedor Ocasional y Creación Al Vuelo con Multicontactos:**
+  * *Por qué:* En el apuro de una venta de emergencia, el operador no puede perder tiempo buscando o creando un proveedor completo.
+  * *Para qué:* El sistema asigna por defecto el proveedor comodín de ese negocio (**"Compra Ocasional / Proveedor Local"**, uno por negocio), pero incluye un modal rápido para crear el proveedor nuevo (solo con nombre obligatorio) y seleccionar o registrar su contacto al instante. Permite también la edición posterior de la compra flash para reasignar el proveedor real con fines contables y de auditoría.
+
+### 6. Control Financiero, Cajas y Caja Chica
+* **Arqueo y Cálculo Automático de Desfases:** 
+  * *Por qué:* El cierre de caja debe ser transparente y auditable matemáticamente.
+  * *Para qué:* El sistema compara el efectivo físico contado con el teórico registrado, obligando al cajero a justificar por escrito cualquier diferencia.
+* **Control de Rendiciones y Vales de Caja Chica:** 
+  * *Por qué:* Las salidas de efectivo para compras menores no pueden quedar volando sin respaldo.
+  * *Para qué:* El sistema bloquea preventivamente el cierre de caja si existen movimientos en `estado_rendicion = 'pendiente_comprobante'`.
+
+---
+
+## CORRECCIONES
+
+Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. Fijan dónde vive cada dato cuando muchos negocios comparten el pool, para que un SKU, un NIT o una pieza no se mezclen entre negocios.
+
+### 1. El tenant es el negocio, no la sucursal
+* *Por qué:* Una ferretería y un taller son dos clientes del sistema. Cada uno puede tener varias sucursales. Si una sucursal fuera otro tenant, el kardex y la caja se partirían y el costo promedio dejaría de cuadrar.
+* *Para qué:* `tenants` y `domains` viven en la base central. El subdominio (`norte`) se guarda en `domains` y abre `norte.localhost`. Sucursales, almacenes, stock y ventas viven en el pool, todos con el mismo `tenant_id` del negocio.
+
+### 2. `tenant_id` en toda tabla del pool
+* *Por qué:* En una base compartida, un único puesto solo sobre `sku` o `nit` impide que el segundo negocio use el mismo código. Una foreign key solo por `id` deja guardar una venta del negocio A con el producto del negocio B.
+* *Para qué:* Toda tabla de la Parte 2 lleva `tenant_id` (string, el id del tenant, sin foreign key a la central porque es otra base). El único y el índice empiezan por `tenant_id`. Cada tabla padre tiene único `(tenant_id, id)`. Cada foreign key del pool es compuesta: `(tenant_id, producto_variante_id)` apunta a `(tenant_id, id)`. `user_id` y `supervisor_id` apuntan a `users` del pool, nunca al admin de la plataforma.
+* *Para qué, al borrar:* Cada tabla nueva entra en la lista de limpieza del pool, hijas antes que padres. Si falta, al borrar el negocio quedan ventas y kardex ajenos en la base compartida.
+
+### 3. Almacén compartido: solo la pivote
+* *Por qué:* Hay sucursales con depósito propio y otras que venden del mismo montón. `sucursal_id` en el almacén dice que pertenece a una sola sucursal. La pivote dice que lo usan varias. Las dos juntas se contradicen y el kardex no sabe de quién era la pieza.
+* *Para qué:* `almacenes` no tiene `sucursal_id`. `sucursal_almacenes` es el único vínculo. Una fila significa «es su almacén»; dos filas significan «comparten el mismo saldo». `es_principal` vive en la pivote: un depósito compartido puede ser el principal de una sucursal y el de respaldo de otra. La venta guarda `sucursal_id` (quién cobró) y `almacen_id` (de qué montón salió).
+* *Para qué, si el galpón es el mismo pero el saldo no:* Eso no es un almacén compartido. Son dos almacenes y el pase de mercadería es un traslado de kardex (`traslado_salida` y `traslado_entrada`).
+
+### 4. El mismo código puede existir en otro negocio
+* *Por qué:* `6204-2RS`, un NIT y el número de un talonario se repiten en la vida real entre negocios, sucursales y tipos de comprobante.
+* *Para qué:* Los únicos quedan así:
+  * Variante: `(tenant_id, sku)`.
+  * Cliente: `(tenant_id, nit_ci)`. El NIT vacío puede repetirse; Postgres lo permite en un único.
+  * Proveedor: `(tenant_id, nit)`.
+  * Comprobante de venta: `(tenant_id, sucursal_id, tipo_comprobante, numero_comprobante)`.
+  * Stock: `(tenant_id, producto_variante_id, almacen_id)`. Una variante tiene una sola fila de stock por almacén.
+
+### 5. La ubicación es del almacén, no de la variante
+* *Por qué:* La misma pieza puede estar en `PASILLO-01` en un depósito y en `ESTANTE-04` en otro.
+* *Para qué:* `ubicacion` va en `inventario_stocks`, junto al almacén. No va en `productos_variantes`.
+
+### 6. El kardex no apunta a un id suelto
+* *Por qué:* `referencia_id` solo, sin tipo, puede caer en una venta, en una compra o en una fila de otro negocio.
+* *Para qué:* El movimiento guarda `referencia_tipo` (`venta`, `orden_compra`, `nota_credito`, `traslado`, `ajuste` o `correccion_costo`) y `tenant_id`. También guarda `stock_previo`, `stock_posterior` y `user_id` del pool. La fila se inserta y no se edita. La aplicación comprueba que la fila referenciada sea del mismo tenant. Postgres no puede imponer sola esa relación polimórfica.
+
+### 7. El proveedor ocasional es de cada negocio
+* *Por qué:* Si hubiera un solo proveedor comodín para todo el pool, las compras flash de todos los negocios compartirían esa fila.
+* *Para qué:* Al crear el negocio se inserta un proveedor con `es_ocasional = true` y su `tenant_id`. Solo puede haber uno por negocio. Después se puede reasignar la compra al proveedor real.
+
+### 8. Categorías y trabajadores faltaban en el esquema
+* *Por qué:* `categoria_id` y `trabajadores` ya se usaban en las foreign keys y no tenían tabla. Cada negocio clasifica y emplea a los suyos.
+* *Para qué:* `categorias` y `trabajadores` viven en el pool, con `tenant_id`. La plantilla JSON de atributos cuelga de la categoría. El trabajador puede tener `user_id` opcional hacia el usuario del pool, y ese usuario tiene que ser del mismo `tenant_id`.
+
+### 9. Lo que no se mueve de las reglas de negocio
+* *Para qué:* El PPP se recalcula en cada entrada y se congela en `precio_costo_snapshot` al vender. Los impuestos de la venta se guardan como snapshot. La venta cerrada no se edita: se anula o se devuelve con supervisor. La caja no cierra si hay un vale pendiente de comprobante. Los archivos de comprobante siguen siendo una ruta; el disco ya separa los archivos por tenant.
+
+### 10. El código de barras no es el SKU
+* *Por qué:* La regla ya separa el código interno del número de la etiqueta. Sin columna, el lector de mostrador no tiene dónde caer.
+* *Para qué:* `productos_variantes.codigo_barras` es nullable y único `(tenant_id, codigo_barras)`. El SKU sigue siendo la identidad de la variante. El código de barras es la etiqueta que lee el mostrador, y dentro del negocio no puede apuntar a dos variantes: si se repite, el lector no sabe cuál vender. El vacío puede repetirse, así que una pieza sin etiqueta no choca con otra. Otro negocio sí puede tener el mismo código, porque el único incluye `tenant_id`.
+
+### 11. El desfase de caja tiene que quedar escrito
+* *Por qué:* La regla obliga a justificar por escrito cualquier diferencia, y `diferencia` solo guarda el número.
+* *Para qué:* `cajas_sesiones` lleva `justificacion_diferencia`, `fecha_apertura` y `fecha_cierre`. Si la sesión está cerrada, `fecha_cierre` es obligatoria. Si `diferencia` no es cero, el texto de la justificación es obligatorio. Un índice parcial permite una sola sesión `abierta` por `(tenant_id, sucursal_id, user_id)`.
+
+### 12. La devolución también mueve el dinero del turno
+* *Por qué:* El cambio del mismo día compensa el saldo con la caja abierta. Si el reembolso no tiene sesión, el arqueo no lo ve.
+* *Para qué:* `notas_credito_devoluciones.caja_sesion_id` apunta al turno de esa sucursal. El dinero que sale es un `pagos` con `sentido = 'reembolso'`. La aplicación de ese pago apunta a la nota, no a la venta. Un cobro es `sentido = 'cobro'` y sus aplicaciones apuntan a ventas o a saldo a favor. El monto sigue siendo positivo. El efectivo teórico del turno es la suma de cobros en efectivo menos reembolsos en efectivo menos los egresos de caja chica. Aplicar después un adelanto no crea otro pago y no cambia la caja del turno viejo.
+
+### 13. Se devuelve una línea vendida, no un producto suelto
+* *Por qué:* Sin la línea original, la base no sabe cuántas unidades salieron ni con qué costo congelado deben reingresar.
+* *Para qué:* `nota_credito_detalles.venta_detalle_id` es obligatorio cuando `tipo_accion = 'devuelve_stock'`. En un cambio, la línea que sale de nuevo puede no tener venta de origen. `precio_costo_snapshot` de la devolución se copia del de esa línea, para que el reingreso al kardex no recalcule el PPP como si fuera una compra nueva. La suma devuelta de una línea no puede superar `venta_detalles.cantidad`. Eso lo cierra la aplicación dentro de la transacción, con la línea bloqueada, porque cruza varias filas y Postgres no lo impone con un CHECK.
+
+### 14. El traslado entre almacenes es un documento
+* *Por qué:* `traslado_salida` y `traslado_entrada` existen en el kardex, pero nada los ata. Sin eso, una salida puede quedar sin su entrada.
+* *Para qué:* `traslados` guarda origen, destino, usuario y estado. El detalle guarda la variante y la cantidad. Cada línea completada genera los dos movimientos, ambos con `referencia_tipo = 'traslado'` y el mismo `referencia_id`. Origen y destino no pueden ser el mismo almacén. Esto vale cuando hay dos saldos distintos. Si el saldo es uno solo compartido por sucursales, no hay traslado: alcanza la pivote.
+
+### 15. El supervisor es un rol del negocio
+* *Por qué:* Anular, devolver y cerrar un desfase exigen credenciales de supervisor. El usuario del pool no lleva una columna de rol.
+* *Para qué:* Filament Shield guarda los roles del negocio en el pool. El equipo es el `tenant_id`. Cada negocio nace con `cajero` y `supervisor`. El supervisor autoriza anulaciones, devoluciones y desfases. El cajero puede cobrar y no administra roles. Quien dueña el negocio entra como supervisor. `supervisor_id` apunta a un usuario del mismo `tenant_id`. La foreign key garantiza ese tenant. Que ese usuario tenga el rol `supervisor` de Shield lo comprueba la aplicación al autorizar. La plataforma guarda sus roles en la base central, con el equipo `platform` y el guard `web`. El primer rol es `admin`. Desde el panel central se crean los negocios y los usuarios de la plataforma. Esos roles no se mezclan con `cajero` ni `supervisor`.
+
+### 16. Tres candados que pone la base
+* *Por qué:* Stock negativo, factura manual incompleta y venta desde un almacén que la sucursal no tiene son fallos que el código puede olvidar en un camino.
+* *Para qué:*
+  * `inventario_stocks`: `cantidad_actual >= 0`, `cantidad_reservada >= 0` y `cantidad_reservada <= cantidad_actual`.
+  * `ventas`: si `tipo_comprobante = 'factura_manual'`, entonces `cliente_id`, `numero_comprobante` y `talonario_id` no son nulos.
+  * `ventas (tenant_id, sucursal_id, almacen_id)` apunta al único de `sucursal_almacenes`. Una sucursal no puede vender de un almacén que no tiene asignado.
+
+### 17. El PPP no se redondea a dos decimales en cada entrada
+* *Por qué:* Con `decimal(10,2)`, el promedio se recorta en cada compra y la utilidad se desfasa de a poco.
+* *Para qué:* `precio_costo`, `costo_unitario`, `costo_promedio_resultante` y `precio_costo_snapshot` son `decimal(14,4)`. Precios de venta, impuestos y totales de dinero se quedan en `decimal(10,2)`.
+
+### 18. Las tres medidas del rodamiento se buscan por columna
+* *Por qué:* La regla pide buscar por diámetro interno, externo y ancho en milímetros. Un JSON sin índice no alcanza para el mostrador.
+* *Para qué:* Esas tres medidas son columnas nullable en `productos_variantes` (`diametro_interno_mm`, `diametro_externo_mm`, `ancho_mm`), con índice que empieza por `tenant_id`. `atributos_json` pasa a `jsonb` y guarda el resto de la plantilla de la categoría (marca y lo que no es una de esas tres medidas).
+
+### 19. El talonario físico tiene rango y hojas anuladas
+* *Por qué:* El único del número evita repetirlo, pero no sabe qué talonario está en uso ni qué hoja se anuló en papel. La regla de anulación de `factura_manual` exige esa observación para el contador.
+* *Para qué:* `talonarios` pertenece a una sucursal y a `factura_manual`. Guarda `numero_desde`, `numero_hasta` y estado. Solo puede haber uno `activo` por `(tenant_id, sucursal_id, tipo_comprobante)`. Los rangos de una sucursal no se solapan: lo comprueba la aplicación al crear el talonario. La venta con factura manual apunta a ese talonario y su número tiene que caer dentro del rango. `talonario_anulaciones` registra cada hoja muerta en papel, con motivo, usuario y supervisor. Si la anulación nace de una nota de crédito, también guarda `nota_credito_id` y `notas_credito_devoluciones.observacion_anulacion_fisica` es obligatoria.
+
+### 20. La seña, el fiado y el adelanto no tienen tabla propia
+* *Por qué:* `pagos` podía colgar de una sola venta. Con eso no entra un abono que cubre tres deudas, ni una seña que aparta stock, ni plata a cuenta sin pieza. Guardar el saldo en el cliente se desfasa en cuanto hay dos cobros.
+* *Para qué:* El pago es el movimiento de caja. `pago_aplicaciones` reparte ese monto. La suma de las aplicaciones originales de un pago es igual al monto del pago. Usar después un saldo a favor inserta otra aplicación que apunta a la primera y a la venta: no nace un pago nuevo. El por cobrar de una venta es `total` menos lo aplicado con cobros aprobados. El saldo a favor de un cliente es lo no aplicado menos lo que ya se usó. Una seña o un fiado exigen `cliente_id`. El contado de mostrador puede seguir sin cliente, y solo se completa si lo aplicado cubre el total. En el fiado el stock sale aunque quede saldo. En la reserva el stock queda en `cantidad_reservada` hasta que se entrega, se anula o vence.
+
+### 21. La seña vence y suelta el stock
+* *Por qué:* Sin un plazo, `cantidad_reservada` deja la pieza invisible para el resto de los clientes aunque siga en el estante. El plazo no puede ser el mismo para todos los negocios ni para todas las señas.
+* *Para qué:* `negocio_configuracion.horas_reserva` nace en 48. Cada negocio puede cambiar ese valor de partida. Al crear la reserva, el cajero puede poner menos horas o más, y eso se guarda en `ventas.vence_en`. Después de creada, solo un `supervisor` puede modificar `vence_en`. Al cumplirse el plazo, la venta pasa a `vencida`, baja `cantidad_reservada` y no se escribe kardex. La aplicación de esa seña se convierte en saldo a favor con una fila nueva de `pago_aplicaciones` (`venta_id` nulo, `aplicacion_origen_id` apuntando a la aplicación de la reserva, el mismo `pago_id`). No nace un pago nuevo y la caja vieja no se mueve.
+
+### 22. El ajuste cambia unidades, no el precio
+* *Por qué:* El tipo `ajuste` del kardex no tenía documento, motivo ni supervisor. Alcanzaba con escribir otro número.
+* *Para qué:* `ajustes_inventario` es el documento y `ajuste_detalles` son las piezas. Al cerrarlo, cada diferencia inserta un movimiento `ajuste` con `referencia_tipo = 'ajuste'`. `costo_unitario` y `costo_promedio_resultante` quedan en el PPP que la pieza ya tenía. `precio_costo` de la variante no se toca. `supervisor_id` es obligatorio al cerrar. Una fila cerrada no se edita.
+
+### 23. Un costo mal tipeado se corrige hacia adelante
+* *Por qué:* La compra y las ventas ya cerradas no se reescriben. El promedio mal cargado tampoco puede quedar para siempre en lo que sigue en el estante.
+* *Para qué:* `correcciones_costo` guarda el costo anterior, el nuevo, la línea de compra, el usuario y el supervisor. Actualiza `precio_costo` de la variante. Inserta un movimiento `correccion_costo` con cantidad cero y `referencia_tipo = 'correccion_costo'`. `stock_previo` y `stock_posterior` quedan iguales. Los `precio_costo_snapshot` de las ventas ya hechas no se tocan.
+
+### 24. El costo se confirma al guardar, y la venta avisa si queda por debajo
+* *Por qué:* La corrección hacia adelante no alcanza si el 200 entra sin que nadie lo vea, y tampoco si el mostrador vende a 50 sin notar que el promedio ya está en 200.
+* *Para qué:* No hay tablas nuevas. Al guardar la compra, la pantalla obliga a confirmar el costo por unidad antes de escribir el kardex. Al vender, si el PPP es mayor que el precio unitario que va a pagar el cliente, ya con descuento, hay una alerta con ambos números y la venta puede continuar.
+
+### 25. Menor, mayor y dos tipos de descuento
+* *Por qué:* Un solo `precio_venta` y un descuento solo en dinero no distinguen al taller del mostrador, ni un 10 % de un descuento de un monto fijo.
+* *Para qué:* El precio usado queda copiado en `precio_unitario` de la línea. El descuento guarda `tipo_descuento` y `valor_descuento`, y `descuento_aplicado` es la plata que se restó. Si el valor pasa el tope del negocio, `supervisor_descuento_id` es obligatorio.
+
+### 26. La moneda es de la tienda. El dólar solo convierte y no se cobra
+* *Por qué:* Sin un lugar donde poner el tipo de cambio, la tienda que importa no puede convertir. Si ese número se pisa, las compras viejas cambian de costo. Si cada cliente trajera su moneda, la caja dejaría de cuadrar.
+* *Para qué:* `negocio_configuracion.moneda` es `BOB`, `PEN` o `BRL`. `tipos_cambio.valor` dice cuántas unidades de esa moneda vale un dólar. Solo uno está vigente por negocio. La compra en dólares copia `tipo_cambio_valor` en la línea. `costo_unitario` queda en la moneda de la tienda y alimenta el PPP. Al confirmar el cambio nuevo, la pantalla no recorre los productos: encola un trabajo que actualiza `precio_venta` y `precio_mayor` por lotes, solo en los que tienen precio en dólares. Si un lote se reintenta con el mismo dólar, el precio queda igual. El costo promedio no se toca. La caja y el cliente siguen en la moneda de la tienda. No se cobra en dólares.
+
+---
+
+## PARTE 2: ESTRUCTURA RELACIONAL DE LA BASE DE DATOS
+
+Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es string y va primero en índices y únicos. Toda foreign key interna es `(tenant_id, *_id)` hacia `(tenant_id, id)` de la tabla padre. `users` es la tabla de usuarios del negocio, no la del admin de la plataforma.
+
+* **Users** (Usuarios del negocio. La tabla ya existe en el pool. El rol no es una columna)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`, y único `(tenant_id, email)`
+  * `name` (varchar)
+  * `email` (varchar)
+  * `password` (varchar)
+  * `is_active` (boolean, Default: true)
+  * `timestamps` (timestamp)
+  * El rol es el de Shield de ese negocio: `cajero` o `supervisor`. El supervisor autoriza anulaciones, devoluciones y desfases. El cajero no administra roles.
+* **Negocio_Configuracion** (Una fila por negocio)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único
+  * `horas_reserva` (int, Default: 48) -- Plazo de partida de una seña. Cada reserva puede durar menos o más
+  * `descuento_max_porcentaje` (decimal 5,2, Default: 10) -- Tope del cajero, en menor y en mayor
+  * `descuento_max_importe` (decimal 10,2, Default: 0.00) -- Tope en la moneda de la tienda. En 0, un importe fijo lo autoriza el supervisor
+  * `moneda` (enum: 'BOB', 'PEN', 'BRL') -- Default: 'BOB'. Bs, sol o real. Es la moneda de la caja, los precios y el costo
+  * `modo_moneda` (enum: 'solo_moneda', 'con_dolar') -- Default: 'solo_moneda'. El dólar es referencia. No se cobra en dólares
+  * `siguiente_numero_venta` (bigint, Default: 1) -- Siguiente `VNT-`. Cabe hasta 19 dígitos. Se reserva al guardar, con la fila bloqueada, para que dos cajeros no saquen el mismo
+  * `timestamps` (timestamp)
+* **Tipos_Cambio** (Solo si `modo_moneda = 'con_dolar'`. El dólar del día, contra la moneda de la tienda)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `valor` (decimal 10,4) -- Unidades de la moneda de la tienda por un dólar. Ejemplo: 11 en Bolivia, 3.70 en Perú. CHECK `valor > 0`
+  * `vigente` (boolean, Default: true) -- Solo uno vigente por negocio
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Rol Shield `supervisor`
+  * `timestamps` (timestamp)
+
+### 1. Módulo de Sucursales y Almacenes
+* **Sucursales**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombre` (varchar) -- Único `(tenant_id, nombre)`. Ej: Sucursal Central, Sucursal 4 Anillo
+  * `direccion` (text, Nullable)
+  * `telefono` (varchar, Nullable)
+  * `is_active` (boolean, Default: true)
+  * `timestamps` (timestamp)
+* **Almacenes**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`. Sin `sucursal_id`: quién lo usa lo dice la pivote
+  * `nombre` (varchar) -- Único `(tenant_id, nombre)`. Ej: Depósito Principal, Estante A-1
+  * `timestamps` (timestamp)
+* **Sucursal_Almacenes** (Tabla pivote N:M. Una fila: almacén propio. Dos filas del mismo almacén: saldo compartido)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales)
+  * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
+  * `es_principal` (boolean, Default: false) -- Principal de esa sucursal, no del almacén
+  * `timestamps` (timestamp)
+  * Único `(tenant_id, sucursal_id, almacen_id)` -- Destino de la foreign key de `ventas`
+  * Una sola fila con `es_principal = true` por `(tenant_id, sucursal_id)`
+
+### 2. Módulo de Productos e Inventarios (Kardex y PPP)
+* **Categorias**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombre` (varchar) -- Único `(tenant_id, nombre)`
+  * `plantilla_atributos` (jsonb, Nullable) -- Plantilla que hereda la variante
+  * `timestamps` (timestamp)
+* **Productos_Maestros**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombre` (varchar) -- Ej: Rodamiento rígido de bolas
+  * `categoria_id` (int, Foreign Key compuesta con `tenant_id` -> Categorias)
+  * `timestamps` (timestamp)
+* **Productos_Variantes** (El único ítem vendible)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `producto_maestro_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Maestros)
+  * `sku` (varchar) -- Único `(tenant_id, sku)`. Ej: 6204-2RS
+  * `codigo_barras` (varchar, Nullable) -- Único `(tenant_id, codigo_barras)`. El vacío puede repetirse
+  * `diametro_interno_mm` (decimal 8,2, Nullable)
+  * `diametro_externo_mm` (decimal 8,2, Nullable)
+  * `ancho_mm` (decimal 8,2, Nullable)
+  * `atributos_json` (jsonb) -- Marca y el resto de la plantilla. Las tres medidas van en columnas
+  * `precio_venta` (decimal 10,2) -- Precio al por menor, en la moneda de la tienda
+  * `precio_mayor` (decimal 10,2, Nullable) -- En la moneda de la tienda. Si está vacío, el mayorista paga `precio_venta`
+  * `precio_venta_dolar` (decimal 10,2, Nullable) -- Si tiene valor, al confirmar un tipo de cambio nuevo se propone `precio_venta`
+  * `precio_mayor_dolar` (decimal 10,2, Nullable) -- Igual, para el precio mayorista
+  * `precio_costo` (decimal 14,4) -- Costo Promedio Ponderado (PPP) actual, en la moneda de la tienda
+  * `timestamps` (timestamp)
+  * Índice `(tenant_id, diametro_interno_mm, diametro_externo_mm, ancho_mm)`
+* **Inventario_Stocks**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
+  * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
+  * `ubicacion` (varchar, Nullable) -- Ej: PASILLO-01-ESTANTE-04-ALTURA-02. Es del almacén, no de la variante
+  * `cantidad_actual` (int, Default: 0) -- Piezas físicas en el estante, señas incluidas
+  * `cantidad_reservada` (int, Default: 0) -- Suma de las líneas de ventas en `reserva` de esta variante y este almacén. No es un número suelto: si una seña vence o se anula, esa suma baja
+  * `timestamps` (timestamp)
+  * Único `(tenant_id, producto_variante_id, almacen_id)`
+  * CHECK `cantidad_actual >= 0`, `cantidad_reservada >= 0` y `cantidad_reservada <= cantidad_actual`
+* **Movimientos_Inventario** (Kardex físico y financiero. Solo inserción)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
+  * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Responsable del movimiento
+  * `tipo_movimiento` (enum: 'entrada_compra', 'salida_venta', 'devolucion', 'traslado_salida', 'traslado_entrada', 'ajuste', 'entrada_flash_emergencia', 'correccion_costo')
+  * `cantidad` (int) -- Positivo o negativo según corresponda. Cero solo en `correccion_costo`
+  * `stock_previo` (int)
+  * `stock_posterior` (int)
+  * `costo_unitario` (decimal 14,4) -- Costo unitario de la transacción
+  * `costo_promedio_resultante` (decimal 14,4) -- PPP calculado tras el movimiento
+  * `referencia_tipo` (varchar, Nullable) -- `venta`, `orden_compra`, `nota_credito`, `traslado`, `ajuste` o `correccion_costo`
+  * `referencia_id` (int, Nullable) -- Id de esa tabla, del mismo `tenant_id`. La aplicación lo comprueba
+  * `timestamps` (timestamp)
+* **Ajustes_Inventario** (Documento de ajuste puntual o de conteo)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Quien carga las cantidades
+  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Obligatorio al cerrar. Rol Shield `supervisor`
+  * `tipo` (enum: 'puntual', 'conteo')
+  * `estado` (enum: 'en_curso', 'cerrado') -- El puntual se cierra en el acto. El conteo lo cierra el supervisor
+  * `observacion` (text, Nullable) -- Obligatoria si `tipo = 'puntual'`
+  * `timestamps` (timestamp)
+* **Ajuste_Detalles**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `ajuste_id` (int, Foreign Key compuesta con `tenant_id` -> Ajustes_Inventario, On Delete: Cascade)
+  * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
+  * `motivo` (enum: 'merma', 'rotura', 'hallazgo', 'uso_interno', 'diferencia_conteo')
+  * `cantidad_sistema` (int, Nullable) -- Se copia del stock al cerrar, no al empezar
+  * `cantidad_fisica` (int) -- Lo que hay en el estante, señas incluidas
+  * `timestamps` (timestamp)
+  * Al cerrar, la diferencia es `cantidad_fisica - cantidad_sistema`. Si no es cero, nace un movimiento `ajuste`. Si `cantidad_fisica` deja el stock bajo `cantidad_reservada`, el cierre no pasa. El PPP no cambia.
+* **Correcciones_Costo** (El costo tipeado en una compra estaba mal. No cambia cuántas piezas hay)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `orden_compra_detalle_id` (int, Foreign Key compuesta con `tenant_id` -> Orden_Compra_Detalles)
+  * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
+  * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes) -- El almacén de esa compra, para la línea de kardex
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Rol Shield `supervisor`
+  * `costo_anterior` (decimal 14,4)
+  * `costo_nuevo` (decimal 14,4)
+  * `observacion` (text)
+  * `timestamps` (timestamp)
+  * Nace un movimiento `correccion_costo` con cantidad cero. `precio_costo` de la variante pasa a `costo_nuevo`. Las ventas ya cerradas conservan su snapshot. La compra no se edita.
+
+* **Traslados** (Dos saldos distintos. No se usa cuando el almacén es compartido)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `almacen_origen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
+  * `almacen_destino_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `estado` (enum: 'pendiente', 'completado', 'anulado') -- Default: 'pendiente'
+  * `timestamps` (timestamp)
+  * CHECK `almacen_origen_id <> almacen_destino_id`
+* **Traslado_Detalles**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `traslado_id` (int, Foreign Key compuesta con `tenant_id` -> Traslados, On Delete: Cascade)
+  * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
+  * `cantidad` (int) -- CHECK `cantidad > 0`
+  * `timestamps` (timestamp)
+
+### 3. Módulo de Clientes (Gestión Comercial y Fiscal)
+* **Clientes** (Sin moneda propia. Paga en la moneda de la tienda)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `razon_social` (varchar) -- Nombre o Razón Social
+  * `tipo_precio` (enum: 'menor', 'mayor') -- Default: 'menor'
+  * `nit_ci` (varchar, Nullable) -- Único `(tenant_id, nit_ci)`. Obligatorio para facturación manual. El vacío puede repetirse
+  * `telefono` (varchar, Nullable)
+  * `email` (varchar, Nullable)
+  * `direccion` (text, Nullable)
+  * `timestamps` (timestamp)
+
+### 4. Módulo de Proveedores, Contactos y Compras Flash
+* **Trabajadores**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombres` (varchar)
+  * `apellidos` (varchar, Nullable)
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Si también entra al sistema, es un usuario del mismo negocio
+  * `is_active` (boolean, Default: true)
+  * `timestamps` (timestamp)
+* **Proveedores**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombre_empresa` (varchar) -- Ej: Rodamientos SKF S.A. (Único campo obligatorio para creación al vuelo)
+  * `nit` (varchar, Nullable) -- Único `(tenant_id, nit)`. El vacío puede repetirse
+  * `es_ocasional` (boolean, Default: false) -- Uno solo por negocio, creado al nacer el tenant. Único parcial donde `es_ocasional = true`
+  * `direccion` (text, Nullable)
+  * `timestamps` (timestamp)
+* **Proveedor_Contactos**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `proveedor_id` (int, Foreign Key compuesta con `tenant_id` -> Proveedores, On Delete: Cascade)
+  * `nombres` (varchar)
+  * `apellidos` (varchar, Nullable)
+  * `cargo` (varchar, Nullable) -- Ej: Asesor Comercial
+  * `telefono` (varchar, Nullable)
+  * `email` (varchar, Nullable)
+  * `es_principal` (boolean, Default: false)
+  * `timestamps` (timestamp)
+* **Ordenes_Compra** (Soporta Compras Normales y Entradas Flash de Emergencia)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `proveedor_id` (int, Foreign Key compuesta con `tenant_id` -> Proveedores) -- Proveedor ocasional del negocio, o el real
+  * `proveedor_contacto_id` (int, Foreign Key compuesta con `tenant_id` -> Proveedor_Contactos, Nullable) -- Contacto que atendió la emergencia
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Usuario del pool que genera la orden
+  * `almacen_destino_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
+  * `es_compra_flash` (boolean, Default: false) -- Identificador si nació de una urgencia en mostrador
+  * `estado` (enum: 'pendiente', 'recibida_parcial', 'completada', 'anulada') -- Default: 'completada' para flash
+  * `subtotal` (decimal 10,2)
+  * `impuestos` (decimal 10,2)
+  * `total` (decimal 10,2)
+  * `persona_entrega_nombre` (varchar, Nullable)
+  * `persona_recibe_trabajador_id` (int, Foreign Key compuesta con `tenant_id` -> Trabajadores, Nullable)
+  * `fecha_emision` (timestamp)
+  * `fecha_recepcion` (timestamp, Nullable)
+  * `timestamps` (timestamp)
+* **Orden_Compra_Detalles**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `orden_compra_id` (int, Foreign Key compuesta con `tenant_id` -> Ordenes_Compra, On Delete: Cascade)
+  * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
+  * `cantidad_pedida` (int)
+  * `cantidad_recibida` (int, Default: 0)
+  * `moneda` (enum: 'local', 'USD') -- Default: 'local'. Local es la moneda de la tienda. USD solo si el negocio está en `con_dolar`. No se cobra en USD
+  * `costo_unitario_origen` (decimal 14,4) -- Lo anotado en esa moneda. Ejemplo: 3 dólares, o 20 en la moneda de la tienda
+  * `tipo_cambio_id` (int, Foreign Key compuesta con `tenant_id` -> Tipos_Cambio, Nullable)
+  * `tipo_cambio_valor` (decimal 10,4, Nullable) -- Copia del dólar de ese momento. No cambia si mañana el dólar sube
+  * `costo_unitario` (decimal 14,4) -- En la moneda de la tienda. Alimentador del PPP. Si la moneda es USD, es `costo_unitario_origen * tipo_cambio_valor`
+  * `subtotal_linea` (decimal 10,2)
+  * `timestamps` (timestamp)
+
+### 5. Módulo de Ventas y Comprobantes
+* **Impuestos** (El porcentaje vigente. La venta guarda una copia)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombre` (varchar) -- Único `(tenant_id, nombre)`
+  * `porcentaje` (decimal 5,2)
+  * `is_active` (boolean, Default: true)
+  * `timestamps` (timestamp)
+* **Talonarios** (Solo factura manual física. Una tienda que solo emite nota de venta no lo usa)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales)
+  * `tipo_comprobante` (enum: 'factura_manual')
+  * `numero_desde` (int)
+  * `numero_hasta` (int)
+  * `estado` (enum: 'activo', 'agotado', 'anulado') -- Default: 'activo'
+  * `timestamps` (timestamp)
+  * CHECK `numero_desde <= numero_hasta`
+  * Uno solo `activo` por `(tenant_id, sucursal_id, tipo_comprobante)`
+  * Los rangos de la misma sucursal y tipo no se solapan. Lo comprueba la aplicación al crear
+* **Talonario_Anulaciones** (Hoja muerta en papel. Se crea después de `notas_credito_devoluciones`)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `talonario_id` (int, Foreign Key compuesta con `tenant_id` -> Talonarios)
+  * `nota_credito_id` (int, Foreign Key compuesta con `tenant_id` -> Notas_Credito_Devoluciones, Nullable)
+  * `numero` (int)
+  * `motivo` (text)
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Rol Shield `supervisor`
+  * `timestamps` (timestamp)
+  * Único `(tenant_id, talonario_id, numero)`
+* **Ventas**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `codigo` (varchar) -- Único `(tenant_id, codigo)`. Visible en el papel. Formato `VNT-` más el número. Mínimo 6 dígitos (`VNT-000001`). Al pasar de 999999 sigue (`VNT-1000000`): no se corta ni se reinicia
+  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales) -- Quién cobró
+  * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes) -- De qué montón salió la mercadería
+  * `talonario_id` (int, Foreign Key compuesta con `tenant_id` -> Talonarios, Nullable) -- Obligatorio si es factura manual
+  * `cliente_id` (int, Foreign Key compuesta con `tenant_id` -> Clientes, Nullable) -- Obligatorio si `condicion = 'credito'` o `estado` es `reserva` o `vencida`
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `condicion` (enum: 'contado', 'credito') -- Default: 'contado'. El fiado es crédito. La seña es `estado = 'reserva'`, no otra condición
+  * `estado` (enum: 'pendiente', 'completada', 'anulada', 'reserva', 'vencida') -- Default: 'pendiente'
+  * `vence_en` (timestamp, Nullable) -- Obligatorio si `estado` es `reserva` o `vencida`. Al crearla puede ser antes o después de las 48 horas
+  * `tipo_comprobante` (enum: 'nota_venta', 'factura_manual')
+  * `numero_comprobante` (varchar, Nullable) -- Único `(tenant_id, sucursal_id, tipo_comprobante, numero_comprobante)`
+  * `subtotal` (decimal 10,2)
+  * `descuento` (decimal 10,2, Default: 0.00) -- Suma de los descuentos de las líneas. No es un descuento aparte
+  * `total` (decimal 10,2)
+  * `notes_internas` (text, Nullable)
+  * `timestamps` (timestamp)
+  * Foreign key `(tenant_id, sucursal_id, almacen_id)` -> `sucursal_almacenes`
+  * CHECK: si `tipo_comprobante = 'factura_manual'`, entonces `cliente_id`, `numero_comprobante` y `talonario_id` no son nulos. El número cae entre `numero_desde` y `numero_hasta` del talonario; lo comprueba la aplicación
+* **Venta_Detalles**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `venta_id` (int, Foreign Key compuesta con `tenant_id` -> Ventas, On Delete: Cascade)
+  * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
+  * `cantidad` (int)
+  * `precio_unitario` (decimal 10,2) -- Precio menor o mayor usado en esta línea, antes del descuento
+  * `precio_costo_snapshot` (decimal 14,4) -- PPP congelado para utilidad inalterable
+  * `tipo_descuento` (enum: 'porcentaje', 'importe', Nullable)
+  * `valor_descuento` (decimal 10,2, Default: 0.00) -- El 10 de un 10 %, o el monto en la moneda de la tienda si es importe
+  * `descuento_aplicado` (decimal 10,2, Default: 0.00) -- Plata restada en la línea
+  * `supervisor_descuento_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Obligatorio si el descuento pasa el tope del cajero
+  * `total_linea` (decimal 10,2)
+  * `timestamps` (timestamp)
+  * CHECK: `descuento_aplicado` no supera `precio_unitario * cantidad`. Si `tipo_descuento = 'porcentaje'`, `valor_descuento` no supera 100.
+* **Venta_Impuestos (Snapshots Fiscales Transaccionales)**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `venta_id` (int, Foreign Key compuesta con `tenant_id` -> Ventas, On Delete: Cascade)
+  * `nombre_impuesto_snapshot` (varchar) -- Copiado de `impuestos.nombre`
+  * `porcentaje_aplicado_snapshot` (decimal 5,2) -- Copiado de `impuestos.porcentaje` en esa venta
+  * `monto_calculado` (decimal 10,2)
+  * `timestamps` (timestamp)
+* **Pagos** (Solo plata de la caja. No dice a qué venta se aplica)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `cliente_id` (int, Foreign Key compuesta con `tenant_id` -> Clientes, Nullable) -- Obligatorio si queda saldo a favor o si cobra un fiado o una seña
+  * `caja_sesion_id` (int, Foreign Key compuesta con `tenant_id` -> Cajas_Sesiones, Nullable) -- Obligatoria si el método es efectivo: tiene que haber una caja abierta
+  * `sentido` (enum: 'cobro', 'reembolso') -- Default: 'cobro'
+  * `metodo_pago` (varchar)
+  * `monto` (decimal 10,2) -- Siempre positivo. El sentido dice si entra o sale
+  * `comprobante_archivo_path` (varchar, Nullable) -- Ruta relativa. El disco ya separa los archivos por tenant
+  * `numero_referencia_banco` (varchar, Nullable)
+  * `qr_id_transaccion_banco` (varchar, Nullable)
+  * `estado_pago` (enum: 'pendiente', 'aprobado', 'expirado') -- Default: 'aprobado'. Solo `aprobado` cuenta para el saldo
+  * `fecha_pago` (timestamp)
+  * `timestamps` (timestamp)
+* **Pago_Aplicaciones** (A qué documento se aplicó la plata. Se crea después de ventas, pagos y notas)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `pago_id` (int, Foreign Key compuesta con `tenant_id` -> Pagos)
+  * `venta_id` (int, Foreign Key compuesta con `tenant_id` -> Ventas, Nullable)
+  * `nota_credito_id` (int, Foreign Key compuesta con `tenant_id` -> Notas_Credito_Devoluciones, Nullable)
+  * `aplicacion_origen_id` (int, Foreign Key compuesta con `tenant_id` -> Pago_Aplicaciones, Nullable) -- La fila de saldo a favor que este uso consume
+  * `monto` (decimal 10,2) -- CHECK `monto > 0`
+  * `timestamps` (timestamp)
+  * Una aplicación original tiene `aplicacion_origen_id` nulo y apunta a una venta, a una nota, o a ninguna (saldo a favor). No apunta a las dos.
+  * La suma de las aplicaciones originales de un pago es igual a `pagos.monto`.
+  * Usar un adelanto, o soltar la seña de una reserva vencida, inserta otra fila con `aplicacion_origen_id` y el mismo `pago_id`. No crea un pago nuevo. Si pasa a saldo a favor, `venta_id` va nulo. La suma usada no supera el monto de la fila de origen.
+  * Todas las ventas de un mismo pago son del mismo `cliente_id`. Lo comprueba la aplicación.
+  * El por cobrar de una venta es `total` menos las aplicaciones de cobros `aprobado` a esa venta. El contado solo pasa a `completada` cuando ese saldo es cero. El fiado puede completarse con saldo. La reserva no descuenta `cantidad_actual`: suma `cantidad_reservada`. Al vencer, esa suma se revierte y la venta no sigue como por cobrar.
+
+### 6. Módulo de Notas de Crédito y Cambios de Mostrador
+* **Notas_Credito_Devoluciones**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales)
+  * `venta_original_id` (int, Foreign Key compuesta con `tenant_id` -> Ventas)
+  * `caja_sesion_id` (int, Foreign Key compuesta con `tenant_id` -> Cajas_Sesiones, Nullable) -- Turno donde se compensa el dinero
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Rol Shield `supervisor` del mismo negocio
+  * `tipo_operacion` (enum: 'devolucion_parcial', 'cambio_producto', 'anulacion_total')
+  * `monto_diferencia` (decimal 10,2)
+  * `motivo` (text)
+  * `observacion_anulacion_fisica` (text, Nullable) -- Obligatoria si la venta original es `factura_manual` y la operación es `anulacion_total`
+  * `timestamps` (timestamp)
+* **Nota_Credito_Detalles**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string)
+  * `nota_credito_id` (int, Foreign Key compuesta con `tenant_id` -> Notas_Credito_Devoluciones, On Delete: Cascade)
+  * `venta_detalle_id` (int, Foreign Key compuesta con `tenant_id` -> Venta_Detalles, Nullable) -- Obligatorio si `tipo_accion = 'devuelve_stock'`
+  * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
+  * `cantidad` (int)
+  * `precio_unitario` (decimal 10,2)
+  * `precio_costo_snapshot` (decimal 14,4) -- En una devolución se copia de la línea vendida
+  * `tipo_accion` (enum: 'devuelve_stock', 'entrega_stock')
+  * `timestamps` (timestamp)
+  * La suma devuelta de un `venta_detalle_id` no supera la cantidad vendida. Lo cierra la aplicación con la línea bloqueada. Si la venta era fiado, deja de sumar por cobrar. El reembolso es solo la plata ya aplicada.
+
+### 7. Módulo de Caja y Sesiones de Turno
+* **Cajas_Sesiones**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales) -- La caja sigue siendo de la sucursal, no del negocio entero
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `estado_sesion` (enum: 'abierta', 'cerrada') -- Default: 'abierta'
+  * `fecha_apertura` (timestamp)
+  * `fecha_cierre` (timestamp, Nullable)
+  * `monto_apertura` (decimal 10,2)
+  * `monto_cierre_teorico` (decimal 10,2, Nullable)
+  * `monto_cierre_real` (decimal 10,2, Nullable)
+  * `diferencia` (decimal 10,2, Default: 0.00)
+  * `justificacion_diferencia` (text, Nullable)
+  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Rol Shield `supervisor` si autoriza el desfase
+  * `timestamps` (timestamp)
+  * Una sola fila `abierta` por `(tenant_id, sucursal_id, user_id)`
+  * CHECK: si está `cerrada`, `fecha_cierre` no es nula. Si `diferencia` no es cero, `justificacion_diferencia` no es nula
+
+### 8. Módulo de Caja Chica y Gastos Menores
+* **Categorias_Gastos**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombre` (varchar) -- Único `(tenant_id, nombre)`
+  * `descripcion` (text, Nullable)
+  * `is_active` (boolean, Default: true)
+  * `timestamps` (timestamp)
+* **Caja_Chica_Movimientos**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales)
+  * `caja_sesion_id` (int, Foreign Key compuesta con `tenant_id` -> Cajas_Sesiones)
+  * `categoria_gasto_id` (int, Foreign Key compuesta con `tenant_id` -> Categorias_Gastos, Nullable)
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `solicitado_por_trabajador_id` (int, Foreign Key compuesta con `tenant_id` -> Trabajadores, Nullable)
+  * `tipo_movimiento` (enum: 'egreso_gasto', 'devolucion_sobrante')
+  * `movimiento_origen_id` (int, Foreign Key compuesta con `tenant_id` -> Caja_Chica_Movimientos, Nullable)
+  * `estado_rendicion` (enum: 'pendiente_comprobante', 'rendido_completo')
+  * `monto` (decimal 10,2)
+  * `concepto` (varchar)
+  * `tipo_comprobante` (enum: 'recibo_interno', 'factura', 'sin_comprobante')
+  * `numero_comprobante` (varchar, Nullable)
+  * `comprobante_archivo_path` (varchar, Nullable)
+  * `timestamps` (timestamp)
+
+---
+
+## PARTE 3: CASOS DE USO
+
+Una venta sale de un solo almacén. Si el ticket necesita dos depósitos, son dos ventas. El cliente no tiene moneda: paga en la de la tienda.
+
+* **Contado en mostrador.** Caja abierta. La venta lleva `codigo` `VNT-`, correlativo del negocio, que no se reinicia y no se corta al pasar de 6 dígitos. Se cobra el precio menor o mayor, con descuento de porcentaje o de importe dentro del tope. El pago entra a la caja de hoy, el stock sale y el costo promedio queda pegado en la línea. Si el promedio es mayor que lo que va a pagar, hay alerta y la venta puede seguir.
+* **Lector y búsqueda.** El código de barras abre una sola variante. Sin etiqueta, se busca por SKU o por las tres medidas.
+* **Seña.** Cliente obligatorio. Se aparta stock, no sale del estante, y la plata entra hoy. Dura 48 horas salvo que al crearla pongan menos o más. Si vuelve y paga el resto, el stock sale y el cobro entra en la caja de ese día. Si vence, el stock se libera y la seña queda a su favor. Si pide la plata de vuelta, es un reembolso en la caja de hoy, con supervisor.
+* **Fiado.** El stock sale hoy y la caja no se mueve. Otro día paga, con la caja de ese día abierta, y el saldo baja. Si devuelve todo y no había pagado, vuelve el stock y no sale plata. Si ya había pagado una parte, se reembolsa esa parte y el resto de la deuda se cancela.
+* **Adelanto sin pieza, o un pago de varias deudas.** Un solo movimiento de caja. Se aplica después a una venta, o se reparte en varias, sin volver a sumar en la caja.
+* **Entrada de mercadería.** La compra guarda lo que costó esa entrada. Si fue en dólares, guarda también el tipo de cambio de ese día y convierte a la moneda de la tienda. Antes de guardar, la pantalla pide confirmar el costo por unidad. El promedio del producto se recalcula. El precio de venta no cambia solo.
+* **Costo mal tipeado.** Las ventas ya cerradas siguen con el costo que tenían. Un supervisor corrige el promedio de lo que queda en el estante.
+* **Dólar.** La tienda que no importa no lo ve. La que importa pone el tipo de cambio. Los productos marcados en dólares pasan a la moneda de la tienda en un trabajo por lotes, con una sola confirmación. Lo ya vendido no se toca.
+* **Ajuste y conteo.** Motivo y supervisor. Cambia cuántas piezas hay, no el precio. El conteo compara contra el stock del cierre e incluye las señas. No mueve la caja.
+* **Traslado.** Solo si son dos montones distintos. Un almacén compartido por dos sucursales no se traslada: las dos venden de la misma fila.
+* **Devolución del mismo día.** Supervisor, la pieza vuelve al kardex con el costo de esa venta, y la plata sale de la caja abierta.
+* **Factura manual.** Cliente, número y talonario. Si se anula, queda la observación del papel. La tienda que no factura usa nota de venta y no necesita talonario.
+* **Caja.** Una sesión abierta por cajero y sucursal. No cierra si hay un vale sin comprobante. Si el efectivo no cuadra, el texto de la diferencia es obligatorio.
+* **Dos negocios.** El mismo SKU, el mismo NIT y el mismo número de factura pueden existir en los dos. Una venta no puede usar el producto del otro.

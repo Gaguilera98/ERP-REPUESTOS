@@ -35,6 +35,20 @@ class CleanTenantPoolData
                 continue;
             }
 
+            if ($table === 'role_has_permissions') {
+                $connection->table('role_has_permissions')
+                    ->whereIn('role_id', function ($query) use ($tenantId): void {
+                        $query->select('id')->from('roles')->where('tenant_id', $tenantId);
+                    })
+                    ->delete();
+
+                continue;
+            }
+
+            if (! Schema::connection($pool)->hasColumn($table, 'tenant_id')) {
+                continue;
+            }
+
             $connection->table($table)->where('tenant_id', $tenantId)->delete();
         }
     }
