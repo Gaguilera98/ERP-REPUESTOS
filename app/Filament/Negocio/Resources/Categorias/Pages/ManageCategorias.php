@@ -1,0 +1,21 @@
+<?php
+
+namespace App\Filament\Negocio\Resources\Categorias\Pages;
+
+use App\Filament\Negocio\Resources\Categorias\CategoriaResource;
+use Filament\Actions\CreateAction;
+use Filament\Resources\Pages\ManageRecords;
+
+class ManageCategorias extends ManageRecords
+{
+    protected static string $resource = CategoriaResource::class;
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            CreateAction::make()
+                ->stickyModalHeader()
+                ->stickyModalFooter(),
+        ];
+    }
+}

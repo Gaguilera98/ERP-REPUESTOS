@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Resources\TenantUsers\Tables;
 
+use App\Filament\Tables\OrdenRegistro;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -13,7 +14,7 @@ class TenantUsersTable
 {
     public static function configure(Table $table): Table
     {
-        return $table
+        return OrdenRegistro::aplicar($table
             ->columns([
                 TextColumn::make('name')
                     ->label('Nombre')
@@ -36,6 +37,6 @@ class TenantUsersTable
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
-            ]);
+            ]));
     }
 }

@@ -15,7 +15,11 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        if (tenancy()->initialized) {
+            $this->call(CatalogoSeeder::class);
+
+            return;
+        }
 
         User::factory()->create([
             'name' => 'Test User',

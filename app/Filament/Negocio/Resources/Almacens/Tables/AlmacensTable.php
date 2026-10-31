@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Resources\Almacens\Tables;
 
+use App\Filament\Tables\OrdenRegistro;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -13,7 +14,7 @@ class AlmacensTable
 {
     public static function configure(Table $table): Table
     {
-        return $table
+        return OrdenRegistro::aplicar($table
             ->columns([
                 TextColumn::make('nombre')
                     ->label('Nombre')
@@ -31,6 +32,6 @@ class AlmacensTable
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
-            ]);
+            ]));
     }
 }

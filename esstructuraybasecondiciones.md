@@ -11,11 +11,11 @@ Este documento unificado contiene la arquitectura completa, las reglas de negoci
   * *Por qué:* El SKU representa la designación técnica internacional del fabricante (ej: 6204-2RS) junto con sus variaciones. Es de control interno obligatorio y único por cada variante física dentro del negocio. Otro negocio puede usar el mismo código. El código de barras (EAN/UPC) es el número de la etiqueta para lectura rápida: dentro del negocio, si existe, también es único, para que el lector abra una sola variante.
   * *Para qué:* Garantizar que la búsqueda técnica en mostrador sea precisa sin depender de etiquetas impresas genéricas.
 * **Búsqueda Técnica Avanzada por Atributos:** 
-  * *Por qué:* Los repuestos y rodamientos se identifican muchas veces por sus dimensiones físicas exactas.
-  * *Para qué:* Indexar por separado en milímetros los diámetros interno, externo y ancho dentro de columnas o formatos estructurados para permitir búsquedas cuando el cliente trae una muestra sin conocer el código.
+  * *Por qué:* Muchas veces el cliente no trae el código. Trae una medida, una rosca o un voltaje, y el rubro no es siempre un rodamiento.
+  * *Para qué:* El mostrador filtra las variantes de esa categoría por los atributos que la categoría definió. La igualdad de varias medidas a la vez la resuelve el índice del JSON. La unidad no se escribe en la búsqueda: si el diámetro interno está en milímetros, `20` es `20 mm` en todo ese rubro.
 * **Herencia de Atributos por Categoría y Variantes:** 
-  * *Por qué:* Evitar errores de tipeo y estandarizar la creación de productos mediante plantillas JSON heredadas desde la categoría.
-  * *Para qué:* Generar variantes (hijos) automáticas a partir de atributos combinables manteniendo una estructura unificada de venta sobre la tabla `productos_variantes`.
+  * *Por qué:* Cada rubro tiene su ficha. Un rodamiento pide diámetros, un filtro pide rosca y altura, una lámpara pide voltaje y casquillo. Esos campos no pueden ser columnas fijas de la variante ni un texto libre.
+  * *Para qué:* La categoría define cada atributo con su tipo, si es obligatorio y, cuando se mide, su unidad. Al crear la variante, el formulario arma esos campos y ningún otro. Los valores quedan en `atributos_json`. El SKU, el código de barras y los precios siguen siendo columnas de la variante, iguales para todos los rubros.
 * **Ubicación Alfanumérica por Coordenadas Estrictas:** 
   * *Por qué:* Las bodegas de repuestos manejan miles de piezas pequeñas.
   * *Para qué:* Exigir una codificación estructurada (ej: `PASILLO-01-ESTANTE-04-ALTURA-02`) en el stock de cada almacén, para optimizar el tiempo de picking. La misma pieza puede estar en otro pasillo en otro depósito.
@@ -182,9 +182,17 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 * *Por qué:* Con `decimal(10,2)`, el promedio se recorta en cada compra y la utilidad se desfasa de a poco.
 * *Para qué:* `precio_costo`, `costo_unitario`, `costo_promedio_resultante` y `precio_costo_snapshot` son `decimal(14,4)`. Precios de venta, impuestos y totales de dinero se quedan en `decimal(10,2)`.
 
-### 18. Las tres medidas del rodamiento se buscan por columna
-* *Por qué:* La regla pide buscar por diámetro interno, externo y ancho en milímetros. Un JSON sin índice no alcanza para el mostrador.
-* *Para qué:* Esas tres medidas son columnas nullable en `productos_variantes` (`diametro_interno_mm`, `diametro_externo_mm`, `ancho_mm`), con índice que empieza por `tenant_id`. `atributos_json` pasa a `jsonb` y guarda el resto de la plantilla de la categoría (marca y lo que no es una de esas tres medidas).
+### 18. Los atributos se definen en tablas y los valores viven en JSON
+* *Por qué:* Poner `diametro_interno_mm`, `diametro_externo_mm` y `ancho_mm` como columnas fijas en `productos_variantes` lo ata a un solo rubro (rodamientos). Una tienda de filtros, pastillas o correas no necesita esas columnas. Tampoco existe un conjunto finito de atributos que sirva para todos los negocios.
+* *Por qué, la definición:* Un JSON de claves con valor vacío no dice si el campo es un número, un texto o una lista, ni si es obligatorio, ni en qué unidad está. El mostrador termina guardando `"20"`, `20` y `"20 mm"` como si fueran lo mismo, y el filtro del diámetro no encuentra la pieza. Meter la unidad en el nombre (`diametro_interno_mm`) parte en dos un mismo dato.
+* *Para qué, la definición:* `unidades_medida` y `categoria_atributos` son tablas del pool. `categorias` no tiene `plantilla_atributos`. Cada atributo tiene clave estable, etiqueta, tipo (`decimal`, `texto` o `lista`), si es obligatorio y el orden en la ficha. `unidad_medida_id` solo se completa en un decimal que se mide. En un texto, en una lista y en un decimal que no se mide (cantidad de dientes) queda nulo. No se crea una unidad «sin unidad». La clave no lleva la unidad: `diametro_interno`, no `diametro_interno_mm`. Una lista guarda sus opciones (`2RS`, `ZZ`, `ABIERTO`). La variante no puede agregar una clave que la categoría no tenga.
+* *Para qué, la unidad:* `unidades_medida` guarda nombre, símbolo y magnitud (`longitud`, `electrico` o `presion`). Ejemplos: Milímetro/`mm`/longitud, Pulgada/`in`/longitud, Voltio/`V`/electrico. Cada negocio tiene las suyas. Al elegir la unidad, la pantalla agrupa por magnitud, así un diámetro solo ofrece unidades de longitud. Si el atributo ya tiene unidad, otra unidad nueva tiene que ser de la misma magnitud: un `20` no pasa de milímetros a voltios.
+* *Para qué, el valor:* `productos_variantes.atributos_json` sigue siendo jsonb. Laravel lo trata con cast `array`. Guarda solo valores, con la clave del atributo. Un decimal se guarda como número JSON (`20`). Un texto o una opción de lista se guarda como texto (`"3/4-16 UNF"`, `"2RS"`). `3/4-16 UNF` es el código de la rosca, no una unidad: la unidad sigue vacía en ese atributo. La unidad no se copia en el JSON. La pantalla la lee del atributo y muestra `20 mm`. Al guardar, la aplicación exige los obligatorios y rechaza un texto en un decimal.
+* *Para qué, la búsqueda:* El mostrador filtra dentro del negocio y de la categoría. La igualdad de varias medidas usa el índice GIN: `atributos_json @> '{"diametro_interno": 20, "diametro_externo": 47, "ancho": 14}'`. El mismo mecanismo vale para cualquier rubro: un filtro de aceite se busca por `rosca` y `altura`, una lámpara por `voltaje` y `casquillo`. Cambian las claves de esa categoría. Un rango (de 19.5 a 20.5) se compara como número después de acotar por negocio y categoría. Ese rango no lo resuelve el GIN. En SQLite (tests) el campo queda como json sin GIN.
+
+### 27. La marca es una entidad del negocio
+* *Por qué:* Un texto libre en la ficha guarda "Toyota" y "Toyotaa" como si fueran dos marcas. Una lista por categoría repite los mismos nombres en cada rubro.
+* *Para qué:* `marcas` guarda solo el nombre, único por negocio sin distinguir mayúsculas ni espacios de más. El producto maestro apunta con `marca_id`. Todas sus variantes heredan esa marca. SKF y NSK del mismo rodamiento son dos productos. Para qué auto sirve la pieza no va en esta tabla. La marca no es un `categoria_atributos`.
 
 ### 19. El talonario físico tiene rango y hojas anuladas
 * *Por qué:* El único del número evita repetirlo, pero no sabe qué talonario está en uso ni qué hoja se anuló en papel. La regla de anulación de `factura_manual` exige esa observación para el contador.
@@ -217,6 +225,7 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 ### 26. La moneda es de la tienda. El dólar solo convierte y no se cobra
 * *Por qué:* Sin un lugar donde poner el tipo de cambio, la tienda que importa no puede convertir. Si ese número se pisa, las compras viejas cambian de costo. Si cada cliente trajera su moneda, la caja dejaría de cuadrar.
 * *Para qué:* `negocio_configuracion.moneda` es `BOB`, `PEN` o `BRL`. `tipos_cambio.valor` dice cuántas unidades de esa moneda vale un dólar. Solo uno está vigente por negocio. La compra en dólares copia `tipo_cambio_valor` en la línea. `costo_unitario` queda en la moneda de la tienda y alimenta el PPP. Al confirmar el cambio nuevo, la pantalla no recorre los productos: encola un trabajo que actualiza `precio_venta` y `precio_mayor` por lotes, solo en los que tienen precio en dólares. Si un lote se reintenta con el mismo dólar, el precio queda igual. El costo promedio no se toca. La caja y el cliente siguen en la moneda de la tienda. No se cobra en dólares.
+* *Nota pendiente:* Evaluar migrar `negocio_configuracion.moneda` de `enum('BOB', 'PEN', 'BRL')` a `varchar(3)` (código ISO 4217: BOB, PEN, BRL, COP, ARS, etc.) para que el SaaS no quede restringido a tres países y admita clientes de cualquier región, delegando la lista/validación de monedas permitidas a la capa de aplicación/formulario Filament.
 
 ---
 
@@ -239,7 +248,7 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `horas_reserva` (int, Default: 48) -- Plazo de partida de una seña. Cada reserva puede durar menos o más
   * `descuento_max_porcentaje` (decimal 5,2, Default: 10) -- Tope del cajero, en menor y en mayor
   * `descuento_max_importe` (decimal 10,2, Default: 0.00) -- Tope en la moneda de la tienda. En 0, un importe fijo lo autoriza el supervisor
-  * `moneda` (enum: 'BOB', 'PEN', 'BRL') -- Default: 'BOB'. Bs, sol o real. Es la moneda de la caja, los precios y el costo
+  * `moneda` (enum: 'BOB', 'PEN', 'BRL') -- Default: 'BOB'. Bs, sol o real. Es la moneda de la caja, los precios y el costo (Pendiente: migrar a `varchar(3)` con código ISO 4217 para admitir cualquier país/moneda)
   * `modo_moneda` (enum: 'solo_moneda', 'con_dolar') -- Default: 'solo_moneda'. El dólar es referencia. No se cobra en dólares
   * `siguiente_numero_venta` (bigint, Default: 1) -- Siguiente `VNT-`. Cabe hasta 19 dígitos. Se reserva al guardar, con la fila bloqueada, para que dos cajeros no saquen el mismo
   * `timestamps` (timestamp)
@@ -280,13 +289,42 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
   * `nombre` (varchar) -- Único `(tenant_id, nombre)`
-  * `plantilla_atributos` (jsonb, Nullable) -- Plantilla que hereda la variante
+  * `timestamps` (timestamp)
+  * La ficha del rubro son las filas de `categoria_atributos`. No hay columna `plantilla_atributos`.
+* **Unidades_Medida** (Catálogo del negocio. Una fila: Milímetro, mm, longitud)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombre` (varchar) -- Único `(tenant_id, nombre)`. Ej: Milímetro, Pulgada, Voltio
+  * `simbolo` (varchar) -- Único `(tenant_id, simbolo)`. Ej: mm, in, V
+  * `magnitud` (enum: 'longitud', 'electrico', 'presion') -- La pantalla agrupa por esto al elegir la unidad de un atributo
+  * `timestamps` (timestamp)
+* **Categoria_Atributos** (Una fila por campo de la ficha. Se crea antes de borrar `categorias` y `unidades_medida`)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `categoria_id` (int, Foreign Key compuesta con `tenant_id` -> Categorias)
+  * `clave` (varchar) -- Único `(tenant_id, categoria_id, clave)`. Identidad estable. Ej: `diametro_interno`, `rosca`, `casquillo`. No incluye la unidad
+  * `etiqueta` (varchar) -- Lo que ve el operador. Ej: Diámetro interno
+  * `tipo` (enum: 'decimal', 'texto', 'lista')
+  * `obligatorio` (boolean, Default: false)
+  * `orden` (int) -- Orden en la ficha y en el filtro
+  * `unidad_medida_id` (int, Foreign Key compuesta con `tenant_id` -> Unidades_Medida, Nullable) -- Solo en un decimal que se mide. Nulo en texto, en lista y en un decimal sin escala
+  * `opciones` (jsonb, Nullable) -- Solo si `tipo = 'lista'`. Ej: `["2RS", "ZZ", "ABIERTO"]`
+  * `timestamps` (timestamp)
+  * CHECK: si `tipo` es `texto` o `lista`, `unidad_medida_id` es nulo
+  * CHECK: si `tipo` es `lista`, `opciones` no es nulo. En `decimal` y `texto`, `opciones` es nulo
+  * Si el atributo ya tiene unidad, la aplicación solo acepta otra unidad de la misma `magnitud`
+* **Marcas** (Catálogo del negocio. Una fila: Toyota. Se borra después de `productos_maestros`)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `nombre` (varchar) -- Único por negocio en minúsculas. "Toyota" y "toyota" son la misma fila. Se muestra como se escribió
   * `timestamps` (timestamp)
 * **Productos_Maestros**
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
   * `nombre` (varchar) -- Ej: Rodamiento rígido de bolas
   * `categoria_id` (int, Foreign Key compuesta con `tenant_id` -> Categorias)
+  * `marca_id` (int, Foreign Key compuesta con `tenant_id` -> Marcas, Nullable) -- La marca es del producto. Si no se conoce, queda vacío
+  * `imagenes` (jsonb/json, Nullable) -- Galería multimedia del producto almacenada en S3
   * `timestamps` (timestamp)
 * **Productos_Variantes** (El único ítem vendible)
   * `id` (int, Primary Key, Increment)
@@ -294,17 +332,16 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `producto_maestro_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Maestros)
   * `sku` (varchar) -- Único `(tenant_id, sku)`. Ej: 6204-2RS
   * `codigo_barras` (varchar, Nullable) -- Único `(tenant_id, codigo_barras)`. El vacío puede repetirse
-  * `diametro_interno_mm` (decimal 8,2, Nullable)
-  * `diametro_externo_mm` (decimal 8,2, Nullable)
-  * `ancho_mm` (decimal 8,2, Nullable)
-  * `atributos_json` (jsonb) -- Marca y el resto de la plantilla. Las tres medidas van en columnas
+  * `imagen` (varchar, Nullable) -- Foto específica de la variante en S3 (opcional, si difiere de la galería general)
+  * `atributos_json` (jsonb) -- Solo valores, con la clave de `categoria_atributos`. Un decimal es número JSON (`20`). Un texto o una opción de lista es texto (`"3/4-16 UNF"`, `"2RS"`). La unidad no se guarda acá. Cast `array` en Laravel. La variante no agrega claves fuera de su categoría
   * `precio_venta` (decimal 10,2) -- Precio al por menor, en la moneda de la tienda
   * `precio_mayor` (decimal 10,2, Nullable) -- En la moneda de la tienda. Si está vacío, el mayorista paga `precio_venta`
   * `precio_venta_dolar` (decimal 10,2, Nullable) -- Si tiene valor, al confirmar un tipo de cambio nuevo se propone `precio_venta`
   * `precio_mayor_dolar` (decimal 10,2, Nullable) -- Igual, para el precio mayorista
   * `precio_costo` (decimal 14,4) -- Costo Promedio Ponderado (PPP) actual, en la moneda de la tienda
   * `timestamps` (timestamp)
-  * Índice `(tenant_id, diametro_interno_mm, diametro_externo_mm, ancho_mm)`
+  * Índice GIN sobre `atributos_json` (solo PostgreSQL) -- Igualdad de uno o varios atributos dentro del negocio y de la categoría. Ej: `atributos_json @> '{"diametro_interno": 20, "diametro_externo": 47, "ancho": 14}'`. El rango numérico no usa este índice: se compara después de acotar por negocio y categoría. En SQLite queda json sin GIN
+
 * **Inventario_Stocks**
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
@@ -637,7 +674,7 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
 Una venta sale de un solo almacén. Si el ticket necesita dos depósitos, son dos ventas. El cliente no tiene moneda: paga en la de la tienda.
 
 * **Contado en mostrador.** Caja abierta. La venta lleva `codigo` `VNT-`, correlativo del negocio, que no se reinicia y no se corta al pasar de 6 dígitos. Se cobra el precio menor o mayor, con descuento de porcentaje o de importe dentro del tope. El pago entra a la caja de hoy, el stock sale y el costo promedio queda pegado en la línea. Si el promedio es mayor que lo que va a pagar, hay alerta y la venta puede seguir.
-* **Lector y búsqueda.** El código de barras abre una sola variante. Sin etiqueta, se busca por SKU o por las tres medidas.
+* **Lector y búsqueda.** El código de barras abre una sola variante. Sin etiqueta, se busca por SKU o por los atributos de la categoría, dentro de ese negocio y de ese rubro. Un rodamiento de 20 × 47 × 14 se filtra por igualdad: interno `20`, externo `47` y ancho `14`, y el índice GIN resuelve esa búsqueda. Un filtro de aceite se busca por su rosca o por su altura, con las claves de esa categoría. La unidad no se escribe en el filtro. Si la muestra está gastada, el rango (de 19.5 a 20.5) se compara como número sobre los productos ya acotados de esa categoría.
 * **Seña.** Cliente obligatorio. Se aparta stock, no sale del estante, y la plata entra hoy. Dura 48 horas salvo que al crearla pongan menos o más. Si vuelve y paga el resto, el stock sale y el cobro entra en la caja de ese día. Si vence, el stock se libera y la seña queda a su favor. Si pide la plata de vuelta, es un reembolso en la caja de hoy, con supervisor.
 * **Fiado.** El stock sale hoy y la caja no se mueve. Otro día paga, con la caja de ese día abierta, y el saldo baja. Si devuelve todo y no había pagado, vuelve el stock y no sale plata. Si ya había pagado una parte, se reembolsa esa parte y el resto de la deuda se cancela.
 * **Adelanto sin pieza, o un pago de varias deudas.** Un solo movimiento de caja. Se aplica después a una venta, o se reparte en varias, sin volver a sumar en la caja.

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Resources\Sucursals\Tables;
 
+use App\Filament\Tables\OrdenRegistro;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -13,7 +14,7 @@ class SucursalsTable
 {
     public static function configure(Table $table): Table
     {
-        return $table
+        return OrdenRegistro::aplicar($table
             ->columns([
                 TextColumn::make('nombre')
                     ->label('Nombre')
@@ -38,6 +39,6 @@ class SucursalsTable
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
-            ]);
+            ]));
     }
 }

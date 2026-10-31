@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Catalogo\AsegurarStockEnCero;
 use App\Models\Concerns\BelongsToTenantPool;
 use Database\Factories\AlmacenFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -16,6 +17,13 @@ class Almacen extends Model
     use BelongsToTenantPool, HasFactory;
 
     protected $table = 'almacenes';
+
+    protected static function booted(): void
+    {
+        static::created(function (Almacen $almacen): void {
+            app(AsegurarStockEnCero::class)->paraAlmacen($almacen);
+        });
+    }
 
     public function sucursales(): BelongsToMany
     {

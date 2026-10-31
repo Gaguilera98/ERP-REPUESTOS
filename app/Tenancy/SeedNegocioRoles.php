@@ -65,6 +65,14 @@ class SeedNegocioRoles
             'View:Sucursal',
             'ViewAny:Almacen',
             'View:Almacen',
+            'ViewAny:Categoria',
+            'View:Categoria',
+            'ViewAny:UnidadMedida',
+            'View:UnidadMedida',
+            'ViewAny:Marca',
+            'View:Marca',
+            'ViewAny:ProductoMaestro',
+            'View:ProductoMaestro',
         ]);
 
         NegocioConfiguracion::query()->firstOrCreate([], [
@@ -88,7 +96,7 @@ class SeedNegocioRoles
             'Restore', 'ForceDelete', 'ForceDeleteAny', 'RestoreAny', 'Replicate', 'Reorder',
         ];
 
-        foreach (['Sucursal', 'Almacen', 'TenantUser'] as $subject) {
+        foreach (['Sucursal', 'Almacen', 'TenantUser', 'UnidadMedida', 'Categoria', 'Marca', 'ProductoMaestro', 'ProductoVariante', 'InventarioStock'] as $subject) {
             foreach ($methods as $method) {
                 $names[] = $method.':'.$subject;
             }
