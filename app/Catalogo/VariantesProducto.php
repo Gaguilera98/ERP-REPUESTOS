@@ -2,10 +2,10 @@
 
 namespace App\Catalogo;
 
+use App\Enums\TipoAtributoCategoria;
 use App\Models\InventarioStock;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
-use App\TipoAtributoCategoria;
 use Illuminate\Support\Arr;
 
 class VariantesProducto

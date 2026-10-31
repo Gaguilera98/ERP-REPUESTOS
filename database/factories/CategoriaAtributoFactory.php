@@ -2,9 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Enums\TipoAtributoCategoria;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
-use App\TipoAtributoCategoria;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**

@@ -2,8 +2,8 @@
 
 namespace App\Filament\Negocio\Resources\Categorias\Schemas;
 
+use App\Enums\TipoAtributoCategoria;
 use App\Models\UnidadMedida;
-use App\TipoAtributoCategoria;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;

@@ -1,11 +1,12 @@
 <?php
 
 use App\Catalogo\VariantesProducto;
+use App\Enums\MagnitudUnidad;
+use App\Enums\TipoAtributoCategoria;
 use App\Filament\Negocio\Resources\Categorias\Pages\ManageCategorias;
 use App\Filament\Negocio\Resources\Categorias\Schemas\CategoriaForm;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\CreateProductoMaestro;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\EditProductoMaestro;
-use App\MagnitudUnidad;
 use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
@@ -16,7 +17,6 @@ use App\Models\ProductoVariante;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
-use App\TipoAtributoCategoria;
 use Database\Seeders\CatalogoSeeder;
 use Filament\Facades\Filament;
 use Illuminate\Database\QueryException;

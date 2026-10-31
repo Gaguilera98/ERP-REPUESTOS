@@ -2,7 +2,7 @@
 
 namespace App\Filament\Negocio\Resources\UnidadMedidas\Schemas;
 
-use App\MagnitudUnidad;
+use App\Enums\MagnitudUnidad;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Schema;

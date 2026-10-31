@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\ModoMoneda;
+use App\Enums\Moneda;
 use App\Models\Concerns\BelongsToTenantPool;
-use App\ModoMoneda;
-use App\Moneda;
 use Database\Factories\NegocioConfiguracionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;

@@ -2,12 +2,12 @@
 
 namespace App\Tenancy;
 
+use App\Enums\ModoMoneda;
+use App\Enums\Moneda;
 use App\Exceptions\Tenancy\TenantPoolNotConfiguredException;
 use App\Models\NegocioConfiguracion;
 use App\Models\NegocioRole;
 use App\Models\Tenant;
-use App\ModoMoneda;
-use App\Moneda;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 

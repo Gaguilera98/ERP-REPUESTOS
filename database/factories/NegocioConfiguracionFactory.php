@@ -2,9 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Enums\ModoMoneda;
+use App\Enums\Moneda;
 use App\Models\NegocioConfiguracion;
-use App\ModoMoneda;
-use App\Moneda;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**

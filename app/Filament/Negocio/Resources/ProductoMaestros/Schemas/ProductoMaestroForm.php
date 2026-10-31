@@ -3,6 +3,7 @@
 namespace App\Filament\Negocio\Resources\ProductoMaestros\Schemas;
 
 use App\Catalogo\VariantesProducto;
+use App\Enums\TipoAtributoCategoria;
 use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
 use App\Models\Almacen;
 use App\Models\Categoria;
@@ -10,7 +11,6 @@ use App\Models\CategoriaAtributo;
 use App\Models\Marca;
 use App\Models\NegocioConfiguracion;
 use App\Models\ProductoVariante;
-use App\TipoAtributoCategoria;
 use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\CheckboxList;

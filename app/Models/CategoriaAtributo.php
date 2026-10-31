@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\TipoAtributoCategoria;
 use App\Models\Concerns\BelongsToTenantPool;
-use App\TipoAtributoCategoria;
 use Database\Factories\CategoriaAtributoFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;

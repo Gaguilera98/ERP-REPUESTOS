@@ -2,11 +2,11 @@
 
 namespace Database\Seeders;
 
-use App\MagnitudUnidad;
+use App\Enums\MagnitudUnidad;
+use App\Enums\TipoAtributoCategoria;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
 use App\Models\UnidadMedida;
-use App\TipoAtributoCategoria;
 use Illuminate\Database\Seeder;
 
 class CatalogoSeeder extends Seeder

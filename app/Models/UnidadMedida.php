@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\MagnitudUnidad;
+use App\Enums\MagnitudUnidad;
 use App\Models\Concerns\BelongsToTenantPool;
 use Database\Factories\UnidadMedidaFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;

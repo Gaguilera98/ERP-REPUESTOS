@@ -2,8 +2,8 @@
 
 namespace App\Filament\Negocio\Resources\UnidadMedidas\Tables;
 
+use App\Enums\MagnitudUnidad;
 use App\Filament\Tables\OrdenRegistro;
-use App\MagnitudUnidad;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;

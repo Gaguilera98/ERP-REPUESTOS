@@ -2,7 +2,7 @@
 
 namespace Database\Factories;
 
-use App\MagnitudUnidad;
+use App\Enums\MagnitudUnidad;
 use App\Models\UnidadMedida;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
