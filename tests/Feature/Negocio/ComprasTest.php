@@ -580,13 +580,18 @@ it('al recibir una parte oculta anular y eliminar en la ficha', function () {
             'confirmo_costos' => true,
         ])
         ->assertHasNoActionErrors()
-        ->assertActionHidden('anular')
-        ->assertActionHidden('delete')
+        ->assertRedirect(OrdenCompraResource::getUrl('view', ['record' => $orden]));
+
+    expect($orden->fresh()->estado)->toBe(EstadoOrdenCompra::RecibidaParcial);
+
+    Livewire::actingAs($supervisor, 'tenant')
+        ->test(ViewOrdenCompra::class, ['record' => $orden->getRouteKey()])
+        ->assertSee('Recepción parcial')
+        ->assertSee('Esta compra quedó recibida a medias.')
+        ->assertSee('Llegaron 9 de 10 pza.')
         ->assertActionVisible('recibir')
         ->assertFormFieldDisabled('lineas')
         ->assertFormFieldDisabled('proveedor_id');
-
-    expect($orden->fresh()->estado)->toBe(EstadoOrdenCompra::RecibidaParcial);
 });
 
 it('muestra ver en una compra recibida y edit en una pendiente', function () {

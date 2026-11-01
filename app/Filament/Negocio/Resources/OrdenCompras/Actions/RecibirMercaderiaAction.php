@@ -4,6 +4,10 @@ namespace App\Filament\Negocio\Resources\OrdenCompras\Actions;
 
 use App\Compras\Montos;
 use App\Compras\RecibirMercaderia;
+use App\Enums\EstadoOrdenCompra;
+use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
+use App\Filament\Negocio\Resources\OrdenCompras\Pages\EditOrdenCompra;
+use App\Filament\Negocio\Resources\OrdenCompras\Pages\ViewOrdenCompra;
 use App\Models\NegocioConfiguracion;
 use App\Models\OrdenCompra;
 use App\Models\OrdenCompraDetalle;
@@ -100,10 +104,23 @@ class RecibirMercaderiaAction
                     (bool) ($data['confirmo_costos'] ?? false),
                 );
             })
-            ->after(function (OrdenCompra $record): void {
-                $record->refresh();
+            ->after(function (OrdenCompra $record, Action $action): void {
+                $record->refresh()->load('detalles');
+
+                $livewire = $action->getLivewire();
+
+                if ($livewire instanceof EditOrdenCompra || $livewire instanceof ViewOrdenCompra) {
+                    $livewire->redirect(OrdenCompraResource::getUrl('view', ['record' => $record]));
+                }
             })
-            ->successNotificationTitle('Mercadería recibida. El costo promedio quedó actualizado.');
+            ->successNotificationTitle(function (OrdenCompra $record): string {
+                $record->refresh();
+
+                return match ($record->estado) {
+                    EstadoOrdenCompra::RecibidaParcial => 'Recepción parcial. Todavía falta mercadería. El costo promedio quedó actualizado.',
+                    default => 'Mercadería recibida. El costo promedio quedó actualizado.',
+                };
+            });
     }
 
     private static function linea(OrdenCompraDetalle $detalle, string $moneda, string $falta): Section

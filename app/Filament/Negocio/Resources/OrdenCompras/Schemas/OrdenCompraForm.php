@@ -21,6 +21,7 @@ use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\ToggleButtons;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
@@ -43,6 +44,24 @@ class OrdenCompraForm
                     ->hiddenLabel()
                     ->content('Guardar la compra no mete mercadería. Recibir muestra el costo por unidad y pide confirmación antes de tocar el stock.')
                     ->visible(fn (?OrdenCompra $record): bool => ! $record instanceof OrdenCompra || $record->estado === EstadoOrdenCompra::Pendiente),
+                Callout::make('Recepción parcial')
+                    ->description('Esta compra quedó recibida a medias. Todavía falta mercadería. Usá Recibir para lo que falta.')
+                    ->warning()
+                    ->icon(Heroicon::OutlinedExclamationTriangle)
+                    ->visible(fn (?OrdenCompra $record): bool => $record instanceof OrdenCompra
+                        && $record->estado === EstadoOrdenCompra::RecibidaParcial),
+                Callout::make('Compra completa')
+                    ->description('Esta compra ya recibió toda la mercadería.')
+                    ->success()
+                    ->icon(Heroicon::OutlinedCheckCircle)
+                    ->visible(fn (?OrdenCompra $record): bool => $record instanceof OrdenCompra
+                        && $record->estado === EstadoOrdenCompra::Completada),
+                Callout::make('Compra anulada')
+                    ->description('Esta compra está anulada. No se recibe mercadería.')
+                    ->danger()
+                    ->icon(Heroicon::OutlinedNoSymbol)
+                    ->visible(fn (?OrdenCompra $record): bool => $record instanceof OrdenCompra
+                        && $record->estado === EstadoOrdenCompra::Anulada),
                 Section::make('Compra')
                     ->icon(Heroicon::OutlinedShoppingCart)
                     ->columns(2)
@@ -120,7 +139,10 @@ class OrdenCompraForm
                             ->native(false),
                     ]),
                 Section::make('Productos')
-                    ->description('El costo queda en la compra. El precio de venta no se mueve.')
+                    ->description(fn (?OrdenCompra $record): string => $record instanceof OrdenCompra
+                        && $record->estado === EstadoOrdenCompra::RecibidaParcial
+                        ? 'En cada producto se ve cuánto llegó. El precio de venta no se mueve.'
+                        : 'El costo queda en la compra. El precio de venta no se mueve.')
                     ->schema([
                         Repeater::make('lineas')
                             ->hiddenLabel()
@@ -175,6 +197,21 @@ class OrdenCompraForm
                                 TextInput::make('cantidad_pedida')
                                     ->hiddenLabel()
                                     ->suffix(fn (Get $get): ?string => self::simboloDeLinea($get('unidad_medida_id')))
+                                    ->helperText(function (Get $get, ?OrdenCompra $record): ?string {
+                                        if (! $record instanceof OrdenCompra || $record->estado === EstadoOrdenCompra::Pendiente) {
+                                            return null;
+                                        }
+
+                                        $simbolo = self::simboloDeLinea($get('unidad_medida_id')) ?? 'u';
+                                        $recibida = self::cantidadVisible($get('cantidad_recibida'));
+                                        $pedida = self::cantidadVisible($get('cantidad_pedida'));
+
+                                        if (Montos::comparar((string) ($get('cantidad_recibida') ?? '0'), (string) ($get('cantidad_pedida') ?? '0')) === 0) {
+                                            return 'Llegó todo: '.$recibida.' '.$simbolo.'.';
+                                        }
+
+                                        return 'Llegaron '.$recibida.' de '.$pedida.' '.$simbolo.'.';
+                                    })
                                     ->numeric()
                                     ->minValue(0.0001)
                                     ->required()
@@ -379,6 +416,7 @@ class OrdenCompraForm
                 'producto_variante_id' => $detalle->producto_variante_id,
                 'unidad_medida_id' => $detalle->unidad_medida_id,
                 'cantidad_pedida' => $detalle->cantidad_pedida,
+                'cantidad_recibida' => $detalle->cantidad_recibida,
                 'costo_unitario' => $detalle->costo_anotado ?? $detalle->costo_unitario,
             ])
             ->all();
@@ -386,6 +424,17 @@ class OrdenCompraForm
         $data['porcentaje_impuesto'] = $orden->porcentaje_impuesto;
 
         return $data;
+    }
+
+    private static function cantidadVisible(mixed $cantidad): string
+    {
+        $texto = Montos::cuatro($cantidad ?? '0');
+
+        if (str_contains($texto, '.')) {
+            $texto = rtrim(rtrim($texto, '0'), '.');
+        }
+
+        return $texto === '' ? '0' : $texto;
     }
 
     private static function impuestoEnPantalla(mixed $valor): string
