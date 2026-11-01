@@ -1,0 +1,596 @@
+<?php
+
+namespace App\Ventas;
+
+use App\Compras\Montos;
+use App\Enums\CondicionVenta;
+use App\Enums\EstadoCajaSesion;
+use App\Enums\EstadoPago;
+use App\Enums\EstadoVenta;
+use App\Enums\SentidoPago;
+use App\Enums\TipoComprobante;
+use App\Enums\TipoDescuento;
+use App\Enums\TipoMovimientoInventario;
+use App\Enums\TipoPrecioCliente;
+use App\Inventario\FactorUnidad;
+use App\Models\CajaSesion;
+use App\Models\Cliente;
+use App\Models\Impuesto;
+use App\Models\InventarioStock;
+use App\Models\MovimientoInventario;
+use App\Models\NegocioConfiguracion;
+use App\Models\Pago;
+use App\Models\PagoAplicacion;
+use App\Models\ProductoVariante;
+use App\Models\SucursalAlmacen;
+use App\Models\TenantUser;
+use App\Models\UnidadMedida;
+use App\Models\Venta;
+use App\Models\VentaDetalle;
+use App\Models\VentaImpuesto;
+use App\Ventas\Pagos\MetodoPagoFactory;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+
+class CompletarVentaContado
+{
+    public function __construct(
+        private ReservarCodigoVenta $codigos,
+        private FactorUnidad $factores,
+        private MetodoPagoFactory $metodosPago,
+    ) {}
+
+    /**
+     * @param  array{
+     *     sucursal_id: mixed,
+     *     almacen_id: mixed,
+     *     cliente_id?: mixed,
+     *     notes_internas?: mixed,
+     *     lineas: list<array{
+     *         producto_variante_id: mixed,
+     *         unidad_medida_id?: mixed,
+     *         cantidad: mixed,
+     *         tipo_descuento?: mixed,
+     *         valor_descuento?: mixed,
+     *         supervisor_descuento_id?: mixed
+     *     }>,
+     *     pagos: list<array{
+     *         metodo_pago: mixed,
+     *         monto: mixed,
+     *         numero_referencia_banco?: mixed,
+     *         qr_id_transaccion_banco?: mixed,
+     *         comprobante_archivo_path?: mixed
+     *     }>
+     * }  $data
+     * @return array{venta: Venta, alertas_perdida: list<array{sku: string, precio_neto: string, precio_costo: string}>}
+     */
+    public function completar(array $data, TenantUser $usuario): array
+    {
+        return DB::transaction(function () use ($data, $usuario): array {
+            $sucursalId = $this->id($data['sucursal_id'] ?? null, 'sucursal_id', 'Elegí la sucursal.');
+            $almacenId = $this->id($data['almacen_id'] ?? null, 'almacen_id', 'Elegí el almacén.');
+
+            if (! SucursalAlmacen::query()
+                ->where('sucursal_id', $sucursalId)
+                ->where('almacen_id', $almacenId)
+                ->exists()) {
+                throw ValidationException::withMessages([
+                    'almacen_id' => 'Ese almacén no está asignado a la sucursal.',
+                ]);
+            }
+
+            $caja = CajaSesion::query()
+                ->where('sucursal_id', $sucursalId)
+                ->where('user_id', $usuario->id)
+                ->where('estado_sesion', EstadoCajaSesion::Abierta)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $caja instanceof CajaSesion) {
+                throw ValidationException::withMessages([
+                    'sucursal_id' => 'Abrí la caja de esa sucursal antes de vender.',
+                ]);
+            }
+
+            $clienteId = $this->idOpcional($data['cliente_id'] ?? null, 'cliente_id');
+            $cliente = null;
+
+            if ($clienteId !== null) {
+                $cliente = Cliente::query()->find($clienteId);
+
+                if (! $cliente instanceof Cliente) {
+                    throw ValidationException::withMessages([
+                        'cliente_id' => 'Ese cliente no es de este negocio.',
+                    ]);
+                }
+            }
+
+            $config = NegocioConfiguracion::query()->first();
+            $topePorcentaje = Montos::dos($config?->descuento_max_porcentaje ?? '10');
+            $topeImporte = Montos::dos($config?->descuento_max_importe ?? '0');
+
+            $lineasRaw = $data['lineas'] ?? null;
+
+            if (! is_array($lineasRaw) || $lineasRaw === []) {
+                throw ValidationException::withMessages([
+                    'lineas' => 'Agregá al menos un producto.',
+                ]);
+            }
+
+            $lineasPreparadas = [];
+            $varianteIds = [];
+
+            foreach (array_values($lineasRaw) as $indice => $linea) {
+                if (! is_array($linea)) {
+                    throw ValidationException::withMessages([
+                        'lineas' => 'Agregá al menos un producto.',
+                    ]);
+                }
+
+                $lineasPreparadas[] = $this->prepararLinea(
+                    $linea,
+                    $indice,
+                    $cliente,
+                    $topePorcentaje,
+                    $topeImporte,
+                );
+                $varianteIds[] = $lineasPreparadas[$indice]['producto_variante_id'];
+            }
+
+            $varianteIds = collect($varianteIds)->unique()->sort()->values()->all();
+
+            $variantes = ProductoVariante::query()
+                ->with('productoMaestro')
+                ->whereIn('id', $varianteIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            foreach ($varianteIds as $varianteId) {
+                InventarioStock::query()->firstOrCreate([
+                    'producto_variante_id' => $varianteId,
+                    'almacen_id' => $almacenId,
+                ]);
+            }
+
+            $stocks = InventarioStock::query()
+                ->where('almacen_id', $almacenId)
+                ->whereIn('producto_variante_id', $varianteIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('producto_variante_id');
+
+            $subtotal = '0.00';
+            $descuentoTotal = '0.00';
+            $alertas = [];
+
+            foreach ($lineasPreparadas as $i => $linea) {
+                $variante = $variantes->get($linea['producto_variante_id']);
+
+                if (! $variante instanceof ProductoVariante) {
+                    throw ValidationException::withMessages([
+                        "lineas.{$i}.producto_variante_id" => 'Ese producto no es de este negocio.',
+                    ]);
+                }
+
+                $stock = $stocks->get($variante->id);
+
+                if (! $stock instanceof InventarioStock) {
+                    throw ValidationException::withMessages([
+                        "lineas.{$i}.producto_variante_id" => 'No hay saldo de esa pieza en el almacén.',
+                    ]);
+                }
+
+                $disponible = Montos::sumar(
+                    (string) $stock->cantidad_actual,
+                    bcmul((string) $stock->cantidad_reservada, '-1', 4),
+                    4,
+                );
+
+                if (Montos::comparar($linea['cantidad_base'], $disponible, 4) === 1) {
+                    throw ValidationException::withMessages([
+                        "lineas.{$i}.cantidad" => 'No hay stock suficiente de '.$variante->sku.'.',
+                    ]);
+                }
+
+                $subtotal = Montos::sumar($subtotal, Montos::multiplicar($linea['cantidad_base'], $linea['precio_unitario'], 2), 2);
+                $descuentoTotal = Montos::sumar($descuentoTotal, $linea['descuento_aplicado'], 2);
+
+                $precioNetoUnidad = Montos::comparar($linea['cantidad_base'], '0', 4) === 1
+                    ? Montos::dividir($linea['total_linea'], $linea['cantidad_base'], 2)
+                    : '0.00';
+
+                if (Montos::comparar((string) $variante->precio_costo, $precioNetoUnidad, 4) === 1) {
+                    $alertas[] = [
+                        'sku' => (string) $variante->sku,
+                        'precio_neto' => $precioNetoUnidad,
+                        'precio_costo' => Montos::cuatro((string) $variante->precio_costo),
+                    ];
+                }
+
+                $lineasPreparadas[$i]['variante'] = $variante;
+                $lineasPreparadas[$i]['stock'] = $stock;
+                $lineasPreparadas[$i]['precio_costo_snapshot'] = Montos::cuatro((string) $variante->precio_costo);
+            }
+
+            $base = Montos::sumar($subtotal, bcmul($descuentoTotal, '-1', 2), 2);
+            $impuestosActivos = Impuesto::query()->where('is_active', true)->orderBy('nombre')->get();
+            $montoImpuestos = '0.00';
+            $snapshots = [];
+
+            foreach ($impuestosActivos as $impuesto) {
+                $monto = Montos::porcentaje($base, (string) $impuesto->porcentaje, 2);
+                $montoImpuestos = Montos::sumar($montoImpuestos, $monto, 2);
+                $snapshots[] = [
+                    'nombre_impuesto_snapshot' => $impuesto->nombre,
+                    'porcentaje_aplicado_snapshot' => Montos::dos((string) $impuesto->porcentaje),
+                    'monto_calculado' => $monto,
+                ];
+            }
+
+            // Los precios de mostrador ya son lo que paga el cliente; el snapshot fiscal no suma al total.
+            $total = $base;
+
+            $pagosRaw = $data['pagos'] ?? null;
+
+            if (! is_array($pagosRaw) || $pagosRaw === []) {
+                throw ValidationException::withMessages([
+                    'pagos' => 'Registrá al menos un cobro.',
+                ]);
+            }
+
+            $pagosPreparados = [];
+            $sumaPagos = '0.00';
+
+            foreach (array_values($pagosRaw) as $indice => $pago) {
+                if (! is_array($pago)) {
+                    throw ValidationException::withMessages([
+                        'pagos' => 'Registrá al menos un cobro.',
+                    ]);
+                }
+
+                $metodoRaw = $pago['metodo_pago'] ?? null;
+
+                try {
+                    $handler = $this->metodosPago->make(is_string($metodoRaw) ? $metodoRaw : (string) $metodoRaw);
+                } catch (ValidationException) {
+                    throw ValidationException::withMessages([
+                        "pagos.{$indice}.metodo_pago" => 'Elegí un método de pago válido.',
+                    ]);
+                }
+
+                $preparado = $handler->preparar($pago, $indice, $caja);
+                $pagosPreparados[] = $preparado;
+                $sumaPagos = Montos::sumar($sumaPagos, $preparado['monto'], 2);
+            }
+
+            if (Montos::comparar($sumaPagos, $total, 2) !== 0) {
+                throw ValidationException::withMessages([
+                    'pagos' => 'La suma de los cobros tiene que ser exactamente el total ('.$total.').',
+                ]);
+            }
+
+            $codigo = $this->codigos->reservar();
+
+            $notes = $data['notes_internas'] ?? null;
+            $notes = is_string($notes) ? trim($notes) : null;
+
+            $venta = Venta::query()->create([
+                'codigo' => $codigo,
+                'sucursal_id' => $sucursalId,
+                'almacen_id' => $almacenId,
+                'talonario_id' => null,
+                'cliente_id' => $clienteId,
+                'user_id' => $usuario->id,
+                'condicion' => CondicionVenta::Contado,
+                'estado' => EstadoVenta::Completada,
+                'vence_en' => null,
+                'tipo_comprobante' => TipoComprobante::NotaVenta,
+                'numero_comprobante' => null,
+                'subtotal' => $subtotal,
+                'descuento' => $descuentoTotal,
+                'total' => $total,
+                'notes_internas' => $notes !== '' ? $notes : null,
+            ]);
+
+            foreach ($lineasPreparadas as $linea) {
+                /** @var ProductoVariante $variante */
+                $variante = $linea['variante'];
+                /** @var InventarioStock $stock */
+                $stock = $linea['stock'];
+
+                $previo = Montos::cuatro((string) $stock->cantidad_actual);
+                $posterior = Montos::sumar($previo, bcmul($linea['cantidad_base'], '-1', 4), 4);
+
+                $stock->cantidad_actual = $posterior;
+                $stock->save();
+
+                MovimientoInventario::query()->create([
+                    'producto_variante_id' => $variante->id,
+                    'almacen_id' => $almacenId,
+                    'user_id' => $usuario->id,
+                    'tipo_movimiento' => TipoMovimientoInventario::SalidaVenta,
+                    'cantidad' => $linea['cantidad_base'],
+                    'stock_previo' => $previo,
+                    'stock_posterior' => $posterior,
+                    'costo_unitario' => $linea['precio_costo_snapshot'],
+                    'costo_promedio_resultante' => $linea['precio_costo_snapshot'],
+                    'referencia_tipo' => MovimientoInventario::REFERENCIA_VENTA,
+                    'referencia_id' => $venta->id,
+                ]);
+
+                VentaDetalle::query()->create([
+                    'venta_id' => $venta->id,
+                    'producto_variante_id' => $variante->id,
+                    'unidad_medida_id' => $linea['unidad_medida_id'],
+                    'factor_a_base' => $linea['factor_a_base'],
+                    'cantidad' => $linea['cantidad'],
+                    'cantidad_base' => $linea['cantidad_base'],
+                    'precio_unitario' => $linea['precio_unitario'],
+                    'precio_costo_snapshot' => $linea['precio_costo_snapshot'],
+                    'tipo_descuento' => $linea['tipo_descuento'],
+                    'valor_descuento' => $linea['valor_descuento'],
+                    'descuento_aplicado' => $linea['descuento_aplicado'],
+                    'supervisor_descuento_id' => $linea['supervisor_descuento_id'],
+                    'total_linea' => $linea['total_linea'],
+                ]);
+            }
+
+            foreach ($snapshots as $snapshot) {
+                VentaImpuesto::query()->create([
+                    'venta_id' => $venta->id,
+                    ...$snapshot,
+                ]);
+            }
+
+            foreach ($pagosPreparados as $pagoData) {
+                $pago = Pago::query()->create([
+                    'cliente_id' => $clienteId,
+                    'caja_sesion_id' => $pagoData['caja_sesion_id'],
+                    'sentido' => SentidoPago::Cobro,
+                    'metodo_pago' => $pagoData['metodo_pago'],
+                    'monto' => $pagoData['monto'],
+                    'comprobante_archivo_path' => $pagoData['comprobante_archivo_path'],
+                    'numero_referencia_banco' => $pagoData['numero_referencia_banco'],
+                    'qr_id_transaccion_banco' => $pagoData['qr_id_transaccion_banco'],
+                    'estado_pago' => EstadoPago::Aprobado,
+                    'fecha_pago' => now(),
+                ]);
+
+                PagoAplicacion::query()->create([
+                    'pago_id' => $pago->id,
+                    'venta_id' => $venta->id,
+                    'nota_credito_id' => null,
+                    'aplicacion_origen_id' => null,
+                    'monto' => $pagoData['monto'],
+                ]);
+            }
+
+            return [
+                'venta' => $venta->refresh()->load(['detalles', 'impuestos']),
+                'alertas_perdida' => $alertas,
+            ];
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $linea
+     * @return array{
+     *     producto_variante_id: int,
+     *     unidad_medida_id: int,
+     *     factor_a_base: string,
+     *     cantidad: string,
+     *     cantidad_base: string,
+     *     precio_unitario: string,
+     *     tipo_descuento: TipoDescuento|null,
+     *     valor_descuento: string,
+     *     descuento_aplicado: string,
+     *     supervisor_descuento_id: int|null,
+     *     total_linea: string
+     * }
+     */
+    private function prepararLinea(
+        array $linea,
+        int $indice,
+        ?Cliente $cliente,
+        string $topePorcentaje,
+        string $topeImporte,
+    ): array {
+        $varianteId = $this->id(
+            $linea['producto_variante_id'] ?? null,
+            "lineas.{$indice}.producto_variante_id",
+            'Elegí el producto.',
+        );
+
+        $variante = ProductoVariante::query()->with('productoMaestro')->find($varianteId);
+
+        if (! $variante instanceof ProductoVariante || ! $variante->productoMaestro) {
+            throw ValidationException::withMessages([
+                "lineas.{$indice}.producto_variante_id" => 'Ese producto no es de este negocio.',
+            ]);
+        }
+
+        $unidadId = array_key_exists('unidad_medida_id', $linea) && $linea['unidad_medida_id'] !== null && $linea['unidad_medida_id'] !== ''
+            ? $this->id($linea['unidad_medida_id'], "lineas.{$indice}.unidad_medida_id", 'Elegí la unidad.')
+            : (int) $variante->productoMaestro->unidad_base_id;
+
+        $unidad = UnidadMedida::query()->find($unidadId);
+
+        if (! $unidad instanceof UnidadMedida) {
+            throw ValidationException::withMessages([
+                "lineas.{$indice}.unidad_medida_id" => 'Esa unidad no es de este negocio.',
+            ]);
+        }
+
+        $cantidad = $this->cantidad($linea['cantidad'] ?? null, "lineas.{$indice}.cantidad");
+
+        if (! $unidad->admiteCantidad($cantidad)) {
+            throw ValidationException::withMessages([
+                "lineas.{$indice}.cantidad" => 'Esa unidad no acepta fracciones.',
+            ]);
+        }
+
+        $factor = $this->factores->haciaBase($variante->productoMaestro, $unidadId);
+        $cantidadBase = Montos::multiplicar($cantidad, $factor, 4);
+
+        $precioUnitario = $this->precioDeLista($variante, $cliente);
+        $bruto = Montos::multiplicar($cantidadBase, $precioUnitario, 2);
+
+        $tipoRaw = $linea['tipo_descuento'] ?? null;
+        $tipo = null;
+        $valor = '0.00';
+        $descuentoAplicado = '0.00';
+        $supervisorId = $this->idOpcional($linea['supervisor_descuento_id'] ?? null, "lineas.{$indice}.supervisor_descuento_id");
+
+        if ($tipoRaw !== null && $tipoRaw !== '') {
+            $tipo = TipoDescuento::tryFrom(is_string($tipoRaw) ? $tipoRaw : (string) $tipoRaw);
+
+            if ($tipo === null) {
+                throw ValidationException::withMessages([
+                    "lineas.{$indice}.tipo_descuento" => 'El descuento es porcentaje o importe.',
+                ]);
+            }
+
+            $valor = $this->montoDos($linea['valor_descuento'] ?? null, "lineas.{$indice}.valor_descuento");
+
+            if ($tipo === TipoDescuento::Porcentaje) {
+                if (Montos::comparar($valor, '100', 2) === 1) {
+                    throw ValidationException::withMessages([
+                        "lineas.{$indice}.valor_descuento" => 'El porcentaje no puede pasar de 100.',
+                    ]);
+                }
+
+                $descuentoAplicado = Montos::porcentaje($bruto, $valor, 2);
+
+                if (Montos::comparar($valor, $topePorcentaje, 2) === 1 && $supervisorId === null) {
+                    throw ValidationException::withMessages([
+                        "lineas.{$indice}.supervisor_descuento_id" => 'Ese descuento pasa el tope. Pedí autorización de un supervisor.',
+                    ]);
+                }
+            } else {
+                $descuentoAplicado = $valor;
+
+                if (Montos::comparar($descuentoAplicado, $bruto, 2) === 1) {
+                    throw ValidationException::withMessages([
+                        "lineas.{$indice}.valor_descuento" => 'El descuento no puede dejar la línea en negativo.',
+                    ]);
+                }
+
+                if (Montos::comparar($valor, $topeImporte, 2) === 1 && $supervisorId === null) {
+                    throw ValidationException::withMessages([
+                        "lineas.{$indice}.supervisor_descuento_id" => 'Ese descuento pasa el tope. Pedí autorización de un supervisor.',
+                    ]);
+                }
+            }
+
+            if ($supervisorId !== null && ! TenantUser::query()->whereKey($supervisorId)->exists()) {
+                throw ValidationException::withMessages([
+                    "lineas.{$indice}.supervisor_descuento_id" => 'Ese supervisor no es de este negocio.',
+                ]);
+            }
+        }
+
+        $totalLinea = Montos::sumar($bruto, bcmul($descuentoAplicado, '-1', 2), 2);
+
+        if (Montos::comparar($totalLinea, '0', 2) === -1) {
+            throw ValidationException::withMessages([
+                "lineas.{$indice}.valor_descuento" => 'El descuento no puede dejar la línea en negativo.',
+            ]);
+        }
+
+        return [
+            'producto_variante_id' => $varianteId,
+            'unidad_medida_id' => $unidadId,
+            'factor_a_base' => $factor,
+            'cantidad' => $cantidad,
+            'cantidad_base' => $cantidadBase,
+            'precio_unitario' => $precioUnitario,
+            'tipo_descuento' => $tipo,
+            'valor_descuento' => $valor,
+            'descuento_aplicado' => $descuentoAplicado,
+            'supervisor_descuento_id' => $supervisorId,
+            'total_linea' => $totalLinea,
+        ];
+    }
+
+    private function precioDeLista(ProductoVariante $variante, ?Cliente $cliente): string
+    {
+        if ($cliente?->tipo_precio === TipoPrecioCliente::Mayor
+            && $variante->precio_mayor !== null
+            && Montos::comparar((string) $variante->precio_mayor, '0', 2) === 1) {
+            return Montos::dos((string) $variante->precio_mayor);
+        }
+
+        return Montos::dos((string) $variante->precio_venta);
+    }
+
+    private function id(mixed $valor, string $campo, string $mensaje): int
+    {
+        if (is_int($valor) && $valor > 0) {
+            return $valor;
+        }
+
+        if (is_string($valor) && ctype_digit($valor) && (int) $valor > 0) {
+            return (int) $valor;
+        }
+
+        throw ValidationException::withMessages([
+            $campo => $mensaje,
+        ]);
+    }
+
+    private function idOpcional(mixed $valor, string $campo): ?int
+    {
+        if ($valor === null || $valor === '') {
+            return null;
+        }
+
+        return $this->id($valor, $campo, 'Identificador inválido.');
+    }
+
+    private function cantidad(mixed $valor, string $campo): string
+    {
+        $texto = match (true) {
+            is_int($valor) => (string) $valor,
+            is_float($valor) => number_format($valor, 4, '.', ''),
+            is_string($valor) => trim($valor),
+            default => null,
+        };
+
+        if ($texto === null || preg_match('/^\d+(\.\d+)?$/', $texto) !== 1) {
+            throw ValidationException::withMessages([
+                $campo => 'La cantidad tiene que ser un número mayor a cero.',
+            ]);
+        }
+
+        $cantidad = Montos::redondear($texto, 4);
+
+        if (Montos::comparar($cantidad, '0', 4) !== 1) {
+            throw ValidationException::withMessages([
+                $campo => 'La cantidad tiene que ser un número mayor a cero.',
+            ]);
+        }
+
+        return $cantidad;
+    }
+
+    private function montoDos(mixed $valor, string $campo): string
+    {
+        $texto = match (true) {
+            is_int($valor) => (string) $valor,
+            is_float($valor) => number_format($valor, 2, '.', ''),
+            is_string($valor) => trim($valor),
+            default => null,
+        };
+
+        if ($texto === null || preg_match('/^\d+(\.\d+)?$/', $texto) !== 1) {
+            throw ValidationException::withMessages([
+                $campo => 'El monto tiene que ser un número de cero para arriba.',
+            ]);
+        }
+
+        return Montos::dos($texto);
+    }
+}

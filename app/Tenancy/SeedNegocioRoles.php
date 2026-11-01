@@ -93,6 +93,11 @@ class SeedNegocioRoles
             'View:CajaSesion',
             'Create:CajaSesion',
             'Update:CajaSesion',
+            'ViewAny:Venta',
+            'View:Venta',
+            'Create:Venta',
+            'View:MostradorDelNegocio',
+            'View:CajaDelNegocio',
         ]);
 
         NegocioConfiguracion::query()->firstOrCreate([], [
@@ -118,13 +123,17 @@ class SeedNegocioRoles
      */
     private function permissionNames(): array
     {
-        $names = ['View:ConfiguracionDelNegocio'];
+        $names = [
+            'View:ConfiguracionDelNegocio',
+            'View:MostradorDelNegocio',
+            'View:CajaDelNegocio',
+        ];
         $methods = [
             'ViewAny', 'View', 'Create', 'Update', 'Delete', 'DeleteAny',
             'Restore', 'ForceDelete', 'ForceDeleteAny', 'RestoreAny', 'Replicate', 'Reorder',
         ];
 
-        foreach (['Sucursal', 'Almacen', 'TenantUser', 'UnidadMedida', 'Categoria', 'Marca', 'ProductoMaestro', 'ProductoVariante', 'InventarioStock', 'Proveedor', 'Trabajador', 'OrdenCompra', 'Cliente', 'Impuesto', 'TipoDocumentoIdentidad', 'CajaSesion'] as $subject) {
+        foreach (['Sucursal', 'Almacen', 'TenantUser', 'UnidadMedida', 'Categoria', 'Marca', 'ProductoMaestro', 'ProductoVariante', 'InventarioStock', 'Proveedor', 'Trabajador', 'OrdenCompra', 'Cliente', 'Impuesto', 'TipoDocumentoIdentidad', 'CajaSesion', 'Venta'] as $subject) {
             foreach ($methods as $method) {
                 $names[] = $method.':'.$subject;
             }

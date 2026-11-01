@@ -34,6 +34,7 @@ class NegocioPanelProvider extends PanelProvider
             ->authGuard('tenant')
             ->darkMode()
             ->colors(Paleta::colors())
+            ->viteTheme('resources/css/filament/negocio/theme.css')
             ->renderHook(
                 PanelsRenderHook::STYLES_AFTER,
                 fn (): string => view('filament.paleta')->render(),

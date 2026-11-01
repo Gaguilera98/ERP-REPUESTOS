@@ -241,6 +241,18 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 2. **Moneda ISO abierta.** Hoy el enum de moneda del negocio es BOB/PEN/BRL. Pendiente pasar a código ISO de 3 letras. Ver nota en el punto 26.
 3. **Documento de factura en la venta.** El cliente ya puede guardar varios documentos (CI, NIT, etc.) con atributos dinámicos. Al facturar habrá que elegir **un** tipo + número (y complemento si aplica) para ese comprobante, sin mezclar varios en la misma factura.
 4. **Listado y arqueo de cajas.** Hoy el cajero abre/cierra su sesión y ve un historial corto propio. Falta (cuando haya ventas): ver sesiones abiertas de la sucursal, detalle de cobros/reembolsos del turno y vista supervisor de todas las cajas. La regla de negocio no cambia: una abierta por cajero+sucursal; se puede cerrar y abrir otra el mismo día.
+5. **Baja de usuarios / vendedores (no borrar a ciegas).** Ventas, cajas, compras, kardex, autorizaciones de supervisor, etc. apuntan a `users` del pool. Reglas a diseñar cuando exista administración de usuarios del negocio:
+   * **Borrado físico bloqueado** si hay filas relacionadas (FK Restrict o chequeo en la app): no se pierde el historial ni se rompe la integridad.
+   * **Preferir eliminación lógica** (`deleted_at` / `is_active` / baja): el usuario deja de aparecer en selects de asignación (vendedor, cajero, responsable) y no puede iniciar sesión, pero las ventas y cajas viejas siguen mostrando quién las hizo.
+   * **Al dar de baja**, preguntar si quiere **reasignar** lo pendiente o la titularidad operativa a otro usuario del mismo negocio (ej.: ventas en reserva a su nombre, caja abierta —que debería cerrarse antes—, cartera o reportes “por vendedor”). Es un flujo de ejemplo; al implementarlo definir qué se reasigna y qué queda histórico con el usuario original.
+6. **Pasarela de pagos / S3.** Hoy el cobro de contado registra a mano `efectivo`, `qr_externo`, `voucher_tarjeta` y `transferencia`, con adjunto en disco local (tenancy). Los handlers viven en `App\Ventas\Pagos` (factory). Más adelante: S3 para comprobantes e integración real de QR/tarjeta sin cambiar el enum ni el flujo de `pagos`.
+7. **Reseed de roles/permisos tras deploy (tenants ya vivos).** `SeedNegocioRoles` corre al **crear** el negocio. Si después se agregan modelos, pages Filament o permisos Shield (`Venta`, `View:MostradorDelNegocio`, etc.), los tenants viejos **no** los reciben solos: el menú puede ocultar pantallas aunque el rol diga «todo», porque faltan filas en `permissions` o el `syncPermissions` del `supervisor`/`cajero` no se volvió a correr. Checklist consciente hasta automatizarlo:
+   * Migrar el pool tenant (`database/migrations/tenant`).
+   * Volver a ejecutar el seed de roles **en cada tenant** (comando Artisan tipo `negocio:resync-roles`, job post-deploy, o hook de **Laravel Cloud** en cada deploy).
+   * Limpiar caché de permisos Spatie.
+   * Alinear `canAccess` de pages con el permiso que Shield muestra (página y/o policy del modelo).
+   * Decidir si el resync del supervisor **pisa** permisos custom del negocio o solo **agrega** los nuevos (hoy el seed hace `syncPermissions` completo del listado canónico).
+8. **Lista `tenant-pools.tables` (limpieza del pool).** En el tenancy híbrido las tablas con `tenant_id` se declaran a mano en `config/tenant-pools.php`, en orden de borrado (hijas antes que padres), para que `CleanTenantPoolData` limpie al eliminar un negocio. Es sostenible en v1 si la regla de equipo es: *migración tenant ⇒ actualizar esa lista*. A futuro, si se olvida seguido: test/CI que falle si hay tabla con `tenant_id` fuera del config; comando que valide el orden; o limpieza diferida (soft-delete del tenant + job). No hace falta reescribir el modelo de pools solo por esto.
 
 ---
 
@@ -642,9 +654,9 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `cliente_id` (int, Foreign Key compuesta con `tenant_id` -> Clientes, Nullable) -- Obligatorio si queda saldo a favor o si cobra un fiado o una seña
   * `caja_sesion_id` (int, Foreign Key compuesta con `tenant_id` -> Cajas_Sesiones, Nullable) -- Obligatoria si el método es efectivo: tiene que haber una caja abierta
   * `sentido` (enum: 'cobro', 'reembolso') -- Default: 'cobro'
-  * `metodo_pago` (varchar)
+  * `metodo_pago` (varchar) -- En v1: `efectivo`, `qr_externo`, `voucher_tarjeta`, `transferencia`. Sin pasarela. Handlers en `App\Ventas\Pagos`
   * `monto` (decimal 10,2) -- Siempre positivo. El sentido dice si entra o sale
-  * `comprobante_archivo_path` (varchar, Nullable) -- Ruta relativa. El disco ya separa los archivos por tenant
+  * `comprobante_archivo_path` (varchar, Nullable) -- Ruta relativa en disco local. El tenancy separa por tenant; S3 después
   * `numero_referencia_banco` (varchar, Nullable)
   * `qr_id_transaccion_banco` (varchar, Nullable)
   * `estado_pago` (enum: 'pendiente', 'aprobado', 'expirado') -- Default: 'aprobado'. Solo `aprobado` cuenta para el saldo

@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: fase-5-venta
     content: "Fase 5: mostrador Livewire de contado, código VNT y compra flash"
-    status: pending
+    status: completed
   - id: fase-6-credito
     content: "Fase 6: seña, fiado, adelanto y aplicaciones de pago"
     status: pending
@@ -62,7 +62,7 @@ flowchart LR
 
 - Recursos Filament en `app/Filament/Negocio/Resources`: sucursales, almacenes, categorías, productos, clientes, tipos de documento de identidad, proveedores, compras, talonarios, ajustes, traslados, categorías de gasto, impuestos, tipo de cambio.
 - Abrir/cerrar caja es una página Filament (`CajaDelNegocio`), no un resource de listado completo ni el mostrador.
-- La venta no es un resource. Es una página Filament en `app/Filament/Negocio/Pages` que monta componentes Livewire en `app/Livewire/Negocio/Venta`. Así hereda el login, el subdominio y el tenant, y el mostrador se arma a mano: buscador, líneas, totales y cobro.
+- El mostrador es `MostradorDelNegocio` + Livewire `app/Livewire/Negocio/Venta/Mostrador`: buscador, líneas, flash, cobros y adjuntos.
 - La devolución del mismo día usa el mismo estilo Livewire, no un formulario genérico.
 - El vale de caja chica tampoco es un resource. Vive en la página de la caja abierta, como un paso corto: monto, concepto, categoría y comprobante. El listado histórico puede ser una tabla Filament de solo lectura.
 
@@ -105,15 +105,13 @@ Reglas cubiertas:
 
 Pantalla: resources Clientes, Impuestos, Tipos de documento; página Filament Abrir/Cerrar caja (historial corto del cajero). Mejoras de UI de listado de todas las sesiones / arqueo enriquecido: después, cuando existan ventas (fase 5+) o supervisión.
 
-## Fase 5. Venta de contado
+## Fase 5. Venta de contado — hecha
 
-Tablas: `ventas`, `venta_detalles`, `venta_impuestos`, `pagos` solo como cobro completo de esa venta. `siguiente_numero_venta` en la configuración. `pago_aplicaciones` mínimo: una fila por el cobro, para no rehacer el dinero en la fase 6.
+Tablas: `ventas`, `venta_detalles`, `venta_impuestos`, `pagos`, `pago_aplicaciones`. `siguiente_numero_venta` ya en configuración.
 
-Reglas: código `VNT-` por negocio, mínimo 6 dígitos y sigue creciendo; no es el `id` ni el número de talonario; una venta sale de un solo almacén y ese almacén tiene que estar en la pivote de la sucursal; se bloquea la fila de stock antes de descontar; el contado solo se completa si el pago cubre el total y la caja está abierta; el descuento es porcentaje o importe, con tope, y el supervisor entra si se pasa; alerta si el promedio queda encima de lo que va a pagar, sin bloquear; el comprobante de esta fase es `nota_venta`; el costo promedio se pega en la línea y no se edita la venta cerrada.
+Reglas cubiertas: código `VNT-`; almacén en pivote de sucursal; lock de stock; contado con caja abierta; descuento %/importe con tope y supervisor; alerta PPP sin bloquear; `nota_venta`; snapshot de impuestos; cobros multi-método (`efectivo`, `qr_externo`, `voucher_tarjeta`, `transferencia`) sin pasarela; adjunto local por pago; factory de handlers de método de pago.
 
-Pantalla: Livewire de mostrador. Buscar por código de barras, SKU o medidas. Elegir cliente opcional. Líneas, descuento y cobro. Dos cajeros no pueden llevarse la última unidad.
-
-Ahí también entra la compra flash: si no hay stock, alta rápida y micro-compra con el proveedor ocasional, confirmando el costo, y después la venta. No deja stock negativo.
+Pantalla: `MostradorDelNegocio` + Livewire `Mostrador`. Compra flash completa (pieza existente o alta al vuelo) con ocasional y `entrada_flash_emergencia`.
 
 ## Fase 6. Seña, fiado y adelanto
 

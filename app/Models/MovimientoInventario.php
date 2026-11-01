@@ -29,6 +29,8 @@ class MovimientoInventario extends Model
 {
     public const REFERENCIA_ORDEN_COMPRA = 'orden_compra';
 
+    public const REFERENCIA_VENTA = 'venta';
+
     /** @use HasFactory<MovimientoInventarioFactory> */
     use BelongsToTenantPool, HasFactory;
 
