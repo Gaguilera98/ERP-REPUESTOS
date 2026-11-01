@@ -46,6 +46,9 @@ class CompletarVentaContado
      *     almacen_id: mixed,
      *     cliente_id?: mixed,
      *     notes_internas?: mixed,
+     *     tipo_descuento?: mixed,
+     *     valor_descuento?: mixed,
+     *     supervisor_descuento_id?: mixed,
      *     lineas: list<array{
      *         producto_variante_id: mixed,
      *         unidad_medida_id?: mixed,
@@ -216,6 +219,19 @@ class CompletarVentaContado
             }
 
             $base = Montos::sumar($subtotal, bcmul($descuentoTotal, '-1', 2), 2);
+            $descuentoVenta = $this->resolverDescuento(
+                $data['tipo_descuento'] ?? null,
+                $data['valor_descuento'] ?? null,
+                $data['supervisor_descuento_id'] ?? null,
+                $base,
+                $topePorcentaje,
+                $topeImporte,
+                'tipo_descuento',
+                'valor_descuento',
+                'supervisor_descuento_id',
+            );
+            $descuentoTotal = Montos::sumar($descuentoTotal, $descuentoVenta['aplicado'], 2);
+            $base = Montos::sumar($base, bcmul($descuentoVenta['aplicado'], '-1', 2), 2);
             $impuestosActivos = Impuesto::query()->where('is_active', true)->orderBy('nombre')->get();
             $montoImpuestos = '0.00';
             $snapshots = [];
@@ -290,7 +306,10 @@ class CompletarVentaContado
                 'tipo_comprobante' => TipoComprobante::NotaVenta,
                 'numero_comprobante' => null,
                 'subtotal' => $subtotal,
+                'tipo_descuento' => $descuentoVenta['tipo'],
+                'valor_descuento' => $descuentoVenta['valor'],
                 'descuento' => $descuentoTotal,
+                'supervisor_descuento_id' => $descuentoVenta['supervisor_id'],
                 'total' => $total,
                 'notes_internas' => $notes !== '' ? $notes : null,
             ]);
@@ -438,61 +457,19 @@ class CompletarVentaContado
         $precioUnitario = $this->precioDeLista($variante, $cliente);
         $bruto = Montos::multiplicar($cantidadBase, $precioUnitario, 2);
 
-        $tipoRaw = $linea['tipo_descuento'] ?? null;
-        $tipo = null;
-        $valor = '0.00';
-        $descuentoAplicado = '0.00';
-        $supervisorId = $this->idOpcional($linea['supervisor_descuento_id'] ?? null, "lineas.{$indice}.supervisor_descuento_id");
+        $descuento = $this->resolverDescuento(
+            $linea['tipo_descuento'] ?? null,
+            $linea['valor_descuento'] ?? null,
+            $linea['supervisor_descuento_id'] ?? null,
+            $bruto,
+            $topePorcentaje,
+            $topeImporte,
+            "lineas.{$indice}.tipo_descuento",
+            "lineas.{$indice}.valor_descuento",
+            "lineas.{$indice}.supervisor_descuento_id",
+        );
 
-        if ($tipoRaw !== null && $tipoRaw !== '') {
-            $tipo = TipoDescuento::tryFrom(is_string($tipoRaw) ? $tipoRaw : (string) $tipoRaw);
-
-            if ($tipo === null) {
-                throw ValidationException::withMessages([
-                    "lineas.{$indice}.tipo_descuento" => 'El descuento es porcentaje o importe.',
-                ]);
-            }
-
-            $valor = $this->montoDos($linea['valor_descuento'] ?? null, "lineas.{$indice}.valor_descuento");
-
-            if ($tipo === TipoDescuento::Porcentaje) {
-                if (Montos::comparar($valor, '100', 2) === 1) {
-                    throw ValidationException::withMessages([
-                        "lineas.{$indice}.valor_descuento" => 'El porcentaje no puede pasar de 100.',
-                    ]);
-                }
-
-                $descuentoAplicado = Montos::porcentaje($bruto, $valor, 2);
-
-                if (Montos::comparar($valor, $topePorcentaje, 2) === 1 && $supervisorId === null) {
-                    throw ValidationException::withMessages([
-                        "lineas.{$indice}.supervisor_descuento_id" => 'Ese descuento pasa el tope. Pedí autorización de un supervisor.',
-                    ]);
-                }
-            } else {
-                $descuentoAplicado = $valor;
-
-                if (Montos::comparar($descuentoAplicado, $bruto, 2) === 1) {
-                    throw ValidationException::withMessages([
-                        "lineas.{$indice}.valor_descuento" => 'El descuento no puede dejar la línea en negativo.',
-                    ]);
-                }
-
-                if (Montos::comparar($valor, $topeImporte, 2) === 1 && $supervisorId === null) {
-                    throw ValidationException::withMessages([
-                        "lineas.{$indice}.supervisor_descuento_id" => 'Ese descuento pasa el tope. Pedí autorización de un supervisor.',
-                    ]);
-                }
-            }
-
-            if ($supervisorId !== null && ! TenantUser::query()->whereKey($supervisorId)->exists()) {
-                throw ValidationException::withMessages([
-                    "lineas.{$indice}.supervisor_descuento_id" => 'Ese supervisor no es de este negocio.',
-                ]);
-            }
-        }
-
-        $totalLinea = Montos::sumar($bruto, bcmul($descuentoAplicado, '-1', 2), 2);
+        $totalLinea = Montos::sumar($bruto, bcmul($descuento['aplicado'], '-1', 2), 2);
 
         if (Montos::comparar($totalLinea, '0', 2) === -1) {
             throw ValidationException::withMessages([
@@ -507,11 +484,91 @@ class CompletarVentaContado
             'cantidad' => $cantidad,
             'cantidad_base' => $cantidadBase,
             'precio_unitario' => $precioUnitario,
-            'tipo_descuento' => $tipo,
-            'valor_descuento' => $valor,
-            'descuento_aplicado' => $descuentoAplicado,
-            'supervisor_descuento_id' => $supervisorId,
+            'tipo_descuento' => $descuento['tipo'],
+            'valor_descuento' => $descuento['valor'],
+            'descuento_aplicado' => $descuento['aplicado'],
+            'supervisor_descuento_id' => $descuento['supervisor_id'],
             'total_linea' => $totalLinea,
+        ];
+    }
+
+    /**
+     * @return array{tipo: TipoDescuento|null, valor: string, aplicado: string, supervisor_id: int|null}
+     */
+    private function resolverDescuento(
+        mixed $tipoRaw,
+        mixed $valorRaw,
+        mixed $supervisorRaw,
+        string $base,
+        string $topePorcentaje,
+        string $topeImporte,
+        string $campoTipo,
+        string $campoValor,
+        string $campoSupervisor,
+    ): array {
+        $supervisorId = $this->idOpcional($supervisorRaw, $campoSupervisor);
+
+        if ($tipoRaw === null || $tipoRaw === '') {
+            return [
+                'tipo' => null,
+                'valor' => '0.00',
+                'aplicado' => '0.00',
+                'supervisor_id' => $supervisorId,
+            ];
+        }
+
+        $tipo = TipoDescuento::tryFrom(is_string($tipoRaw) ? $tipoRaw : (string) $tipoRaw);
+
+        if ($tipo === null) {
+            throw ValidationException::withMessages([
+                $campoTipo => 'El descuento es porcentaje o importe.',
+            ]);
+        }
+
+        $valor = $this->montoDos($valorRaw ?? null, $campoValor);
+        $aplicado = '0.00';
+
+        if ($tipo === TipoDescuento::Porcentaje) {
+            if (Montos::comparar($valor, '100', 2) === 1) {
+                throw ValidationException::withMessages([
+                    $campoValor => 'El porcentaje no puede pasar de 100.',
+                ]);
+            }
+
+            $aplicado = Montos::porcentaje($base, $valor, 2);
+
+            if (Montos::comparar($valor, $topePorcentaje, 2) === 1 && $supervisorId === null) {
+                throw ValidationException::withMessages([
+                    $campoSupervisor => 'Ese descuento pasa el tope. Pedí autorización de un supervisor.',
+                ]);
+            }
+        } else {
+            $aplicado = $valor;
+
+            if (Montos::comparar($aplicado, $base, 2) === 1) {
+                throw ValidationException::withMessages([
+                    $campoValor => 'El descuento no puede dejar el total en negativo.',
+                ]);
+            }
+
+            if (Montos::comparar($valor, $topeImporte, 2) === 1 && $supervisorId === null) {
+                throw ValidationException::withMessages([
+                    $campoSupervisor => 'Ese descuento pasa el tope. Pedí autorización de un supervisor.',
+                ]);
+            }
+        }
+
+        if ($supervisorId !== null && ! TenantUser::query()->whereKey($supervisorId)->exists()) {
+            throw ValidationException::withMessages([
+                $campoSupervisor => 'Ese supervisor no es de este negocio.',
+            ]);
+        }
+
+        return [
+            'tipo' => $tipo,
+            'valor' => $valor,
+            'aplicado' => $aplicado,
+            'supervisor_id' => $supervisorId,
         ];
     }
 

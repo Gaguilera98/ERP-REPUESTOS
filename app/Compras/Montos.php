@@ -82,4 +82,11 @@ final class Montos
 
         return $negativo ? '-'.$resultado : $resultado;
     }
+
+    public static function sinCeros(string|int|float $valor, int $decimales = 4): string
+    {
+        $limpio = rtrim(rtrim(self::redondear(self::normalizar($valor), $decimales), '0'), '.');
+
+        return $limpio === '' || $limpio === '-' ? '0' : $limpio;
+    }
 }

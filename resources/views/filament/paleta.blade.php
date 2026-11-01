@@ -183,4 +183,290 @@
     .dark .fi-link.fi-color-danger {
         color: #F07167;
     }
+
+    .negocio-panel,
+    .negocio-modal {
+        border-radius: 0.75rem;
+        background-color: #fff;
+        box-shadow: 0 0 0 1px rgb(15 23 42 / 0.05);
+    }
+
+    .negocio-modal {
+        border-radius: 1rem;
+    }
+
+    .dark .negocio-panel,
+    .dark .negocio-modal {
+        background-color: #18352B;
+        box-shadow: 0 0 0 1px #315344;
+    }
+
+    .negocio-hairline {
+        border-color: #e5e7eb;
+    }
+
+    .dark .negocio-hairline {
+        border-color: #315344;
+    }
+
+    .negocio-inset {
+        border-radius: 0.75rem;
+        border: 1px solid #e5e7eb;
+        background-color: transparent;
+    }
+
+    .dark .negocio-inset {
+        border-color: #315344;
+        background-color: transparent;
+    }
+
+    .negocio-field,
+    .mostrador-field {
+        width: 100%;
+        border-radius: 0.5rem;
+        border: 1px solid #e5e7eb;
+        background-color: #fff;
+        padding: 0.625rem 0.75rem;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        color: #030712;
+        outline: none;
+    }
+
+    .negocio-field:focus,
+    .negocio-field:focus-within,
+    .mostrador-field:focus,
+    .mostrador-field:focus-within {
+        border-color: #2E7D63;
+        box-shadow: 0 0 0 1px #2E7D63;
+    }
+
+    .dark .negocio-field,
+    .dark .mostrador-field {
+        background-color: #18352B;
+        border-color: #315344;
+        color: #DCE6E0;
+        color-scheme: dark;
+        box-shadow: none;
+    }
+
+    .dark .negocio-field:focus,
+    .dark .negocio-field:focus-within,
+    .dark .mostrador-field:focus,
+    .dark .mostrador-field:focus-within {
+        border-color: #4DA486;
+        box-shadow: 0 0 0 1px #4DA486;
+    }
+
+    .negocio-field::placeholder,
+    .mostrador-field::placeholder,
+    .negocio-field-control::placeholder {
+        color: #9ca3af;
+        opacity: 1;
+    }
+
+    .dark .negocio-field::placeholder,
+    .dark .mostrador-field::placeholder,
+    .dark .negocio-field-control::placeholder {
+        color: #91A69A;
+        opacity: 1;
+    }
+
+    .negocio-field-control {
+        min-width: 0;
+        flex: 1 1 auto;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        color: inherit;
+        outline: none;
+    }
+
+    .dark .negocio-field option,
+    .dark .negocio-field optgroup,
+    .dark .mostrador-field option,
+    .dark .mostrador-field optgroup {
+        background-color: #24483A;
+        color: #DCE6E0;
+    }
+
+    [x-cloak] {
+        display: none !important;
+    }
+
+    .negocio-select-panel {
+        position: absolute;
+        inset-inline: 0;
+        z-index: 50;
+        margin-top: 0.25rem;
+        width: 100%;
+        overflow: hidden;
+        border-radius: 0.5rem;
+        background-color: #fff;
+        color: #030712;
+        box-shadow: 0 0 0 1px rgb(15 23 42 / 0.08), 0 10px 24px rgb(15 23 42 / 0.12);
+    }
+
+    .dark .negocio-select-panel,
+    html.dark .negocio-select-panel {
+        background-color: #18352B;
+        color: #DCE6E0;
+        box-shadow: 0 0 0 1px #315344;
+    }
+
+    .negocio-select-search {
+        border-bottom: 1px solid #e5e7eb;
+        padding: 0.5rem 0.75rem;
+    }
+
+    .dark .negocio-select-search {
+        border-bottom-color: #315344;
+    }
+
+    .negocio-select-options {
+        max-height: 15rem;
+        overflow-y: auto;
+        padding: 0.25rem 0;
+    }
+
+    .negocio-select-option {
+        display: flex;
+        width: 100%;
+        min-height: 2.5rem;
+        align-items: center;
+        padding: 0.625rem 0.75rem;
+        text-align: left;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        color: inherit;
+        background: transparent;
+    }
+
+    .negocio-select-option:hover,
+    .negocio-select-option.is-active {
+        background-color: rgb(15 23 42 / 0.05);
+    }
+
+    .dark .negocio-select-option:hover,
+    .dark .negocio-select-option.is-active {
+        background-color: #24483A;
+    }
+
+    .negocio-select-empty {
+        padding: 0.75rem;
+        font-size: 0.875rem;
+        color: #91A69A;
+    }
 </style>
+<script>
+    window.negocioSelect = function (config) {
+        return {
+            open: false,
+            query: '',
+            value: '',
+            label: '',
+            options: [],
+            searchablePref: config && config.searchable,
+            get searchable() {
+                if (this.searchablePref === true) {
+                    return true;
+                }
+
+                if (this.searchablePref === false) {
+                    return false;
+                }
+
+                return this.options.length > 5;
+            },
+            get filtered() {
+                const query = this.query.trim().toLowerCase();
+
+                if (query === '') {
+                    return this.options;
+                }
+
+                return this.options.filter((option) => option.label.toLowerCase().includes(query));
+            },
+            init() {
+                this.syncFromNative();
+
+                const select = this.$refs.native;
+
+                if (select) {
+                    new MutationObserver(() => this.syncFromNative()).observe(select, {
+                        childList: true,
+                        subtree: true,
+                        attributes: true,
+                        attributeFilter: ['value', 'disabled'],
+                    });
+                }
+
+                const close = () => {
+                    this.open = false;
+                };
+
+                window.addEventListener('resize', close);
+                window.addEventListener('scroll', close, true);
+            },
+            syncFromNative() {
+                const select = this.$refs.native;
+
+                if (! select) {
+                    return;
+                }
+
+                this.options = Array.from(select.options).map((option) => ({
+                    value: option.value,
+                    label: option.textContent.trim(),
+                }));
+                this.value = select.value;
+                this.label = this.options.find((option) => option.value === this.value)?.label ?? '';
+            },
+            toggle() {
+                if (this.$refs.native?.disabled) {
+                    return;
+                }
+
+                this.syncFromNative();
+                this.open = ! this.open;
+                this.query = '';
+
+                if (this.open) {
+                    this.$nextTick(() => {
+                        this.positionPanel();
+                        this.$refs.search?.focus();
+                    });
+                }
+            },
+            positionPanel() {
+                const trigger = this.$refs.trigger;
+                const panel = this.$refs.panel;
+
+                if (! trigger || ! panel) {
+                    return;
+                }
+
+                const rect = trigger.getBoundingClientRect();
+
+                panel.style.position = 'fixed';
+                panel.style.top = `${rect.bottom + 4}px`;
+                panel.style.left = `${rect.left}px`;
+                panel.style.width = `${Math.max(rect.width, 160)}px`;
+                panel.style.marginTop = '0';
+                panel.style.zIndex = '80';
+            },
+            choose(value) {
+                const select = this.$refs.native;
+
+                select.value = value;
+                select.dispatchEvent(new Event('input', { bubbles: true }));
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                this.syncFromNative();
+                this.open = false;
+                this.query = '';
+            },
+        };
+    };
+</script>

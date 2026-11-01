@@ -3,6 +3,7 @@
 namespace App\Filament\Negocio\Pages;
 
 use App\Enums\EstadoCajaSesion;
+use App\Livewire\Negocio\Venta\Concerns\ManejaMostrador;
 use App\Models\CajaSesion;
 use App\Models\TenantUser;
 use App\Models\Venta;
@@ -10,10 +11,14 @@ use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Livewire\WithFileUploads;
 use UnitEnum;
 
 class MostradorDelNegocio extends Page
 {
+    use ManejaMostrador;
+    use WithFileUploads;
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedShoppingCart;
 
     protected static ?string $navigationLabel = 'Mostrador';
@@ -28,6 +33,11 @@ class MostradorDelNegocio extends Page
 
     protected string $view = 'filament.negocio.pages.mostrador-del-negocio';
 
+    public function getSubheading(): ?string
+    {
+        return 'Venta de contado · cobro rápido en mostrador';
+    }
+
     public static function canAccess(): bool
     {
         if (! tenancy()->initialized) {
@@ -36,7 +46,6 @@ class MostradorDelNegocio extends Page
 
         $usuario = auth('tenant')->user();
 
-        // Shield marca la página como View:MostradorDelNegocio; vender exige Create:Venta.
         return $usuario instanceof TenantUser
             && (
                 $usuario->can('View:MostradorDelNegocio')
@@ -57,16 +66,26 @@ class MostradorDelNegocio extends Page
             ->where('estado_sesion', EstadoCajaSesion::Abierta)
             ->exists();
 
-        if ($tieneCajaAbierta) {
+        if (! $tieneCajaAbierta) {
+            Notification::make()
+                ->title('Abrí la caja primero')
+                ->body('El mostrador solo se usa con un turno abierto en la sucursal.')
+                ->warning()
+                ->send();
+
+            $this->redirect(CajaDelNegocio::getUrl());
+
             return;
         }
 
-        Notification::make()
-            ->title('Abrí la caja primero')
-            ->body('El mostrador solo se usa con un turno abierto en la sucursal.')
-            ->warning()
-            ->send();
+        $this->inicializarMostrador();
+    }
 
-        $this->redirect(CajaDelNegocio::getUrl());
+    /**
+     * @return array<string, mixed>
+     */
+    protected function getViewData(): array
+    {
+        return $this->datosVistaMostrador();
     }
 }

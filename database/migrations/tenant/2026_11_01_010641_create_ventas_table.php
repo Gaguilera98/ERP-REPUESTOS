@@ -23,7 +23,10 @@ return new class extends Migration
             $table->enum('tipo_comprobante', ['nota_venta', 'factura_manual']);
             $table->string('numero_comprobante')->nullable();
             $table->decimal('subtotal', 10, 2);
+            $table->enum('tipo_descuento', ['porcentaje', 'importe'])->nullable();
+            $table->decimal('valor_descuento', 10, 2)->default(0);
             $table->decimal('descuento', 10, 2)->default(0);
+            $table->foreignId('supervisor_descuento_id')->nullable();
             $table->decimal('total', 10, 2);
             $table->text('notes_internas')->nullable();
             $table->timestamps();
@@ -44,6 +47,9 @@ return new class extends Migration
                 ->references(['tenant_id', 'id'])
                 ->on('clientes');
             $table->foreign(['tenant_id', 'user_id'])
+                ->references(['tenant_id', 'id'])
+                ->on('users');
+            $table->foreign(['tenant_id', 'supervisor_descuento_id'])
                 ->references(['tenant_id', 'id'])
                 ->on('users');
         });
@@ -69,6 +75,17 @@ return new class extends Migration
                 check (
                     estado not in ('reserva', 'vencida')
                     or vence_en is not null
+                )
+            SQL);
+            Schema::getConnection()->statement(<<<'SQL'
+                alter table ventas
+                add constraint ventas_descuento_check
+                check (
+                    descuento <= subtotal
+                    and (
+                        tipo_descuento is distinct from 'porcentaje'
+                        or valor_descuento <= 100
+                    )
                 )
             SQL);
         }

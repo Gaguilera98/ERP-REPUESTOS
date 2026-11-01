@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\CondicionVenta;
 use App\Enums\EstadoVenta;
 use App\Enums\TipoComprobante;
+use App\Enums\TipoDescuento;
 use App\Models\Concerns\BelongsToTenantPool;
 use Database\Factories\VentaFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -27,7 +28,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'tipo_comprobante',
     'numero_comprobante',
     'subtotal',
+    'tipo_descuento',
+    'valor_descuento',
     'descuento',
+    'supervisor_descuento_id',
     'total',
     'notes_internas',
 ])]
@@ -41,6 +45,7 @@ class Venta extends Model
     protected $attributes = [
         'condicion' => 'contado',
         'estado' => 'pendiente',
+        'valor_descuento' => 0,
         'descuento' => 0,
     ];
 
@@ -55,6 +60,8 @@ class Venta extends Model
             'vence_en' => 'datetime',
             'tipo_comprobante' => TipoComprobante::class,
             'subtotal' => 'decimal:2',
+            'tipo_descuento' => TipoDescuento::class,
+            'valor_descuento' => 'decimal:2',
             'descuento' => 'decimal:2',
             'total' => 'decimal:2',
         ];
@@ -78,6 +85,11 @@ class Venta extends Model
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(TenantUser::class, 'user_id');
+    }
+
+    public function supervisorDescuento(): BelongsTo
+    {
+        return $this->belongsTo(TenantUser::class, 'supervisor_descuento_id');
     }
 
     public function detalles(): HasMany
