@@ -81,6 +81,18 @@ class SeedNegocioRoles
             'View:Trabajador',
             'ViewAny:OrdenCompra',
             'View:OrdenCompra',
+            'ViewAny:Cliente',
+            'View:Cliente',
+            'Create:Cliente',
+            'Update:Cliente',
+            'ViewAny:Impuesto',
+            'View:Impuesto',
+            'ViewAny:TipoDocumentoIdentidad',
+            'View:TipoDocumentoIdentidad',
+            'ViewAny:CajaSesion',
+            'View:CajaSesion',
+            'Create:CajaSesion',
+            'Update:CajaSesion',
         ]);
 
         NegocioConfiguracion::query()->firstOrCreate([], [
@@ -98,6 +110,7 @@ class SeedNegocioRoles
         );
 
         app(AsegurarUnidadesDeCantidad::class)->handle();
+        app(AsegurarTiposDocumentoIdentidad::class)->handle();
     }
 
     /**
@@ -111,7 +124,7 @@ class SeedNegocioRoles
             'Restore', 'ForceDelete', 'ForceDeleteAny', 'RestoreAny', 'Replicate', 'Reorder',
         ];
 
-        foreach (['Sucursal', 'Almacen', 'TenantUser', 'UnidadMedida', 'Categoria', 'Marca', 'ProductoMaestro', 'ProductoVariante', 'InventarioStock', 'Proveedor', 'Trabajador', 'OrdenCompra'] as $subject) {
+        foreach (['Sucursal', 'Almacen', 'TenantUser', 'UnidadMedida', 'Categoria', 'Marca', 'ProductoMaestro', 'ProductoVariante', 'InventarioStock', 'Proveedor', 'Trabajador', 'OrdenCompra', 'Cliente', 'Impuesto', 'TipoDocumentoIdentidad', 'CajaSesion'] as $subject) {
             foreach ($methods as $method) {
                 $names[] = $method.':'.$subject;
             }

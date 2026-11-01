@@ -53,7 +53,7 @@ Este documento unificado contiene la arquitectura completa, las reglas de negoci
 ### 3. Ventas, Comprobantes y Control de Talonario Fiscal
 * **Emisión Dual de Comprobantes (`nota_venta` vs `factura_manual`):** 
   * *Por qué:* En la práctica comercial, se requiere agilidad extrema en mostrador y cumplimiento fiscal ante Impuestos Nacionales (SIN) sin depender de integraciones electrónicas complejas desde el inicio.
-  * *Para qué:* El sistema emite un ticket comercial rápido (`nota_venta`) con todo el detalle de los repuestos para entregar al cliente o grapar al papel. Si requiere factura formal, se registra como `factura_manual`, exigiendo el `cliente_id` (con NIT/CI y Razón Social) y el `numero_comprobante` físico del talonario, facilitando al contador un reporte limpio y libre de errores de tipeo.
+  * *Para qué:* El sistema emite un ticket comercial rápido (`nota_venta`) con todo el detalle de los repuestos para entregar al cliente o grapar al papel. Si requiere factura formal, se registra como `factura_manual`, exigiendo el `cliente_id` (con razón social / nombres y un documento de identidad del catálogo, tipicamente NIT o CI) y el `numero_comprobante` físico del talonario, facilitando al contador un reporte limpio y libre de errores de tipeo.
 * **Snapshot Fiscal Histórico:** 
   * *Por qué:* Las leyes tributarias o porcentajes impositivos pueden cambiar en el futuro.
   * *Para qué:* Congelar los valores de impuestos (`venta_impuestos`) como texto y número fijo durante la transacción para proteger las auditorías contables pasadas. El porcentaje vigente vive en `impuestos`. La venta copia nombre y porcentaje. Si la ley cambia, se edita el impuesto. Las ventas viejas no.
@@ -129,7 +129,7 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 * *Por qué:* `6204-2RS`, un NIT y el número de un talonario se repiten en la vida real entre negocios, sucursales y tipos de comprobante.
 * *Para qué:* Los únicos quedan así:
   * Variante: `(tenant_id, sku)`.
-  * Cliente: `(tenant_id, nit_ci)`. El NIT vacío puede repetirse; Postgres lo permite en un único.
+  * Documento de cliente: `(tenant_id, tipo_documento_identidad_id, identidad)`. La identidad sale de los atributos marcados «identifica» (ej. número + complemento del CI). Un mismo tipo no se repite en el mismo cliente.
   * Proveedor: `(tenant_id, nit)`.
   * Comprobante de venta: `(tenant_id, sucursal_id, tipo_comprobante, numero_comprobante)`.
   * Stock: `(tenant_id, producto_variante_id, almacen_id)`. Una variante tiene una sola fila de stock por almacén.
@@ -226,12 +226,21 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 
 ### 25. Menor, mayor y dos tipos de descuento
 * *Por qué:* Un solo `precio_venta` y un descuento solo en dinero no distinguen al taller del mostrador, ni un 10 % de un descuento de un monto fijo.
-* *Para qué:* El precio usado queda copiado en `precio_unitario` de la línea. El descuento guarda `tipo_descuento` y `valor_descuento`, y `descuento_aplicado` es la plata que se restó. Si el valor pasa el tope del negocio, `supervisor_descuento_id` es obligatorio.
+* *Para qué:* El precio usado queda copiado en `precio_unitario` de la línea. El descuento guarda `tipo_descuento` y `valor_descuento`, y `descuento_aplicado` es la plata que se restó. Si el valor pasa el tope del negocio, `supervisor_descuento_id` es obligatorio. En v1 el cliente lleva `tipo_precio` `menor` o `mayor`: es la tarifa de partida. El producto guarda `precio_venta` (menor) y `precio_mayor`. Si el cliente es mayorista y la pieza no tiene mayor, paga el menor.
+* *Nota a futuro (listas de precios estilo Odoo):* Hoy bastan dos tarifas fijas. Si el negocio necesita más (VIP, temporada, mínimo de cantidad, % por categoría, moneda por lista), no alcanza con el enum. Habrá que modelar **listas de precios** configurables por tenant (nombre + reglas) y que el cliente apunte a una lista, como el campo *Pricelist* de Odoo: al armar la venta se trae esa lista y se puede cambiar en el pedido puntual. Migración típica: `tipo_precio` deja de ser la fuente de verdad y pasa a ser un atajo o se reemplaza por `lista_precio_id`. Hasta entonces no inventar N columnas de precio en el producto ni en el cliente.
 
 ### 26. La moneda es de la tienda. El dólar solo convierte y no se cobra
 * *Por qué:* Sin un lugar donde poner el tipo de cambio, la tienda que importa no puede convertir. Si ese número se pisa, las compras viejas cambian de costo. Si cada cliente trajera su moneda, la caja dejaría de cuadrar.
 * *Para qué:* `negocio_configuracion.moneda` es `BOB`, `PEN` o `BRL`. `tipos_cambio.valor` dice cuántas unidades de esa moneda vale un dólar. Solo uno está vigente por negocio. La compra en dólares copia `tipo_cambio_valor` en la línea. `costo_unitario` queda en la moneda de la tienda y alimenta el PPP. Al confirmar el cambio nuevo, la pantalla no recorre los productos: encola un trabajo que actualiza `precio_venta` y `precio_mayor` por lotes, solo en los que tienen precio en dólares. Si un lote se reintenta con el mismo dólar, el precio queda igual. El costo promedio no se toca. La caja y el cliente siguen en la moneda de la tienda. No se cobra en dólares.
 * *Nota pendiente:* Evaluar migrar `negocio_configuracion.moneda` de `enum('BOB', 'PEN', 'BRL')` a `varchar(3)` (código ISO 4217: BOB, PEN, BRL, COP, ARS, etc.) para que el SaaS no quede restringido a tres países y admita clientes de cualquier región, delegando la lista/validación de monedas permitidas a la capa de aplicación/formulario Filament.
+
+### Cosas a tener en cuenta a futuro
+Ítems conscientes que **no** se implementan en v1, para no rediseñar a ciegas después:
+
+1. **Listas de precios (estilo Odoo / SAP).** Hoy: `clientes.tipo_precio` = `menor` | `mayor` y en el producto `precio_venta` / `precio_mayor`. Sirve al mostrador y al taller. Más adelante: catálogo de listas por tenant + reglas (producto, categoría, cantidad mínima, descuento %, vigencia) y el cliente apunta a una lista; la venta puede sobreescribir la lista en ese pedido. Ver nota en el punto 25.
+2. **Moneda ISO abierta.** Hoy el enum de moneda del negocio es BOB/PEN/BRL. Pendiente pasar a código ISO de 3 letras. Ver nota en el punto 26.
+3. **Documento de factura en la venta.** El cliente ya puede guardar varios documentos (CI, NIT, etc.) con atributos dinámicos. Al facturar habrá que elegir **un** tipo + número (y complemento si aplica) para ese comprobante, sin mezclar varios en la misma factura.
+4. **Listado y arqueo de cajas.** Hoy el cajero abre/cierra su sesión y ve un historial corto propio. Falta (cuando haya ventas): ver sesiones abiertas de la sucursal, detalle de cobros/reembolsos del turno y vista supervisor de todas las cajas. La regla de negocio no cambia: una abierta por cajero+sucursal; se puede cerrar y abrir otra el mismo día.
 
 ---
 
@@ -442,13 +451,47 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
 * **Clientes** (Sin moneda propia. Paga en la moneda de la tienda)
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
-  * `razon_social` (varchar) -- Nombre o Razón Social
-  * `tipo_precio` (enum: 'menor', 'mayor') -- Default: 'menor'
-  * `nit_ci` (varchar, Nullable) -- Único `(tenant_id, nit_ci)`. Obligatorio para facturación manual. El vacío puede repetirse
+  * `tipo_cliente` (enum: 'persona_natural', 'empresa') -- Default: 'persona_natural'
+  * `nombres` (varchar, Nullable) -- Obligatorio si persona natural
+  * `apellidos` (varchar, Nullable) -- Obligatorio si persona natural
+  * `razon_social` (varchar, Nullable) -- Obligatorio si empresa. En persona se arma con nombres + apellidos para listar y buscar
+  * `tipo_precio` (enum: 'menor', 'mayor') -- Default: 'menor'. A futuro puede pasar a lista de precios (ver «Cosas a tener en cuenta a futuro»)
   * `telefono` (varchar, Nullable)
   * `email` (varchar, Nullable)
   * `direccion` (text, Nullable)
   * `timestamps` (timestamp)
+* **Tipos_Documento_Identidad** (Catálogo configurable por negocio. Al nacer el tenant: CI y NIT)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`; único `(tenant_id, codigo)`
+  * `codigo` (varchar) -- Ej: `ci`, `nit`, `pasaporte`, `licencia`
+  * `nombre` (varchar)
+  * `para_persona_natural` (boolean)
+  * `para_empresa` (boolean)
+  * `is_active` (boolean, Default: true)
+  * `orden` (smallint, Default: 0)
+  * `timestamps` (timestamp)
+* **Tipo_Documento_Atributos** (Campos dinámicos del tipo: como `categoria_atributos`)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `tipo_documento_identidad_id` (int, FK compuesta)
+  * `clave` (varchar) -- Único por tipo dentro del tenant
+  * `etiqueta` (varchar)
+  * `tipo` (enum: 'decimal', 'texto', 'lista')
+  * `obligatorio` (boolean, Default: false)
+  * `identifica` (boolean, Default: false) -- Entra en `cliente_documentos.identidad`
+  * `orden` (int, Default: 0)
+  * `opciones` (json/jsonb, Nullable) -- Solo si `tipo = lista`
+  * `timestamps` (timestamp)
+* **Cliente_Documentos**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `cliente_id` (int, FK compuesta -> Clientes, Cascade)
+  * `tipo_documento_identidad_id` (int, FK compuesta -> Tipos_Documento_Identidad, Restrict)
+  * `valores_json` (json/jsonb) -- Clave → valor según los atributos del tipo
+  * `identidad` (varchar) -- Derivada de atributos con `identifica`; único `(tenant_id, tipo_documento_identidad_id, identidad)`
+  * Único `(tenant_id, cliente_id, tipo_documento_identidad_id)` -- Un CI y un NIT por cliente, no dos CI
+  * `timestamps` (timestamp)
+  * Semilla CI: `numero` (texto, identifica), `complemento` (texto, identifica), `lugar_emision` (lista LP/SCZ/…). Semilla NIT: `numero` (texto, identifica). Persona y empresa pueden usar NIT.
 
 ### 4. Módulo de Proveedores, Contactos y Compras Flash
 * **Trabajadores**
