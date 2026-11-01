@@ -40,4 +40,9 @@ class NegocioConfiguracion extends Model
             'siguiente_numero_venta' => 'integer',
         ];
     }
+
+    public static function codigoMoneda(): string
+    {
+        return static::query()->first()?->moneda->value ?? Moneda::Bob->value;
+    }
 }

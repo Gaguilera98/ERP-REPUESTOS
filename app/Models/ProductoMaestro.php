@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Inventario\AsegurarUnidadesDeCantidad;
 use App\Models\Concerns\BelongsToTenantPool;
 use Database\Factories\ProductoMaestroFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -10,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['tenant_id', 'nombre', 'categoria_id', 'marca_id', 'imagenes', 'is_active'])]
+#[Fillable(['tenant_id', 'nombre', 'categoria_id', 'marca_id', 'unidad_base_id', 'imagenes', 'is_active'])]
 class ProductoMaestro extends Model
 {
     /** @use HasFactory<ProductoMaestroFactory> */
@@ -33,6 +34,18 @@ class ProductoMaestro extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::saving(function (ProductoMaestro $producto): void {
+            if ($producto->unidad_base_id) {
+                return;
+            }
+
+            app(AsegurarUnidadesDeCantidad::class)->handle();
+            $producto->unidad_base_id = UnidadMedida::query()->where('simbolo', 'pza')->value('id');
+        });
+    }
+
     public function categoria(): BelongsTo
     {
         return $this->belongsTo(Categoria::class);
@@ -46,5 +59,15 @@ class ProductoMaestro extends Model
     public function variantes(): HasMany
     {
         return $this->hasMany(ProductoVariante::class);
+    }
+
+    public function unidadBase(): BelongsTo
+    {
+        return $this->belongsTo(UnidadMedida::class, 'unidad_base_id');
+    }
+
+    public function empaques(): HasMany
+    {
+        return $this->hasMany(ProductoUnidad::class);
     }
 }

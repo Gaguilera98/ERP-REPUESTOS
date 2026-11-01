@@ -5,8 +5,10 @@ namespace App\Tenancy;
 use App\Enums\ModoMoneda;
 use App\Enums\Moneda;
 use App\Exceptions\Tenancy\TenantPoolNotConfiguredException;
+use App\Inventario\AsegurarUnidadesDeCantidad;
 use App\Models\NegocioConfiguracion;
 use App\Models\NegocioRole;
+use App\Models\Proveedor;
 use App\Models\Tenant;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
@@ -73,6 +75,12 @@ class SeedNegocioRoles
             'View:Marca',
             'ViewAny:ProductoMaestro',
             'View:ProductoMaestro',
+            'ViewAny:Proveedor',
+            'View:Proveedor',
+            'ViewAny:Trabajador',
+            'View:Trabajador',
+            'ViewAny:OrdenCompra',
+            'View:OrdenCompra',
         ]);
 
         NegocioConfiguracion::query()->firstOrCreate([], [
@@ -83,6 +91,13 @@ class SeedNegocioRoles
             'modo_moneda' => ModoMoneda::SoloMoneda,
             'siguiente_numero_venta' => 1,
         ]);
+
+        Proveedor::query()->firstOrCreate(
+            ['es_ocasional' => true],
+            ['nombre_empresa' => Proveedor::OCASIONAL],
+        );
+
+        app(AsegurarUnidadesDeCantidad::class)->handle();
     }
 
     /**
@@ -96,7 +111,7 @@ class SeedNegocioRoles
             'Restore', 'ForceDelete', 'ForceDeleteAny', 'RestoreAny', 'Replicate', 'Reorder',
         ];
 
-        foreach (['Sucursal', 'Almacen', 'TenantUser', 'UnidadMedida', 'Categoria', 'Marca', 'ProductoMaestro', 'ProductoVariante', 'InventarioStock'] as $subject) {
+        foreach (['Sucursal', 'Almacen', 'TenantUser', 'UnidadMedida', 'Categoria', 'Marca', 'ProductoMaestro', 'ProductoVariante', 'InventarioStock', 'Proveedor', 'Trabajador', 'OrdenCompra'] as $subject) {
             foreach ($methods as $method) {
                 $names[] = $method.':'.$subject;
             }

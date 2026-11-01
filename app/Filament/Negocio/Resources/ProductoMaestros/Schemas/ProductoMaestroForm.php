@@ -4,6 +4,7 @@ namespace App\Filament\Negocio\Resources\ProductoMaestros\Schemas;
 
 use App\Catalogo\VariantesProducto;
 use App\Enums\TipoAtributoCategoria;
+use App\Enums\UsoUnidad;
 use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
 use App\Models\Almacen;
 use App\Models\Categoria;
@@ -11,6 +12,7 @@ use App\Models\CategoriaAtributo;
 use App\Models\Marca;
 use App\Models\NegocioConfiguracion;
 use App\Models\ProductoVariante;
+use App\Models\UnidadMedida;
 use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\CheckboxList;
@@ -75,6 +77,36 @@ class ProductoMaestroForm
                                     ->createOptionAction(fn (Action $action): Action => $action
                                         ->visible(fn (): bool => (bool) auth('tenant')->user()?->can('create', Marca::class))
                                         ->modalHeading('Nueva marca')),
+                                Select::make('unidad_base_id')
+                                    ->label('Unidad de stock')
+                                    ->helperText('El estante, el costo y el precio se cuentan en esta unidad.')
+                                    ->options(fn (): array => self::unidadesDeCantidad())
+                                    ->default(fn (): mixed => UnidadMedida::query()->where('simbolo', 'pza')->value('id'))
+                                    ->required()
+                                    ->searchable()
+                                    ->preload()
+                                    ->native(false),
+                                Repeater::make('empaques')
+                                    ->label('Empaques')
+                                    ->helperText('Una caja u otro bulto de este producto. 1 caja = tantas unidades de stock.')
+                                    ->relationship()
+                                    ->defaultItems(0)
+                                    ->addActionLabel('Agregar empaque')
+                                    ->schema([
+                                        Select::make('unidad_medida_id')
+                                            ->label('Unidad')
+                                            ->options(fn (): array => self::unidadesDeCantidad())
+                                            ->required()
+                                            ->searchable()
+                                            ->preload()
+                                            ->native(false),
+                                        TextInput::make('factor_a_base')
+                                            ->label('Cuántas de stock entran')
+                                            ->numeric()
+                                            ->minValue(0.000001)
+                                            ->required(),
+                                    ])
+                                    ->columns(2),
                                 Toggle::make('is_active')
                                     ->label('Activo')
                                     ->default(true)
@@ -276,6 +308,21 @@ class ProductoMaestroForm
     }
 
     /**
+     * @return array<int, string>
+     */
+    private static function unidadesDeCantidad(): array
+    {
+        return UnidadMedida::query()
+            ->where('uso', UsoUnidad::Cantidad)
+            ->orderBy('nombre')
+            ->get()
+            ->mapWithKeys(fn (UnidadMedida $unidad): array => [
+                $unidad->id => $unidad->nombre.' ('.$unidad->simbolo.')',
+            ])
+            ->all();
+    }
+
+    /**
      * @param  class-string<Categoria|Marca>  $modelo
      * @return array<int|string, string>
      */
@@ -329,7 +376,7 @@ class ProductoMaestroForm
             ->label($etiqueta)
             ->numeric()
             ->minValue(0)
-            ->prefix(self::moneda());
+            ->prefix(NegocioConfiguracion::codigoMoneda());
 
         if ($obligatorio) {
             $campo->required();
@@ -568,10 +615,5 @@ class ProductoMaestroForm
     private static function conVariantes(Get $get): bool
     {
         return filter_var($get('con_variantes'), FILTER_VALIDATE_BOOLEAN);
-    }
-
-    private static function moneda(): string
-    {
-        return NegocioConfiguracion::query()->first()?->moneda->value ?? 'BOB';
     }
 }

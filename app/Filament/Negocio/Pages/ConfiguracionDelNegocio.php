@@ -11,6 +11,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
@@ -83,12 +84,14 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
                     ->required(),
                 TextInput::make('descuento_max_importe')
                     ->label('Descuento máximo en importe')
+                    ->prefix(fn (Get $get): string => (string) ($get('moneda') ?: NegocioConfiguracion::codigoMoneda()))
                     ->helperText('En 0, un importe fijo lo autoriza el supervisor.')
                     ->numeric()
                     ->minValue(0)
                     ->required(),
                 Select::make('moneda')
                     ->label('Moneda de la tienda')
+                    ->live()
                     ->options(collect(Moneda::cases())->mapWithKeys(
                         fn (Moneda $moneda): array => [$moneda->value => $moneda->etiqueta()],
                     )->all())

@@ -3,6 +3,7 @@
 namespace App\Filament\Negocio\Resources\Categorias\Schemas;
 
 use App\Enums\TipoAtributoCategoria;
+use App\Enums\UsoUnidad;
 use App\Models\UnidadMedida;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -124,6 +125,7 @@ class CategoriaForm
     public static function opcionesDeUnidad(): array
     {
         return UnidadMedida::query()
+            ->where('uso', UsoUnidad::Atributo)
             ->orderBy('nombre')
             ->get()
             ->groupBy(fn (UnidadMedida $unidad): string => $unidad->magnitud->etiqueta())

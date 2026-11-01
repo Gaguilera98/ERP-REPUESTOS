@@ -70,6 +70,7 @@ trait GuardaVariantesDelProducto
             $data['opciones'],
             $data['variantes'],
             $data['ubicaciones'],
+            $data['empaques'],
         );
 
         return $data;

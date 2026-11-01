@@ -36,8 +36,8 @@ class InventarioStock extends Model
     protected function casts(): array
     {
         return [
-            'cantidad_actual' => 'integer',
-            'cantidad_reservada' => 'integer',
+            'cantidad_actual' => 'decimal:4',
+            'cantidad_reservada' => 'decimal:4',
         ];
     }
 

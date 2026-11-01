@@ -114,8 +114,8 @@ it('inicia cada variante en stock cero en cada almacén', function () {
 
     expect($stock)->toHaveCount(1)
         ->and($stock->first()->almacen_id)->toBe($deposito->id)
-        ->and($stock->first()->cantidad_actual)->toBe(0)
-        ->and($stock->first()->cantidad_reservada)->toBe(0);
+        ->and($stock->first()->cantidad_actual)->toBe('0.0000')
+        ->and($stock->first()->cantidad_reservada)->toBe('0.0000');
 
     $fila = $stock->first();
     $fila->update([
@@ -123,8 +123,8 @@ it('inicia cada variante en stock cero en cada almacén', function () {
         'cantidad_reservada' => 3,
     ]);
 
-    expect($fila->fresh()->cantidad_actual)->toBe(0)
-        ->and($fila->fresh()->cantidad_reservada)->toBe(0);
+    expect($fila->fresh()->cantidad_actual)->toBe('0.0000')
+        ->and($fila->fresh()->cantidad_reservada)->toBe('0.0000');
 
     expect(fn () => DB::connection('pool_shared_1')->table('inventario_stocks')->where('id', $fila->id)->update([
         'cantidad_actual' => -1,
@@ -147,7 +147,7 @@ it('agrega stock en cero cuando se crea un almacén después de la variante', fu
         ->first();
 
     expect($stock)->not->toBeNull()
-        ->and($stock->cantidad_actual)->toBe(0);
+        ->and($stock->cantidad_actual)->toBe('0.0000');
 
     tenancy()->end();
 });
@@ -233,7 +233,7 @@ it('guarda los atributos de la categoría como número o texto, sin claves de m�
             'sello' => ['2RS'],
         ])
         ->and($variante->stocks)->toHaveCount(1)
-        ->and($variante->stocks->first()->cantidad_actual)->toBe(0);
+        ->and($variante->stocks->first()->cantidad_actual)->toBe('0.0000');
 
     tenancy()->end();
 });
@@ -421,7 +421,7 @@ it('el supervisor crea productos y el cajero no puede editar el catálogo', func
         ->and($variante->precio_venta)->toBe('25.50')
         ->and($variante->precio_costo)->toBe('0.0000')
         ->and($variante->stocks)->toHaveCount(1)
-        ->and($variante->stocks->first()->cantidad_actual)->toBe(0);
+        ->and($variante->stocks->first()->cantidad_actual)->toBe('0.0000');
 
     tenancy()->end();
 
@@ -851,7 +851,7 @@ it('siembra unidades y la categoría de rodamientos una sola vez por negocio', f
     $rodamientos = Categoria::query()->where('nombre', 'Rodamientos')->first();
     $interno = $rodamientos?->atributos()->where('clave', 'diametro_interno')->first();
 
-    expect(UnidadMedida::query()->count())->toBe(7)
+    expect(UnidadMedida::query()->count())->toBe(12)
         ->and(Categoria::query()->count())->toBe(1)
         ->and($rodamientos)->not->toBeNull()
         ->and($rodamientos->atributos)->toHaveCount(4)
@@ -863,7 +863,7 @@ it('siembra unidades y la categoría de rodamientos una sola vez por negocio', f
 
     tenancy()->initialize($sur);
 
-    expect(UnidadMedida::query()->count())->toBe(0)
+    expect(UnidadMedida::query()->count())->toBe(7)
         ->and(Categoria::query()->count())->toBe(0);
 
     tenancy()->end();

@@ -68,7 +68,7 @@ class ProductoMaestrosTable
 
                         $min = (float) $precios->min();
                         $max = (float) $precios->max();
-                        $moneda = self::moneda();
+                        $moneda = NegocioConfiguracion::codigoMoneda();
 
                         if ($min === $max) {
                             return "{$moneda} ".number_format($min, 2);
@@ -111,10 +111,5 @@ class ProductoMaestrosTable
             ->emptyStateHeading('No hay productos en el catálogo')
             ->emptyStateDescription('Registra el producto con su código y precio. Las variantes se agregan solo si el rubro las distingue.')
             ->emptyStateIcon(Heroicon::OutlinedCube));
-    }
-
-    private static function moneda(): string
-    {
-        return NegocioConfiguracion::query()->first()?->moneda->value ?? 'BOB';
     }
 }

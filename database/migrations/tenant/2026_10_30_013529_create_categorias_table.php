@@ -13,7 +13,11 @@ return new class extends Migration
             $table->string('tenant_id');
             $table->string('nombre');
             $table->string('simbolo');
-            $table->enum('magnitud', ['longitud', 'electrico', 'presion']);
+            $table->enum('magnitud', ['longitud', 'electrico', 'presion', 'conteo', 'masa', 'volumen']);
+            $table->string('uso')->default('atributo');
+            $table->decimal('factor_a_referencia', 18, 6)->default(1);
+            $table->unsignedTinyInteger('decimales')->default(0);
+            $table->boolean('es_referencia')->default(false);
             $table->timestamps();
 
             $table->unique(['tenant_id', 'id']);

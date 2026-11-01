@@ -14,8 +14,8 @@ return new class extends Migration
             $table->foreignId('producto_variante_id');
             $table->foreignId('almacen_id');
             $table->string('ubicacion')->nullable();
-            $table->integer('cantidad_actual')->default(0);
-            $table->integer('cantidad_reservada')->default(0);
+            $table->decimal('cantidad_actual', 14, 4)->default(0);
+            $table->decimal('cantidad_reservada', 14, 4)->default(0);
             $table->timestamps();
 
             $table->unique(['tenant_id', 'id']);

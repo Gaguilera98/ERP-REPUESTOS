@@ -36,6 +36,12 @@ Este documento unificado contiene la arquitectura completa, las reglas de negoci
 * **Kardex Obligatorio e Inalterable:** 
   * *Por qué:* Ninguna pieza puede entrar o salir de la bodega sin dejar rastro contable y físico.
   * *Para qué:* Prohibir la alteración directa del stock sin generar un movimiento correlativo en el Kardex que registre el stock previo, el posterior y el responsable. La venta bloquea la fila de stock antes de descontar, para que dos cajeros no vendan la última unidad al mismo tiempo.
+* **La cantidad vive en la unidad base del producto:**
+  * *Por qué:* Un 10 en la compra no dice si son 10 carburadores, 10 kilos o 10 cajas. El estante, el kardex y el costo promedio tienen que hablar la misma unidad, si no el promedio mezcla cajas con piezas.
+  * *Para qué:* Cada producto tiene `unidad_base_id`. El stock, el kardex y `precio_costo` están siempre en esa unidad. La unidad base es la más chica con la que se cuenta, se compra o se vende. Un tornillo es la pieza. Un aceite puede ser el mililitro. No se cambia la unidad base si ya hay movimientos.
+  * *Para qué, en la compra:* La línea guarda la unidad tipeada, la cantidad tipeada, el factor congelado y `cantidad_base`. El stock recibe solo `cantidad_base`. Cambiar el factor mañana no reescribe la compra vieja. `costo_anotado` es el precio de la unidad tipeada. `costo_unitario` es ese precio dividido por el factor: el costo de una unidad base, y es el que entra al PPP. El subtotal es cantidad tipeada por `costo_anotado`.
+  * *Para qué, en la venta (todavía sin tablas):* La línea va a guardar la unidad, la cantidad tipeada, el factor congelado y `cantidad_base`. El stock sale y la seña reserva `cantidad_base`. `precio_venta`, `precio_mayor` y `precio_costo` son por unidad base. La plata de la línea es `cantidad_base` por ese precio, menos el descuento. La alerta de pérdida compara el precio por unidad base contra `precio_costo`.
+  * *Para qué, en la conversión:* Solo dentro de la misma familia. El kilo vale 1000 gramos. No se pasa de kilos a litros. Una caja de 100 tornillos es un factor de ese producto (`producto_unidades`), no una unidad global. Una caja sellada con su propio código de barras es otro producto. Las unidades de un dato del rubro (mm, V, presión) siguen aparte y no se mezclan con las de cantidad.
 * **Ajuste de unidades y conteo físico:**
   * *Por qué:* Cambiar el número del estante sin motivo y sin supervisor hace desaparecer piezas y valor, y no queda por qué.
   * *Para qué:* Un ajuste corrige cuántas hay. El precio de la pieza no cambia. Lleva motivo (`merma`, `rotura`, `hallazgo`, `uso_interno` o `diferencia_conteo`) y un texto. Lo autoriza un supervisor. El kardex inserta una línea `ajuste` con el stock previo, el posterior, quién lo cargó y quién autorizó. Si el ajuste estaba mal, se carga otro en sentido contrario. El primero no se edita.
@@ -291,12 +297,16 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `nombre` (varchar) -- Único `(tenant_id, nombre)`
   * `timestamps` (timestamp)
   * La ficha del rubro son las filas de `categoria_atributos`. No hay columna `plantilla_atributos`.
-* **Unidades_Medida** (Catálogo del negocio. Una fila: Milímetro, mm, longitud)
+* **Unidades_Medida** (Catálogo del negocio. Una fila: Milímetro, mm, longitud, atributo. Otra: Kilogramo, kg, masa, cantidad)
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
-  * `nombre` (varchar) -- Único `(tenant_id, nombre)`. Ej: Milímetro, Pulgada, Voltio
-  * `simbolo` (varchar) -- Único `(tenant_id, simbolo)`. Ej: mm, in, V
-  * `magnitud` (enum: 'longitud', 'electrico', 'presion') -- La pantalla agrupa por esto al elegir la unidad de un atributo
+  * `nombre` (varchar) -- Único `(tenant_id, nombre)`. Ej: Milímetro, Pulgada, Voltio, Kilogramo
+  * `simbolo` (varchar) -- Único `(tenant_id, simbolo)`. Ej: mm, in, V, kg
+  * `magnitud` (enum: 'longitud', 'electrico', 'presion', 'conteo', 'masa', 'volumen') -- La pantalla agrupa por esto. Solo se convierte dentro de la misma magnitud
+  * `uso` (enum: 'atributo', 'cantidad') -- `atributo` mide un dato del rubro (diámetro en mm). `cantidad` compra, stock y venta. No se mezclan
+  * `factor_a_referencia` (decimal 18,6, Default: 1) -- Cuántas unidades de la referencia de esa familia vale una de esta. El gramo es 1. El kilo es 1000. La pieza es 1
+  * `decimales` (int, Default: 0) -- Cuántos decimales acepta al tipear. La pieza es 0. El kilo es 3
+  * `es_referencia` (boolean, Default: false) -- La unidad contra la que se miden las demás de su familia
   * `timestamps` (timestamp)
 * **Categoria_Atributos** (Una fila por campo de la ficha. Se crea antes de borrar `categorias` y `unidades_medida`)
   * `id` (int, Primary Key, Increment)
@@ -324,8 +334,17 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `nombre` (varchar) -- Ej: Rodamiento rígido de bolas
   * `categoria_id` (int, Foreign Key compuesta con `tenant_id` -> Categorias)
   * `marca_id` (int, Foreign Key compuesta con `tenant_id` -> Marcas, Nullable) -- La marca es del producto. Si no se conoce, queda vacío
+  * `unidad_base_id` (int, Foreign Key compuesta con `tenant_id` -> Unidades_Medida) -- Unidad del stock, del kardex, del PPP y del precio. Si no se elige, queda la pieza. No se cambia si ya hay movimientos
   * `imagenes` (jsonb/json, Nullable) -- Galería multimedia del producto almacenada en S3
   * `timestamps` (timestamp)
+* **Producto_Unidades** (Empaque de un producto. Una caja de 100 tornillos)
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `producto_maestro_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Maestros, On Delete: Cascade)
+  * `unidad_medida_id` (int, Foreign Key compuesta con `tenant_id` -> Unidades_Medida)
+  * `factor_a_base` (decimal 18,6) -- Cuántas unidades base entran en una de esta. 1 caja = 100 piezas
+  * `timestamps` (timestamp)
+  * Único `(tenant_id, producto_maestro_id, unidad_medida_id)`
 * **Productos_Variantes** (El único ítem vendible)
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
@@ -334,11 +353,11 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `codigo_barras` (varchar, Nullable) -- Único `(tenant_id, codigo_barras)`. El vacío puede repetirse
   * `imagen` (varchar, Nullable) -- Foto específica de la variante en S3 (opcional, si difiere de la galería general)
   * `atributos_json` (jsonb) -- Solo valores, con la clave de `categoria_atributos`. Un decimal es número JSON (`20`). Un texto o una opción de lista es texto (`"3/4-16 UNF"`, `"2RS"`). La unidad no se guarda acá. Cast `array` en Laravel. La variante no agrega claves fuera de su categoría
-  * `precio_venta` (decimal 10,2) -- Precio al por menor, en la moneda de la tienda
-  * `precio_mayor` (decimal 10,2, Nullable) -- En la moneda de la tienda. Si está vacío, el mayorista paga `precio_venta`
+  * `precio_venta` (decimal 10,2) -- Precio al por menor de una unidad base, en la moneda de la tienda
+  * `precio_mayor` (decimal 10,2, Nullable) -- Precio mayorista de una unidad base. Si está vacío, el mayorista paga `precio_venta`
   * `precio_venta_dolar` (decimal 10,2, Nullable) -- Si tiene valor, al confirmar un tipo de cambio nuevo se propone `precio_venta`
   * `precio_mayor_dolar` (decimal 10,2, Nullable) -- Igual, para el precio mayorista
-  * `precio_costo` (decimal 14,4) -- Costo Promedio Ponderado (PPP) actual, en la moneda de la tienda
+  * `precio_costo` (decimal 14,4) -- Costo Promedio Ponderado (PPP) actual de una unidad base, en la moneda de la tienda
   * `timestamps` (timestamp)
   * Índice GIN sobre `atributos_json` (solo PostgreSQL) -- Igualdad de uno o varios atributos dentro del negocio y de la categoría. Ej: `atributos_json @> '{"diametro_interno": 20, "diametro_externo": 47, "ancho": 14}'`. El rango numérico no usa este índice: se compara después de acotar por negocio y categoría. En SQLite queda json sin GIN
 
@@ -348,8 +367,8 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
   * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
   * `ubicacion` (varchar, Nullable) -- Ej: PASILLO-01-ESTANTE-04-ALTURA-02. Es del almacén, no de la variante
-  * `cantidad_actual` (int, Default: 0) -- Piezas físicas en el estante, señas incluidas
-  * `cantidad_reservada` (int, Default: 0) -- Suma de las líneas de ventas en `reserva` de esta variante y este almacén. No es un número suelto: si una seña vence o se anula, esa suma baja
+  * `cantidad_actual` (decimal 14,4, Default: 0) -- Stock físico en la unidad base, señas incluidas. 0.250 kg si la base es el kilo
+  * `cantidad_reservada` (decimal 14,4, Default: 0) -- Suma de `cantidad_base` de las líneas de ventas en `reserva` de esta variante y este almacén. Si una seña vence o se anula, esa suma baja
   * `timestamps` (timestamp)
   * Único `(tenant_id, producto_variante_id, almacen_id)`
   * CHECK `cantidad_actual >= 0`, `cantidad_reservada >= 0` y `cantidad_reservada <= cantidad_actual`
@@ -360,10 +379,10 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
   * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Responsable del movimiento
   * `tipo_movimiento` (enum: 'entrada_compra', 'salida_venta', 'devolucion', 'traslado_salida', 'traslado_entrada', 'ajuste', 'entrada_flash_emergencia', 'correccion_costo')
-  * `cantidad` (int) -- Positivo o negativo según corresponda. Cero solo en `correccion_costo`
-  * `stock_previo` (int)
-  * `stock_posterior` (int)
-  * `costo_unitario` (decimal 14,4) -- Costo unitario de la transacción
+  * `cantidad` (decimal 14,4) -- En la unidad base. Positivo o negativo según corresponda. Cero solo en `correccion_costo`
+  * `stock_previo` (decimal 14,4) -- En la unidad base
+  * `stock_posterior` (decimal 14,4) -- En la unidad base
+  * `costo_unitario` (decimal 14,4) -- Costo de una unidad base en la transacción
   * `costo_promedio_resultante` (decimal 14,4) -- PPP calculado tras el movimiento
   * `referencia_tipo` (varchar, Nullable) -- `venta`, `orden_compra`, `nota_credito`, `traslado`, `ajuste` o `correccion_costo`
   * `referencia_id` (int, Nullable) -- Id de esa tabla, del mismo `tenant_id`. La aplicación lo comprueba
@@ -469,7 +488,8 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `es_compra_flash` (boolean, Default: false) -- Identificador si nació de una urgencia en mostrador
   * `estado` (enum: 'pendiente', 'recibida_parcial', 'completada', 'anulada') -- Default: 'completada' para flash
   * `subtotal` (decimal 10,2)
-  * `impuestos` (decimal 10,2)
+  * `porcentaje_impuesto` (decimal 5,2, Nullable) -- Si tiene número, el impuesto se cargó como porcentaje de este subtotal y al editar se vuelve a calcular. Vacío significa importe fijo. Un 0 es cero por ciento, no un importe. No sale del catálogo de impuestos
+  * `impuestos` (decimal 10,2) -- Monto de la factura del proveedor. Es el porcentaje aplicado al subtotal, o el importe tipeado. Se suma al subtotal para el total. No entra al costo promedio. El costo de la línea se anota sin impuesto. Varios impuestos se desglosan cuando exista la tabla de impuestos; este campo guarda la suma
   * `total` (decimal 10,2)
   * `persona_entrega_nombre` (varchar, Nullable)
   * `persona_recibe_trabajador_id` (int, Foreign Key compuesta con `tenant_id` -> Trabajadores, Nullable)
@@ -481,13 +501,17 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `tenant_id` (string)
   * `orden_compra_id` (int, Foreign Key compuesta con `tenant_id` -> Ordenes_Compra, On Delete: Cascade)
   * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
-  * `cantidad_pedida` (int)
-  * `cantidad_recibida` (int, Default: 0)
+  * `unidad_medida_id` (int, Foreign Key compuesta con `tenant_id` -> Unidades_Medida) -- La unidad tipeada. Si no se elige, es la unidad base
+  * `factor_a_base` (decimal 18,6) -- Congelado al guardar. Cuántas unidades base hay en una unidad tipeada
+  * `cantidad_pedida` (decimal 14,4) -- Cantidad tipeada, en la unidad de la línea. 2 cajas, o 0.250 kg
+  * `cantidad_recibida` (decimal 14,4, Default: 0) -- Lo ya ingresado, en la misma unidad tipeada, para comparar contra lo pedido
+  * `cantidad_base` (decimal 14,4) -- `cantidad_pedida * factor_a_base`. Es lo que entra al stock
   * `moneda` (enum: 'local', 'USD') -- Default: 'local'. Local es la moneda de la tienda. USD solo si el negocio está en `con_dolar`. No se cobra en USD
-  * `costo_unitario_origen` (decimal 14,4) -- Lo anotado en esa moneda. Ejemplo: 3 dólares, o 20 en la moneda de la tienda
+  * `costo_anotado` (decimal 14,4) -- Precio de una unidad tipeada, en la moneda de la línea. 50 por caja
+  * `costo_unitario_origen` (decimal 14,4) -- Lo anotado en esa moneda. Hoy es el mismo `costo_anotado`. El dólar sigue para la fase 11
   * `tipo_cambio_id` (int, Foreign Key compuesta con `tenant_id` -> Tipos_Cambio, Nullable)
   * `tipo_cambio_valor` (decimal 10,4, Nullable) -- Copia del dólar de ese momento. No cambia si mañana el dólar sube
-  * `costo_unitario` (decimal 14,4) -- En la moneda de la tienda. Alimentador del PPP. Si la moneda es USD, es `costo_unitario_origen * tipo_cambio_valor`
+  * `costo_unitario` (decimal 14,4) -- Costo de una unidad base, en la moneda de la tienda. Alimenta el PPP. Hoy es `costo_anotado / factor_a_base`
   * `subtotal_linea` (decimal 10,2)
   * `timestamps` (timestamp)
 
@@ -548,16 +572,19 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `tenant_id` (string)
   * `venta_id` (int, Foreign Key compuesta con `tenant_id` -> Ventas, On Delete: Cascade)
   * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
-  * `cantidad` (int)
-  * `precio_unitario` (decimal 10,2) -- Precio menor o mayor usado en esta línea, antes del descuento
-  * `precio_costo_snapshot` (decimal 14,4) -- PPP congelado para utilidad inalterable
+  * `unidad_medida_id` (int, Foreign Key compuesta con `tenant_id` -> Unidades_Medida) -- La unidad tipeada. Todavía no hay tabla de ventas: esta es la forma cuando se construya
+  * `factor_a_base` (decimal 18,6) -- Congelado al vender
+  * `cantidad` (decimal 14,4) -- Lo tipeado en esa unidad
+  * `cantidad_base` (decimal 14,4) -- Lo que sale del stock y lo que reserva la seña
+  * `precio_unitario` (decimal 10,2) -- Precio de una unidad base, menor o mayor, antes del descuento
+  * `precio_costo_snapshot` (decimal 14,4) -- PPP de una unidad base, congelado para utilidad inalterable
   * `tipo_descuento` (enum: 'porcentaje', 'importe', Nullable)
   * `valor_descuento` (decimal 10,2, Default: 0.00) -- El 10 de un 10 %, o el monto en la moneda de la tienda si es importe
   * `descuento_aplicado` (decimal 10,2, Default: 0.00) -- Plata restada en la línea
   * `supervisor_descuento_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Obligatorio si el descuento pasa el tope del cajero
-  * `total_linea` (decimal 10,2)
+  * `total_linea` (decimal 10,2) -- `cantidad_base * precio_unitario` menos `descuento_aplicado`
   * `timestamps` (timestamp)
-  * CHECK: `descuento_aplicado` no supera `precio_unitario * cantidad`. Si `tipo_descuento = 'porcentaje'`, `valor_descuento` no supera 100.
+  * CHECK: `descuento_aplicado` no supera `precio_unitario * cantidad_base`. Si `tipo_descuento = 'porcentaje'`, `valor_descuento` no supera 100.
 * **Venta_Impuestos (Snapshots Fiscales Transaccionales)**
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string)
@@ -673,12 +700,12 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
 
 Una venta sale de un solo almacén. Si el ticket necesita dos depósitos, son dos ventas. El cliente no tiene moneda: paga en la de la tienda.
 
-* **Contado en mostrador.** Caja abierta. La venta lleva `codigo` `VNT-`, correlativo del negocio, que no se reinicia y no se corta al pasar de 6 dígitos. Se cobra el precio menor o mayor, con descuento de porcentaje o de importe dentro del tope. El pago entra a la caja de hoy, el stock sale y el costo promedio queda pegado en la línea. Si el promedio es mayor que lo que va a pagar, hay alerta y la venta puede seguir.
+* **Contado en mostrador.** Caja abierta. La venta lleva `codigo` `VNT-`, correlativo del negocio, que no se reinicia y no se corta al pasar de 6 dígitos. Se cobra el precio menor o mayor de una unidad base, con descuento de porcentaje o de importe dentro del tope. La plata de la línea es la cantidad en unidad base por ese precio. El pago entra a la caja de hoy, del stock sale esa cantidad base y el costo promedio de una unidad base queda pegado en la línea. Si el promedio es mayor que lo que va a pagar por unidad base, hay alerta y la venta puede seguir.
 * **Lector y búsqueda.** El código de barras abre una sola variante. Sin etiqueta, se busca por SKU o por los atributos de la categoría, dentro de ese negocio y de ese rubro. Un rodamiento de 20 × 47 × 14 se filtra por igualdad: interno `20`, externo `47` y ancho `14`, y el índice GIN resuelve esa búsqueda. Un filtro de aceite se busca por su rosca o por su altura, con las claves de esa categoría. La unidad no se escribe en el filtro. Si la muestra está gastada, el rango (de 19.5 a 20.5) se compara como número sobre los productos ya acotados de esa categoría.
 * **Seña.** Cliente obligatorio. Se aparta stock, no sale del estante, y la plata entra hoy. Dura 48 horas salvo que al crearla pongan menos o más. Si vuelve y paga el resto, el stock sale y el cobro entra en la caja de ese día. Si vence, el stock se libera y la seña queda a su favor. Si pide la plata de vuelta, es un reembolso en la caja de hoy, con supervisor.
 * **Fiado.** El stock sale hoy y la caja no se mueve. Otro día paga, con la caja de ese día abierta, y el saldo baja. Si devuelve todo y no había pagado, vuelve el stock y no sale plata. Si ya había pagado una parte, se reembolsa esa parte y el resto de la deuda se cancela.
 * **Adelanto sin pieza, o un pago de varias deudas.** Un solo movimiento de caja. Se aplica después a una venta, o se reparte en varias, sin volver a sumar en la caja.
-* **Entrada de mercadería.** La compra guarda lo que costó esa entrada. Si fue en dólares, guarda también el tipo de cambio de ese día y convierte a la moneda de la tienda. Antes de guardar, la pantalla pide confirmar el costo por unidad. El promedio del producto se recalcula. El precio de venta no cambia solo.
+* **Entrada de mercadería.** La compra guarda la unidad tipeada, la cantidad tipeada y el factor congelado. Al stock entra la cantidad en la unidad base. El costo que alimenta el promedio es el de una unidad base. Si fue en dólares, guarda también el tipo de cambio de ese día y convierte a la moneda de la tienda. Antes de guardar, la pantalla pide confirmar el costo por unidad base. El precio de venta no cambia solo.
 * **Costo mal tipeado.** Las ventas ya cerradas siguen con el costo que tenían. Un supervisor corrige el promedio de lo que queda en el estante.
 * **Dólar.** La tienda que no importa no lo ve. La que importa pone el tipo de cambio. Los productos marcados en dólares pasan a la moneda de la tienda en un trabajo por lotes, con una sola confirmación. Lo ya vendido no se toca.
 * **Ajuste y conteo.** Motivo y supervisor. Cambia cuántas piezas hay, no el precio. El conteo compara contra el stock del cierre e incluye las señas. No mueve la caja.
