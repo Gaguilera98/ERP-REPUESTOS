@@ -36,6 +36,10 @@ class NegocioPanelProvider extends PanelProvider
             ->colors(Paleta::colors())
             ->viteTheme('resources/css/filament/negocio/theme.css')
             ->renderHook(
+                PanelsRenderHook::BODY_START,
+                fn (): string => view('filament.partials.splash-screen')->render(),
+            )
+            ->renderHook(
                 PanelsRenderHook::STYLES_AFTER,
                 fn (): string => view('filament.paleta')->render(),
             )

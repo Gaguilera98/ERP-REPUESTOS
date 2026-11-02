@@ -35,6 +35,10 @@ class AdminPanelProvider extends PanelProvider
             ->darkMode()
             ->colors(Paleta::colors())
             ->renderHook(
+                PanelsRenderHook::BODY_START,
+                fn (): string => view('filament.partials.splash-screen')->render(),
+            )
+            ->renderHook(
                 PanelsRenderHook::STYLES_AFTER,
                 fn (): string => view('filament.paleta')->render(),
             )

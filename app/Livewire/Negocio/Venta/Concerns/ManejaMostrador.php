@@ -687,20 +687,31 @@ trait ManejaMostrador
             $this->quitarDescuentoVenta();
             $this->busqueda = '';
 
-            $notificacion = Notification::make()
+            Notification::make()
                 ->title('Venta '.$resultado['venta']->codigo)
-                ->success();
+                ->success()
+                ->send();
 
             if ($resultado['alertas_perdida'] !== []) {
-                $notificacion->body('Hay líneas con costo por encima del precio. Revisá la alerta.');
-            }
+                $detalle = collect($resultado['alertas_perdida'])
+                    ->map(fn (array $alerta): string => $alerta['sku']
+                        .' · costo '.Montos::sinCeros((string) $alerta['precio_costo'])
+                        .' > precio '.Montos::sinCeros((string) $alerta['precio_neto']))
+                    ->implode("\n");
 
-            $notificacion->send();
+                Notification::make()
+                    ->title('Costo por encima del precio')
+                    ->body($detalle."\nLa venta igual se guardó. Cerrá este aviso cuando lo leas.")
+                    ->warning()
+                    ->persistent()
+                    ->send();
+            }
         } catch (ValidationException $e) {
             Notification::make()
                 ->title('No se completó la venta')
                 ->body(collect($e->errors())->flatten()->first() ?? 'Revisá los datos.')
                 ->danger()
+                ->persistent()
                 ->send();
         }
     }

@@ -6,10 +6,7 @@
 ])
 
 <section class="{{ $panel }} p-4">
-    <div class="mb-3 flex items-center justify-between gap-3">
-        <div class="text-sm font-bold text-gray-950 dark:text-white">Contexto de la venta</div>
-        <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">CONTADO</span>
-    </div>
+    <div class="mb-3 text-sm font-bold text-gray-950 dark:text-white">Contexto de la venta</div>
     <div class="grid gap-3 md:grid-cols-3">
         <label class="block">
             <x-negocio.label>Sucursal <span class="text-warning-600">*</span></x-negocio.label>
