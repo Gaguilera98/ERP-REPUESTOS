@@ -32,6 +32,7 @@ return [
         'venta_impuestos',
         'venta_detalles',
         'ventas',
+        'caja_sesion_medios',
         'cajas_sesiones',
         'movimientos_inventario',
         'orden_compra_detalles',

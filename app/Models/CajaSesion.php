@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'tenant_id',
@@ -65,6 +66,16 @@ class CajaSesion extends Model
     public function supervisor(): BelongsTo
     {
         return $this->belongsTo(TenantUser::class, 'supervisor_id');
+    }
+
+    public function pagos(): HasMany
+    {
+        return $this->hasMany(Pago::class, 'caja_sesion_id');
+    }
+
+    public function medios(): HasMany
+    {
+        return $this->hasMany(CajaSesionMedio::class, 'caja_sesion_id');
     }
 
     public function estaAbierta(): bool

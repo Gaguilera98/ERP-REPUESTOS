@@ -40,7 +40,8 @@ trait PreparaPagoBase
         return [
             'metodo_pago' => $metodo,
             'monto' => $monto,
-            'caja_sesion_id' => $metodo->exigeCajaSesion() ? $caja->id : null,
+            // Todo cobro del turno cuelga de la sesión abierta (arqueo). El efectivo es el que mueve el cajón.
+            'caja_sesion_id' => $caja->id,
             'numero_referencia_banco' => $referencia !== '' ? $referencia : null,
             'qr_id_transaccion_banco' => $qr !== '' ? $qr : null,
             'comprobante_archivo_path' => $path !== '' ? $path : null,

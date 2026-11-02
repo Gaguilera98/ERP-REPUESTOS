@@ -1,9 +1,11 @@
 <?php
 
 use App\Caja\AbrirCajaSesion;
+use App\Caja\ArqueoCajaSesion;
 use App\Caja\CerrarCajaSesion;
 use App\Enums\DepartamentoEmisionBolivia;
 use App\Enums\EstadoCajaSesion;
+use App\Enums\MetodoPago;
 use App\Enums\TipoCliente;
 use App\Enums\TipoPrecioCliente;
 use App\Filament\Negocio\Pages\CajaDelNegocio;
@@ -47,6 +49,20 @@ afterEach(function () {
 /**
  * @return array{supervisor: TenantUser, cajero: TenantUser, sucursal: Sucursal}
  */
+/**
+ * @return array<string, string>
+ */
+function mediosParaCerrar($sesion, array $cambios = []): array
+{
+    $medios = [];
+
+    foreach (app(ArqueoCajaSesion::class)->de($sesion)['por_metodo'] as $fila) {
+        $medios[$fila['metodo']] = $cambios[$fila['metodo']] ?? $fila['esperado'];
+    }
+
+    return $medios;
+}
+
 function negocioConCaja(string $dominio = 'caja'): array
 {
     $tenant = Tenant::factory()->create();
@@ -189,7 +205,7 @@ it('abre y cierra la caja sin diferencia y no permite abrir dos en la misma sucu
     ], $supervisor))->toThrow(ValidationException::class);
 
     $cerrada = $cerrar->cerrar($sesion, [
-        'monto_cierre_real' => '100',
+        'medios_declarados' => mediosParaCerrar($sesion),
     ], $supervisor);
 
     expect($cerrada->estado_sesion)->toBe(EstadoCajaSesion::Cerrada)
@@ -207,11 +223,15 @@ it('exige justificación cuando el cierre tiene diferencia', function () {
     ], $cajero);
 
     expect(fn () => $cerrar->cerrar($sesion, [
-        'monto_cierre_real' => '90',
+        'medios_declarados' => mediosParaCerrar($sesion, [
+            MetodoPago::Efectivo->value => '90',
+        ]),
     ], $cajero))->toThrow(ValidationException::class);
 
     $cerrada = $cerrar->cerrar($sesion->fresh(), [
-        'monto_cierre_real' => '90',
+        'medios_declarados' => mediosParaCerrar($sesion->fresh(), [
+            MetodoPago::Efectivo->value => '90',
+        ]),
         'justificacion_diferencia' => 'Faltó un billete de diez.',
     ], $cajero);
 
@@ -249,10 +269,15 @@ it('deja al cajero abrir caja y le niega administrar impuestos', function () {
 
     expect(CajaSesion::query()->where('user_id', $cajero->id)->where('estado_sesion', EstadoCajaSesion::Abierta)->count())->toBe(1);
 
+    $sesionAbierta = CajaSesion::query()
+        ->where('user_id', $cajero->id)
+        ->where('estado_sesion', EstadoCajaSesion::Abierta)
+        ->firstOrFail();
+
     Livewire::actingAs($cajero, 'tenant')
         ->test(CajaDelNegocio::class)
         ->fillForm([
-            'monto_cierre_real' => '50',
+            'medios_declarados' => mediosParaCerrar($sesionAbierta),
         ])
         ->call('cerrar')
         ->assertHasNoFormErrors();
@@ -269,7 +294,9 @@ it('guarda el supervisor cuando un supervisor cierra con diferencia', function (
     ], $supervisor);
 
     $cerrada = app(CerrarCajaSesion::class)->cerrar($sesion, [
-        'monto_cierre_real' => '205',
+        'medios_declarados' => mediosParaCerrar($sesion, [
+            MetodoPago::Efectivo->value => '205',
+        ]),
         'justificacion_diferencia' => 'Sobrante de propina.',
     ], $supervisor);
 

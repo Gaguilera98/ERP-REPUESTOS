@@ -4,15 +4,25 @@ namespace App\Caja;
 
 use App\Compras\Montos;
 use App\Enums\EstadoCajaSesion;
+use App\Enums\MetodoPago;
 use App\Models\CajaSesion;
+use App\Models\CajaSesionMedio;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class CerrarCajaSesion
 {
+    public function __construct(
+        private ArqueoCajaSesion $arqueo,
+    ) {}
+
     /**
-     * @param  array{monto_cierre_real: mixed, justificacion_diferencia?: mixed}  $data
+     * @param  array{
+     *     medios_declarados?: mixed,
+     *     monto_cierre_real?: mixed,
+     *     justificacion_diferencia?: mixed
+     * }  $data
      */
     public function cerrar(CajaSesion $sesion, array $data, TenantUser $usuario): CajaSesion
     {
@@ -31,32 +41,99 @@ class CerrarCajaSesion
                 ]);
             }
 
-            $teorico = Montos::dos((string) $sesion->monto_apertura);
-            $real = $this->monto($data['monto_cierre_real'] ?? null, 'monto_cierre_real');
-            $diferencia = Montos::dos(bcsub($real, $teorico, 4));
+            $arqueo = $this->arqueo->de($sesion);
+            $declarados = $this->mediosDeclarados($data, $arqueo);
             $justificacion = $this->justificacion($data['justificacion_diferencia'] ?? null);
+            $hayDiferencia = false;
+            $filas = [];
 
-            if (Montos::comparar($diferencia, '0', 2) !== 0 && $justificacion === null) {
+            foreach ($arqueo['por_metodo'] as $fila) {
+                $metodo = $fila['metodo'];
+                $esperado = $fila['esperado'];
+                $declarado = $declarados[$metodo];
+                $diferencia = Montos::dos(bcsub($declarado, $esperado, 4));
+
+                if (Montos::comparar($diferencia, '0', 2) !== 0) {
+                    $hayDiferencia = true;
+                }
+
+                $filas[] = [
+                    'metodo_pago' => $metodo,
+                    'monto_esperado' => $esperado,
+                    'monto_declarado' => $declarado,
+                    'diferencia' => $diferencia,
+                ];
+            }
+
+            if ($hayDiferencia && $justificacion === null) {
                 throw ValidationException::withMessages([
-                    'justificacion_diferencia' => 'Si hay diferencia, tenés que justificarla.',
+                    'justificacion_diferencia' => 'Si algún medio no calza con lo esperado, tenés que justificarlo.',
                 ]);
             }
+
+            $efectivo = collect($filas)->firstWhere('metodo_pago', MetodoPago::Efectivo->value);
+            $teorico = $efectivo['monto_esperado'];
+            $real = $efectivo['monto_declarado'];
+            $diferenciaEfectivo = $efectivo['diferencia'];
 
             $sesion->fill([
                 'estado_sesion' => EstadoCajaSesion::Cerrada,
                 'fecha_cierre' => now(),
                 'monto_cierre_teorico' => $teorico,
                 'monto_cierre_real' => $real,
-                'diferencia' => $diferencia,
-                'justificacion_diferencia' => Montos::comparar($diferencia, '0', 2) === 0 ? null : $justificacion,
-                'supervisor_id' => Montos::comparar($diferencia, '0', 2) !== 0 && $usuario->hasRole('supervisor')
+                'diferencia' => $diferenciaEfectivo,
+                'justificacion_diferencia' => $hayDiferencia ? $justificacion : null,
+                'supervisor_id' => $hayDiferencia && $usuario->hasRole('supervisor')
                     ? $usuario->id
                     : null,
             ]);
             $sesion->save();
 
-            return $sesion->refresh();
+            foreach ($filas as $fila) {
+                CajaSesionMedio::query()->create([
+                    'caja_sesion_id' => $sesion->id,
+                    ...$fila,
+                ]);
+            }
+
+            return $sesion->refresh()->load('medios');
         });
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @param  array{por_metodo: list<array{metodo: string, esperado: string}>}  $arqueo
+     * @return array<string, string>
+     */
+    private function mediosDeclarados(array $data, array $arqueo): array
+    {
+        $entrada = $data['medios_declarados'] ?? null;
+
+        if (! is_array($entrada)) {
+            $entrada = [];
+        }
+
+        // Compatibilidad: un solo campo de efectivo contado.
+        if (! array_key_exists(MetodoPago::Efectivo->value, $entrada) && array_key_exists('monto_cierre_real', $data)) {
+            $entrada[MetodoPago::Efectivo->value] = $data['monto_cierre_real'];
+        }
+
+        $declarados = [];
+
+        foreach ($arqueo['por_metodo'] as $fila) {
+            $metodo = $fila['metodo'];
+            $campo = "medios_declarados.{$metodo}";
+
+            if (! array_key_exists($metodo, $entrada)) {
+                throw ValidationException::withMessages([
+                    $campo => 'Declará el monto de '.$fila['etiqueta'].'.',
+                ]);
+            }
+
+            $declarados[$metodo] = $this->monto($entrada[$metodo], $campo);
+        }
+
+        return $declarados;
     }
 
     private function monto(mixed $valor, string $campo): string
@@ -70,7 +147,7 @@ class CerrarCajaSesion
 
         if ($texto === null || preg_match('/^\d+(\.\d+)?$/', $texto) !== 1) {
             throw ValidationException::withMessages([
-                $campo => 'El efectivo contado tiene que ser un número de cero para arriba.',
+                $campo => 'El monto declarado tiene que ser un número de cero para arriba.',
             ]);
         }
 

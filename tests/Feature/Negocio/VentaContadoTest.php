@@ -305,7 +305,7 @@ it('permite cobro mixto y guarda path de comprobante', function () {
     expect($resultado['venta']->total)->toBe('100.00')
         ->and($pagos)->toHaveCount(2)
         ->and($pagos[0]->caja_sesion_id)->not->toBeNull()
-        ->and($pagos[1]->caja_sesion_id)->toBeNull()
+        ->and($pagos[1]->caja_sesion_id)->toBe($pagos[0]->caja_sesion_id)
         ->and($pagos[1]->comprobante_archivo_path)->toBe('pagos/trx-1.pdf')
         ->and($pagos[1]->numero_referencia_banco)->toBe('TRX-1');
 });
