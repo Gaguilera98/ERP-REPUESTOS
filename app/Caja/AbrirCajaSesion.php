@@ -27,6 +27,8 @@ class AbrirCajaSesion
         }
 
         return DB::transaction(function () use ($sucursalId, $monto, $usuario): CajaSesion {
+            app(CongelarTurnosVencidos::class)->de($usuario, $sucursalId);
+
             $yaAbierta = CajaSesion::query()
                 ->where('sucursal_id', $sucursalId)
                 ->where('user_id', $usuario->id)

@@ -5,6 +5,7 @@ namespace App\Filament\Negocio\Pages;
 use App\Caja\AbrirCajaSesion;
 use App\Caja\ArqueoCajaSesion;
 use App\Caja\CerrarCajaSesion;
+use App\Caja\CongelarTurnosVencidos;
 use App\Compras\Montos;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\MetodoPago;
@@ -51,6 +52,10 @@ class CajaDelNegocio extends Page implements HasSchemas
      */
     public ?array $data = [];
 
+    public bool $confirmandoCierre = false;
+
+    public ?int $sesionEnConteo = null;
+
     public static function canAccess(): bool
     {
         if (! tenancy()->initialized) {
@@ -60,11 +65,20 @@ class CajaDelNegocio extends Page implements HasSchemas
         $usuario = auth('tenant')->user();
 
         return $usuario instanceof TenantUser
-            && $usuario->can('viewAny', CajaSesion::class);
+            && (
+                $usuario->can('View:CajaDelNegocio')
+                || $usuario->can('viewAny', CajaSesion::class)
+            );
     }
 
     public function mount(): void
     {
+        $usuario = auth('tenant')->user();
+
+        if ($usuario instanceof TenantUser) {
+            app(CongelarTurnosVencidos::class)->de($usuario);
+        }
+
         $this->rellenarFormulario();
     }
 
@@ -136,7 +150,7 @@ class CajaDelNegocio extends Page implements HasSchemas
         return $schema
             ->components([
                 Grid::make(1)
-                    ->visible(fn (): bool => $this->sesionActual() === null)
+                    ->visible(fn (): bool => $this->sesionParaCerrar() === null)
                     ->schema([
                         Select::make('sucursal_id')
                             ->label('Sucursal')
@@ -161,7 +175,7 @@ class CajaDelNegocio extends Page implements HasSchemas
                     'sm' => 2,
                     'xl' => 4,
                 ])
-                    ->visible(fn (): bool => $this->sesionActual() instanceof CajaSesion)
+                    ->visible(fn (): bool => $this->sesionParaCerrar() instanceof CajaSesion)
                     ->schema($camposMedios),
                 Textarea::make('justificacion_diferencia')
                     ->label('Justificación de la diferencia')
@@ -193,10 +207,28 @@ class CajaDelNegocio extends Page implements HasSchemas
         $this->rellenarFormulario();
     }
 
+    public function revisarCierre(): void
+    {
+        $this->form->getState();
+        $this->confirmandoCierre = true;
+    }
+
+    public function cancelarConfirmacion(): void
+    {
+        $this->confirmandoCierre = false;
+    }
+
+    public function contar(int $sesionId): void
+    {
+        $this->sesionEnConteo = $sesionId;
+        $this->confirmandoCierre = false;
+        $this->rellenarFormulario();
+    }
+
     public function cerrar(): void
     {
         $usuario = auth('tenant')->user();
-        $sesion = $this->sesionActual();
+        $sesion = $this->sesionParaCerrar();
 
         abort_unless(
             $usuario instanceof TenantUser
@@ -205,14 +237,19 @@ class CajaDelNegocio extends Page implements HasSchemas
             403,
         );
 
-        app(CerrarCajaSesion::class)->cerrar($sesion, $this->form->getState(), $usuario);
+        $cerrada = app(CerrarCajaSesion::class)->cerrar($sesion, $this->form->getState(), $usuario);
+        $anulada = $cerrada->estado_sesion === EstadoCajaSesion::Anulada;
 
         Notification::make()
-            ->title('Caja cerrada')
-            ->body('El arqueo del turno se registró correctamente.')
+            ->title($anulada ? 'Turno anulado' : 'Caja cerrada')
+            ->body($anulada
+                ? 'No tuvo ventas, así que no entra en el día.'
+                : 'El arqueo del turno se registró correctamente.')
             ->success()
             ->send();
 
+        $this->confirmandoCierre = false;
+        $this->sesionEnConteo = null;
         $this->rellenarFormulario();
     }
 
@@ -249,7 +286,7 @@ class CajaDelNegocio extends Page implements HasSchemas
      */
     public function arqueoTurno(): ?array
     {
-        $sesion = $this->sesionActual();
+        $sesion = $this->sesionParaCerrar();
 
         if (! $sesion instanceof CajaSesion) {
             return null;
@@ -266,6 +303,57 @@ class CajaDelNegocio extends Page implements HasSchemas
     public function tieneSesionAbierta(): bool
     {
         return $this->sesionActual() instanceof CajaSesion;
+    }
+
+    /**
+     * @return Collection<int, CajaSesion>
+     */
+    public function pendientes(): Collection
+    {
+        $usuario = auth('tenant')->user();
+
+        if (! $usuario instanceof TenantUser) {
+            return collect();
+        }
+
+        return CajaSesion::query()
+            ->with('sucursal')
+            ->where('user_id', $usuario->id)
+            ->where('estado_sesion', EstadoCajaSesion::PendienteArqueo)
+            ->orderBy('fecha_apertura')
+            ->get();
+    }
+
+    public function sesionParaCerrar(): ?CajaSesion
+    {
+        if ($this->sesionEnConteo !== null) {
+            $usuario = auth('tenant')->user();
+            $pendiente = CajaSesion::query()
+                ->with('sucursal')
+                ->whereKey($this->sesionEnConteo)
+                ->where('estado_sesion', EstadoCajaSesion::PendienteArqueo)
+                ->when($usuario instanceof TenantUser, fn ($query) => $query->where('user_id', $usuario->id))
+                ->first();
+
+            if ($pendiente instanceof CajaSesion) {
+                return $pendiente;
+            }
+        }
+
+        return $this->sesionActual();
+    }
+
+    public function turnoSinVentas(): bool
+    {
+        $sesion = $this->sesionParaCerrar();
+
+        if (! $sesion instanceof CajaSesion) {
+            return false;
+        }
+
+        $arqueo = app(ArqueoCajaSesion::class)->de($sesion);
+
+        return $arqueo['total_cobros'] === '0.00' && $arqueo['total_reembolsos'] === '0.00';
     }
 
     public function sesionActual(): ?CajaSesion
@@ -307,7 +395,7 @@ class CajaDelNegocio extends Page implements HasSchemas
 
     private function rellenarFormulario(): void
     {
-        $sesion = $this->sesionActual();
+        $sesion = $this->sesionParaCerrar();
 
         if ($sesion instanceof CajaSesion) {
             $arqueo = app(ArqueoCajaSesion::class)->de($sesion);

@@ -82,4 +82,17 @@ class CajaSesion extends Model
     {
         return $this->estado_sesion === EstadoCajaSesion::Abierta;
     }
+
+    public function aceptaConteo(): bool
+    {
+        return in_array($this->estado_sesion, [
+            EstadoCajaSesion::Abierta,
+            EstadoCajaSesion::PendienteArqueo,
+        ], true);
+    }
+
+    public function esDeHoy(): bool
+    {
+        return $this->fecha_apertura?->isSameDay(now()) ?? false;
+    }
 }

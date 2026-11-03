@@ -127,6 +127,7 @@ class SeedNegocioRoles
             'View:ConfiguracionDelNegocio',
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',
+            'View:CajasDelDia',
         ];
         $methods = [
             'ViewAny', 'View', 'Create', 'Update', 'Delete', 'DeleteAny',

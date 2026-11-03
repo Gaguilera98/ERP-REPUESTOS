@@ -2,6 +2,7 @@
 
 namespace App\Ventas;
 
+use App\Caja\CongelarTurnosVencidos;
 use App\Compras\Montos;
 use App\Enums\CondicionVenta;
 use App\Enums\EstadoCajaSesion;
@@ -82,6 +83,8 @@ class CompletarVentaContado
                 ]);
             }
 
+            app(CongelarTurnosVencidos::class)->de($usuario, $sucursalId);
+
             $caja = CajaSesion::query()
                 ->where('sucursal_id', $sucursalId)
                 ->where('user_id', $usuario->id)
@@ -91,7 +94,7 @@ class CompletarVentaContado
 
             if (! $caja instanceof CajaSesion) {
                 throw ValidationException::withMessages([
-                    'sucursal_id' => 'Abrí la caja de esa sucursal antes de vender.',
+                    'sucursal_id' => 'Abrí la caja de hoy en esa sucursal antes de vender.',
                 ]);
             }
 

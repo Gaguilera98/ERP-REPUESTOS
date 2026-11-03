@@ -13,7 +13,7 @@ return new class extends Migration
             $table->string('tenant_id');
             $table->foreignId('sucursal_id');
             $table->foreignId('user_id');
-            $table->enum('estado_sesion', ['abierta', 'cerrada'])->default('abierta');
+            $table->enum('estado_sesion', ['abierta', 'pendiente_arqueo', 'cerrada', 'anulada'])->default('abierta');
             $table->timestamp('fecha_apertura');
             $table->timestamp('fecha_cierre')->nullable();
             $table->decimal('monto_apertura', 10, 2);
@@ -52,8 +52,8 @@ return new class extends Migration
                 alter table cajas_sesiones
                 add constraint cajas_sesiones_cierre_check
                 check (
-                    (estado_sesion = 'abierta' and fecha_cierre is null)
-                    or (estado_sesion = 'cerrada' and fecha_cierre is not null)
+                    (estado_sesion in ('abierta', 'pendiente_arqueo') and fecha_cierre is null)
+                    or (estado_sesion in ('cerrada', 'anulada') and fecha_cierre is not null)
                 )
             SQL);
             Schema::getConnection()->statement(<<<'SQL'

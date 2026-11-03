@@ -29,7 +29,7 @@ class CerrarCajaSesion
         return DB::transaction(function () use ($sesion, $data, $usuario): CajaSesion {
             $sesion = CajaSesion::query()->whereKey($sesion->id)->lockForUpdate()->firstOrFail();
 
-            if (! $sesion->estaAbierta()) {
+            if (! $sesion->aceptaConteo()) {
                 throw ValidationException::withMessages([
                     'estado_sesion' => 'Esa caja ya está cerrada.',
                 ]);
@@ -42,6 +42,22 @@ class CerrarCajaSesion
             }
 
             $arqueo = $this->arqueo->de($sesion);
+
+            if ($this->sinMovimientos($arqueo)) {
+                $sesion->fill([
+                    'estado_sesion' => EstadoCajaSesion::Anulada,
+                    'fecha_cierre' => now(),
+                    'monto_cierre_teorico' => $arqueo['teorico_efectivo'],
+                    'monto_cierre_real' => $arqueo['teorico_efectivo'],
+                    'diferencia' => '0.00',
+                    'justificacion_diferencia' => null,
+                    'supervisor_id' => null,
+                ]);
+                $sesion->save();
+
+                return $sesion->refresh();
+            }
+
             $declarados = $this->mediosDeclarados($data, $arqueo);
             $justificacion = $this->justificacion($data['justificacion_diferencia'] ?? null);
             $hayDiferencia = false;
@@ -152,6 +168,15 @@ class CerrarCajaSesion
         }
 
         return Montos::dos($texto);
+    }
+
+    /**
+     * @param  array{total_cobros: string, total_reembolsos: string}  $arqueo
+     */
+    private function sinMovimientos(array $arqueo): bool
+    {
+        return Montos::comparar($arqueo['total_cobros'], '0', 2) === 0
+            && Montos::comparar($arqueo['total_reembolsos'], '0', 2) === 0;
     }
 
     private function justificacion(mixed $valor): ?string

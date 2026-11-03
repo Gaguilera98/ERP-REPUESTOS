@@ -208,11 +208,11 @@ it('abre y cierra la caja sin diferencia y no permite abrir dos en la misma sucu
         'medios_declarados' => mediosParaCerrar($sesion),
     ], $supervisor);
 
-    expect($cerrada->estado_sesion)->toBe(EstadoCajaSesion::Cerrada)
+    expect($cerrada->estado_sesion)->toBe(EstadoCajaSesion::Anulada)
         ->and($cerrada->diferencia)->toBe('0.00');
 });
 
-it('exige justificación cuando el cierre tiene diferencia', function () {
+it('anula el turno sin ventas en vez de dejar un cierre vacío', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal] = negocioConCaja('desfase');
     $abrir = app(AbrirCajaSesion::class);
     $cerrar = app(CerrarCajaSesion::class);
@@ -222,22 +222,10 @@ it('exige justificación cuando el cierre tiene diferencia', function () {
         'monto_apertura' => '100',
     ], $cajero);
 
-    expect(fn () => $cerrar->cerrar($sesion, [
-        'medios_declarados' => mediosParaCerrar($sesion, [
-            MetodoPago::Efectivo->value => '90',
-        ]),
-    ], $cajero))->toThrow(ValidationException::class);
+    $anulada = $cerrar->cerrar($sesion, [], $cajero);
 
-    $cerrada = $cerrar->cerrar($sesion->fresh(), [
-        'medios_declarados' => mediosParaCerrar($sesion->fresh(), [
-            MetodoPago::Efectivo->value => '90',
-        ]),
-        'justificacion_diferencia' => 'Faltó un billete de diez.',
-    ], $cajero);
-
-    expect($cerrada->diferencia)->toBe('-10.00')
-        ->and($cerrada->justificacion_diferencia)->toBe('Faltó un billete de diez.')
-        ->and($cerrada->supervisor_id)->toBeNull();
+    expect($anulada->estado_sesion)->toBe(EstadoCajaSesion::Anulada)
+        ->and($anulada->justificacion_diferencia)->toBeNull();
 });
 
 it('deja al cajero abrir caja y le niega administrar impuestos', function () {
@@ -282,10 +270,10 @@ it('deja al cajero abrir caja y le niega administrar impuestos', function () {
         ->call('cerrar')
         ->assertHasNoFormErrors();
 
-    expect(CajaSesion::query()->where('user_id', $cajero->id)->where('estado_sesion', EstadoCajaSesion::Cerrada)->count())->toBe(1);
+    expect(CajaSesion::query()->where('user_id', $cajero->id)->where('estado_sesion', EstadoCajaSesion::Anulada)->count())->toBe(1);
 });
 
-it('guarda el supervisor cuando un supervisor cierra con diferencia', function () {
+it('anula el turno vacío aunque un supervisor lo cierre', function () {
     ['supervisor' => $supervisor, 'sucursal' => $sucursal] = negocioConCaja('sup-desfase');
 
     $sesion = app(AbrirCajaSesion::class)->abrir([
@@ -300,6 +288,6 @@ it('guarda el supervisor cuando un supervisor cierra con diferencia', function (
         'justificacion_diferencia' => 'Sobrante de propina.',
     ], $supervisor);
 
-    expect($cerrada->diferencia)->toBe('5.00')
-        ->and($cerrada->supervisor_id)->toBe($supervisor->id);
+    expect($cerrada->estado_sesion)->toBe(EstadoCajaSesion::Anulada)
+        ->and($cerrada->supervisor_id)->toBeNull();
 });

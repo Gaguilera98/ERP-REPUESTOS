@@ -174,25 +174,63 @@
             @endif
 
             <div class="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4 dark:border-white/10">
-                <x-filament::button
-                    type="submit"
-                    color="danger"
-                    size="lg"
-                    icon="heroicon-m-lock-closed"
-                    :disabled="$cierreBloqueado"
-                    class="min-w-40"
-                >
-                    Cerrar caja
-                </x-filament::button>
-                <p class="text-sm text-gray-500 dark:text-gray-400">
-                    @if ($cierreBloqueado)
-                        Completá la justificación para habilitar el cierre.
-                    @elseif ($justificacionCompleta)
-                        El arqueo se registrará con la diferencia y su justificación.
-                    @else
-                        Si algún medio no calza, justificá antes de cerrar.
-                    @endif
-                </p>
+                @if ($this->turnoSinVentas())
+                    <x-filament::button
+                        type="submit"
+                        color="gray"
+                        size="lg"
+                        icon="heroicon-m-x-circle"
+                        class="min-w-40"
+                    >
+                        Anular turno vacío
+                    </x-filament::button>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        No tuvo ventas. Se anula y no entra en el día.
+                    </p>
+                @elseif (! $this->confirmandoCierre)
+                    <x-filament::button
+                        type="button"
+                        color="danger"
+                        size="lg"
+                        icon="heroicon-m-lock-closed"
+                        wire:click="revisarCierre"
+                        :disabled="$cierreBloqueado"
+                        class="min-w-40"
+                    >
+                        Revisar cierre
+                    </x-filament::button>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        @if ($cierreBloqueado)
+                            Completá la justificación para habilitar el cierre.
+                        @else
+                            El cierre pide una confirmación. No se deshace.
+                        @endif
+                    </p>
+                @else
+                    <x-filament::button
+                        type="submit"
+                        color="danger"
+                        size="lg"
+                        icon="heroicon-m-lock-closed"
+                        class="min-w-40"
+                    >
+                        Confirmar cierre
+                    </x-filament::button>
+                    <x-filament::button
+                        type="button"
+                        color="gray"
+                        wire:click="cancelarConfirmacion"
+                    >
+                        Volver
+                    </x-filament::button>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        @if ($justificacionCompleta)
+                            El arqueo se registrará con la diferencia y su justificación.
+                        @else
+                            Si los montos calzan, confirmá para cerrar el turno.
+                        @endif
+                    </p>
+                @endif
             </div>
         </div>
     </section>
