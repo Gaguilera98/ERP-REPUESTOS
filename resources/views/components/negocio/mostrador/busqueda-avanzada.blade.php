@@ -148,7 +148,10 @@
                                     <span class="text-gray-400 sm:hidden">Stock </span>{{ ($resultado['sin_stock'] ?? false) ? '0' : \App\Compras\Montos::sinCeros((string) $resultado['disponible']) }}@if (($resultado['unidad_simbolo'] ?? '') !== '') <span class="font-normal text-gray-400">{{ $resultado['unidad_simbolo'] }}</span>@endif
                                 </div>
                                 <div class="text-xs font-semibold tabular-nums text-gray-950 dark:text-white sm:text-right">
-                                    {{ number_format((float) $resultado['precio'], 2, '.', ',') }}
+                                    <div>{{ number_format((float) $resultado['precio'], 2, '.', ',') }}</div>
+                                    @if (($resultado['nota_precio'] ?? '') !== '')
+                                        <div class="text-[10px] font-normal {{ $resultado['nota_precio'] === 'sin precio mayor' ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400' }}">{{ $resultado['nota_precio'] }}</div>
+                                    @endif
                                 </div>
                                 <div class="text-right">
                                     <button

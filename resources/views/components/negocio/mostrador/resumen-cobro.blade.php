@@ -200,7 +200,7 @@
                             default => 'heroicon-m-banknotes',
                         };
                     @endphp
-                    <div wire:key="pago-{{ $i }}" class="negocio-inset p-3">
+                    <div wire:key="pago-{{ $i }}-{{ $metodo }}" class="negocio-inset p-3">
                         <div class="mb-2 flex items-center justify-between gap-2">
                             <div class="inline-flex items-center gap-1.5">
                                 <x-filament::icon :icon="$iconoMetodo" class="size-4 text-gray-400 dark:text-gray-500" />
@@ -213,7 +213,7 @@
                         <div class="grid gap-2">
                             <x-negocio.select wire:model.live="pagos.{{ $i }}.metodo_pago">
                                 @foreach ($metodos as $metodoPago)
-                                    <option value="{{ $metodoPago->value }}">{{ $metodoPago->etiqueta() }}</option>
+                                    <option value="{{ $metodoPago->value }}" @selected($metodo === $metodoPago->value)>{{ $metodoPago->etiqueta() }}</option>
                                 @endforeach
                             </x-negocio.select>
                             <x-negocio.input-monto
@@ -222,22 +222,34 @@
                                 inputmode="decimal"
                                 placeholder="0,00"
                             />
+                            @error('pagos.'.$i.'.monto')
+                                <p class="text-xs font-semibold text-danger-600">{{ $message }}</p>
+                            @enderror
                             @if ($pideRef)
                                 <x-negocio.input
                                     wire:model="pagos.{{ $i }}.numero_referencia_banco"
                                     placeholder="Referencia / voucher"
                                 />
+                                @error('pagos.'.$i.'.numero_referencia_banco')
+                                    <p class="text-xs font-semibold text-danger-600">{{ $message }}</p>
+                                @enderror
                             @endif
                             @if ($metodo === 'qr_externo')
                                 <x-negocio.input
                                     wire:model="pagos.{{ $i }}.qr_id_transaccion_banco"
                                     placeholder="ID transacción QR"
                                 />
+                                @error('pagos.'.$i.'.qr_id_transaccion_banco')
+                                    <p class="text-xs font-semibold text-danger-600">{{ $message }}</p>
+                                @enderror
                             @endif
                             @if ($pideAdjunto)
-                                <div>
+                                <div wire:key="adjunto-{{ $i }}-{{ $metodo }}">
                                     <x-negocio.label>Adjunto</x-negocio.label>
                                     <input type="file" wire:model="pagos.{{ $i }}.comprobante" class="block w-full text-xs text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-gray-700 hover:file:bg-gray-200 dark:file:bg-white/10 dark:file:text-gray-200" />
+                                    @error('pagos.'.$i.'.comprobante')
+                                        <p class="mt-1 text-xs font-semibold text-danger-600">{{ $message }}</p>
+                                    @enderror
                                     @if (! empty($pago['comprobante']))
                                         <div class="mt-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">✓ Archivo listo</div>
                                     @endif

@@ -6,6 +6,7 @@
     'flashPrecioVenta' => '',
     'flashCosto' => '',
     'flashCantidad' => '1',
+    'moneda' => 'BOB',
 ])
 
 @if ($mostrarFlash)
@@ -35,13 +36,23 @@
                     </label>
                     <label class="block">
                         <x-negocio.label>Precio de venta</x-negocio.label>
-                        <x-negocio.input wire:model="flashPrecioVenta" inputmode="decimal" />
+                        <x-negocio.input-monto
+                            :moneda="$moneda"
+                            wire:model="flashPrecioVenta"
+                            inputmode="decimal"
+                            placeholder="0.00"
+                        />
                     </label>
                 @endunless
                 <div class="grid gap-3 sm:grid-cols-2">
                     <label class="block">
                         <x-negocio.label>Costo unitario</x-negocio.label>
-                        <x-negocio.input wire:model="flashCosto" inputmode="decimal" />
+                        <x-negocio.input-monto
+                            :moneda="$moneda"
+                            wire:model="flashCosto"
+                            inputmode="decimal"
+                            placeholder="0.00"
+                        />
                     </label>
                     <label class="block">
                         <x-negocio.label>Cantidad a ingresar</x-negocio.label>

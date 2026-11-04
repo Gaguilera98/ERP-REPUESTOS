@@ -9,6 +9,7 @@ use App\Enums\EstadoCajaSesion;
 use App\Enums\MetodoPago;
 use App\Enums\TipoCliente;
 use App\Enums\TipoDescuento;
+use App\Enums\TipoPrecioCliente;
 use App\Models\Almacen;
 use App\Models\CajaSesion;
 use App\Models\Categoria;
@@ -24,6 +25,7 @@ use App\Models\Venta;
 use App\Ventas\BuscarProductosMostrador;
 use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
+use App\Ventas\PrecioDeLista;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -37,6 +39,23 @@ trait ManejaMostrador
     public ?int $almacenId = null;
 
     public ?int $clienteId = null;
+
+    public string $listaPrecio = 'menor';
+
+    public bool $mostrarEleccionPrecio = false;
+
+    public ?int $clientePendienteId = null;
+
+    public string $clientePendienteNombre = '';
+
+    /** @var list<array{sku: string, nombre: string, menor: string, mayor: string}> */
+    public array $comparacionPrecio = [];
+
+    public string $totalMenorPendiente = '0.00';
+
+    public string $totalMayorPendiente = '0.00';
+
+    public bool $eleccionAntesDeDescuento = false;
 
     public bool $mostrarCliente = false;
 
@@ -205,6 +224,10 @@ trait ManejaMostrador
 
     public function buscarYAgregar(): void
     {
+        if ($this->mostrarEleccionPrecio) {
+            return;
+        }
+
         $texto = trim($this->busqueda);
 
         if ($texto === '') {
@@ -433,9 +456,11 @@ trait ManejaMostrador
             $this->flashVarianteId = $variante->id;
             $this->flashNombre = (string) $variante->productoMaestro?->nombre;
             $this->flashSku = (string) $variante->sku;
-            $this->flashPrecioVenta = (string) $variante->precio_venta;
+            $this->flashPrecioVenta = Montos::sinCeros((string) $variante->precio_venta, 2);
             $this->flashCantidad = '1';
-            $this->flashCosto = (string) ($variante->precio_costo ?: '');
+            $this->flashCosto = filled($variante->precio_costo) && Montos::comparar((string) $variante->precio_costo, '0') === 1
+                ? Montos::sinCeros((string) $variante->precio_costo, 2)
+                : '';
             $this->flashConfirmo = false;
             $this->mostrarFlash = true;
 
@@ -450,12 +475,15 @@ trait ManejaMostrador
 
         $variante->loadMissing('productoMaestro.unidadBase');
 
+        $precios = $this->preciosDe($variante);
+
         $this->lineas[] = [
             'producto_variante_id' => $variante->id,
             'sku' => $variante->sku,
             'nombre' => $variante->productoMaestro?->nombre,
             'cantidad' => '1',
-            'precio_unitario' => (string) $variante->precio_venta,
+            'precio_unitario' => $precios['precio_unitario'],
+            'nota_precio' => $precios['nota_precio'],
             'precio_costo' => (string) $variante->precio_costo,
             'tipo_descuento' => '',
             'valor_descuento' => '',
@@ -567,10 +595,27 @@ trait ManejaMostrador
         $this->alertasPerdida = [];
     }
 
+    public function updatedPagos(mixed $value, string $key): void
+    {
+        if (! str_ends_with($key, 'metodo_pago')) {
+            return;
+        }
+
+        $indice = (int) str($key)->before('.')->toString();
+
+        if (! isset($this->pagos[$indice]) || ! is_array($this->pagos[$indice])) {
+            return;
+        }
+
+        $metodo = is_string($value) ? $value : '';
+        $this->limpiarCamposDePago($indice, $metodo);
+        $this->resetValidation();
+    }
+
     public function agregarPago(): void
     {
         $this->pagos[] = [
-            'metodo_pago' => MetodoPago::Transferencia->value,
+            'metodo_pago' => MetodoPago::Efectivo->value,
             'monto' => '',
             'numero_referencia_banco' => '',
             'qr_id_transaccion_banco' => '',
@@ -582,6 +627,7 @@ trait ManejaMostrador
     {
         unset($this->pagos[$indice]);
         $this->pagos = array_values($this->pagos);
+        $this->resetValidation();
 
         if ($this->pagos === []) {
             $this->agregarPago();
@@ -638,6 +684,8 @@ trait ManejaMostrador
             return;
         }
 
+        $this->resetValidation();
+
         try {
             $pagos = [];
 
@@ -662,6 +710,7 @@ trait ManejaMostrador
                 'sucursal_id' => $this->sucursalId,
                 'almacen_id' => $this->almacenId,
                 'cliente_id' => $this->clienteId,
+                'tipo_precio' => $this->listaActiva()->value,
                 'tipo_descuento' => $this->tipoDescuentoVenta !== '' ? $this->tipoDescuentoVenta : null,
                 'valor_descuento' => $this->valorDescuentoVenta !== '' ? $this->valorDescuentoVenta : null,
                 'lineas' => collect($this->lineas)->map(fn (array $linea): array => [
@@ -707,12 +756,154 @@ trait ManejaMostrador
                     ->send();
             }
         } catch (ValidationException $e) {
+            foreach ($e->errors() as $campo => $mensajes) {
+                foreach ($mensajes as $mensaje) {
+                    $this->addError($campo, $mensaje);
+                }
+            }
+
             Notification::make()
                 ->title('No se completó la venta')
                 ->body(collect($e->errors())->flatten()->first() ?? 'Revisá los datos.')
                 ->danger()
-                ->persistent()
                 ->send();
+        }
+    }
+
+    private function aplicarListaPrecio(): void
+    {
+        foreach ($this->lineas as $indice => $linea) {
+            $variante = ProductoVariante::query()->find($linea['producto_variante_id'] ?? null);
+
+            if (! $variante instanceof ProductoVariante) {
+                continue;
+            }
+
+            $this->lineas[$indice] = array_merge($linea, $this->preciosDe($variante));
+        }
+
+        $this->recalcularTotalesUi();
+
+        if (trim($this->busqueda) !== '') {
+            $this->refrescarResultadosBusqueda($this->busqueda);
+        }
+
+        if ($this->mostrarBusquedaAvanzada && $this->tieneCriterioBusquedaAvanzada()) {
+            $this->refrescarBusquedaAvanzada();
+        }
+    }
+
+    /**
+     * @return array{precio_unitario: string, nota_precio: string}
+     */
+    private function preciosDe(ProductoVariante $variante, ?TipoPrecioCliente $lista = null): array
+    {
+        $lista ??= $this->listaActiva();
+        $precios = app(PrecioDeLista::class);
+
+        return [
+            'precio_unitario' => $precios->de($variante, $lista),
+            'nota_precio' => $precios->nota($variante, $lista),
+        ];
+    }
+
+    private function listaActiva(): TipoPrecioCliente
+    {
+        return TipoPrecioCliente::tryFrom($this->listaPrecio) ?? TipoPrecioCliente::Menor;
+    }
+
+    private function tomarCliente(Cliente $cliente): void
+    {
+        if ($cliente->tipo_precio !== TipoPrecioCliente::Mayor || $this->clienteId === $cliente->id) {
+            $this->clienteId = $cliente->id;
+            $this->cerrarEleccionPrecio();
+
+            return;
+        }
+
+        $this->clientePendienteId = $cliente->id;
+        $this->clientePendienteNombre = (string) $cliente->nombre_mostrar;
+        $this->comparacionPrecio = $this->compararPrecios();
+        $this->eleccionAntesDeDescuento = $this->hayDescuentoEnVenta();
+        $this->mostrarEleccionPrecio = true;
+    }
+
+    private function cerrarEleccionPrecio(): void
+    {
+        $this->mostrarEleccionPrecio = false;
+        $this->clientePendienteId = null;
+        $this->clientePendienteNombre = '';
+        $this->comparacionPrecio = [];
+        $this->totalMenorPendiente = '0.00';
+        $this->totalMayorPendiente = '0.00';
+        $this->eleccionAntesDeDescuento = false;
+    }
+
+    /**
+     * @return list<array{sku: string, nombre: string, menor: string, mayor: string}>
+     */
+    private function compararPrecios(): array
+    {
+        $ids = collect($this->lineas)->pluck('producto_variante_id')->filter()->all();
+        $variantes = ProductoVariante::query()->whereIn('id', $ids)->get()->keyBy('id');
+        $precios = app(PrecioDeLista::class);
+        $filas = [];
+        $totalMenor = '0.00';
+        $totalMayor = '0.00';
+
+        foreach ($this->lineas as $linea) {
+            $variante = $variantes->get($linea['producto_variante_id'] ?? null);
+
+            if (! $variante instanceof ProductoVariante) {
+                continue;
+            }
+
+            $menor = $precios->de($variante, TipoPrecioCliente::Menor);
+            $mayor = $precios->de($variante, TipoPrecioCliente::Mayor);
+            $cantidad = (string) ($linea['cantidad'] ?: '0');
+            $totalMenor = Montos::sumar($totalMenor, Montos::multiplicar($cantidad, $menor, 2), 2);
+            $totalMayor = Montos::sumar($totalMayor, Montos::multiplicar($cantidad, $mayor, 2), 2);
+            $filas[] = [
+                'sku' => (string) ($linea['sku'] ?? $variante->sku),
+                'nombre' => (string) ($linea['nombre'] ?? ''),
+                'menor' => $menor,
+                'mayor' => $mayor,
+            ];
+        }
+
+        $this->totalMenorPendiente = $totalMenor;
+        $this->totalMayorPendiente = $totalMayor;
+
+        return $filas;
+    }
+
+    private function hayDescuentoEnVenta(): bool
+    {
+        if ($this->mostrarDescuentoVenta && trim($this->valorDescuentoVenta) !== '') {
+            return true;
+        }
+
+        foreach ($this->lineas as $linea) {
+            if (($linea['tipo_descuento'] ?? '') !== '' && trim((string) ($linea['valor_descuento'] ?? '')) !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function limpiarCamposDePago(int $indice, string $metodo): void
+    {
+        if (! in_array($metodo, ['transferencia', 'qr_externo', 'voucher_tarjeta'], true)) {
+            $this->pagos[$indice]['numero_referencia_banco'] = '';
+        }
+
+        if ($metodo !== 'qr_externo') {
+            $this->pagos[$indice]['qr_id_transaccion_banco'] = '';
+        }
+
+        if (! in_array($metodo, ['transferencia', 'voucher_tarjeta'], true)) {
+            $this->pagos[$indice]['comprobante'] = null;
         }
     }
 
@@ -750,6 +941,7 @@ trait ManejaMostrador
         $resultado = $this->buscador()->sugerir([
             'texto' => $texto,
             'almacen_id' => $this->almacenId,
+            'lista' => $this->listaActiva(),
         ]);
 
         $this->resultadosBusqueda = $resultado['items'];
@@ -797,6 +989,7 @@ trait ManejaMostrador
             'disponibilidad' => $this->filtroDisponibilidad,
             'atributos' => $this->filtrosAtributosActivos(),
             'pagina' => $this->paginaAvanzada,
+            'lista' => $this->listaActiva(),
         ]);
 
         $this->resultadosAvanzados = $pagina->items();
@@ -866,13 +1059,55 @@ trait ManejaMostrador
             return;
         }
 
-        $this->clienteId = $cliente->id;
         $this->cerrarCliente();
+        $this->tomarCliente($cliente);
+    }
+
+    public function confirmarListaPrecio(string $lista): void
+    {
+        $tipo = TipoPrecioCliente::tryFrom($lista);
+
+        if ($tipo === null || $this->clientePendienteId === null) {
+            return;
+        }
+
+        $cliente = Cliente::query()->whereKey($this->clientePendienteId)->first();
+
+        if (! $cliente instanceof Cliente) {
+            $this->cancelarEleccionPrecio();
+
+            return;
+        }
+
+        $this->clienteId = $cliente->id;
+        $this->listaPrecio = $tipo->value;
+        $this->cerrarEleccionPrecio();
+        $this->aplicarListaPrecio();
+    }
+
+    public function cancelarEleccionPrecio(): void
+    {
+        $this->cerrarEleccionPrecio();
+    }
+
+    public function cambiarListaPrecio(string $lista): void
+    {
+        $tipo = TipoPrecioCliente::tryFrom($lista);
+
+        if ($tipo === null || $tipo->value === $this->listaPrecio) {
+            return;
+        }
+
+        $this->listaPrecio = $tipo->value;
+        $this->aplicarListaPrecio();
     }
 
     public function quitarCliente(): void
     {
         $this->clienteId = null;
+        $this->listaPrecio = TipoPrecioCliente::Menor->value;
+        $this->cerrarEleccionPrecio();
+        $this->aplicarListaPrecio();
     }
 
     public function abrirRegistroCliente(): void
@@ -945,14 +1180,21 @@ trait ManejaMostrador
             return;
         }
 
-        $this->clienteId = $resultado['cliente']->id;
+        $cliente = $resultado['cliente'];
+        $abreEleccion = $cliente->tipo_precio === TipoPrecioCliente::Mayor
+            && $this->clienteId !== $cliente->id;
         $this->cerrarCliente();
+        $this->tomarCliente($cliente);
+
+        if ($abreEleccion) {
+            return;
+        }
 
         Notification::make()
             ->title($resultado['existia'] ? 'Ya estaba registrado' : 'Cliente listo')
             ->body($resultado['existia']
                 ? 'Lo seleccionamos para esta venta.'
-                : $resultado['cliente']->nombre_mostrar)
+                : $cliente->nombre_mostrar)
             ->success()
             ->send();
     }

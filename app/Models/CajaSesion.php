@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'diferencia',
     'justificacion_diferencia',
     'supervisor_id',
+    'caja_dia_id',
 ])]
 class CajaSesion extends Model
 {
@@ -56,6 +57,11 @@ class CajaSesion extends Model
     public function sucursal(): BelongsTo
     {
         return $this->belongsTo(Sucursal::class);
+    }
+
+    public function cajaDia(): BelongsTo
+    {
+        return $this->belongsTo(CajaDia::class, 'caja_dia_id');
     }
 
     public function usuario(): BelongsTo

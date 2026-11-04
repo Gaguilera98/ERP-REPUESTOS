@@ -310,6 +310,133 @@ it('permite cobro mixto y guarda path de comprobante', function () {
         ->and($pagos[1]->numero_referencia_banco)->toBe('TRX-1');
 });
 
+it('exige la referencia solo en el medio que la pide', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('mixto-validacion');
+
+    cargarStock($variante, $almacen, $cajero, $ocasional, '1');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '10'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $pagina = Livewire::actingAs($cajero, 'tenant')
+        ->test(MostradorDelNegocio::class)
+        ->call('agregarPago')
+        ->assertSet('pagos.1.metodo_pago', MetodoPago::Efectivo->value)
+        ->set('pagos.0.metodo_pago', MetodoPago::Transferencia->value)
+        ->set('pagos.0.monto', '40')
+        ->set('pagos.1.monto', '60')
+        ->set('lineas', [[
+            'producto_variante_id' => $variante->id,
+            'sku' => $variante->sku,
+            'nombre' => 'Pieza',
+            'cantidad' => '1',
+            'precio_unitario' => '100.00',
+            'precio_costo' => '40.0000',
+            'tipo_descuento' => '',
+            'valor_descuento' => '',
+            'disponible' => '1',
+            'unidad_simbolo' => 'pza',
+        ]]);
+
+    expect(substr_count($pagina->html(), 'Adjunto'))->toBe(1)
+        ->and(substr_count($pagina->html(), 'Referencia / voucher'))->toBe(1);
+
+    $pagina->call('completar')
+        ->assertHasErrors(['pagos.0.numero_referencia_banco'])
+        ->assertHasNoErrors(['pagos.1.numero_referencia_banco']);
+});
+
+it('pide confirmación al elegir un mayorista y cobra la lista elegida', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('precio-mayor');
+
+    cargarStock($variante, $almacen, $cajero, $ocasional, '2');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '10'], $cajero);
+    $mayorista = Cliente::factory()->mayor()->create(['nombres' => 'Taller', 'apellidos' => 'Rápido']);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $pagina = Livewire::actingAs($cajero, 'tenant')
+        ->test(MostradorDelNegocio::class)
+        ->set('busqueda', $variante->sku)
+        ->assertSet('resultadosBusqueda.0.precio', '100.00')
+        ->assertSet('resultadosBusqueda.0.nota_precio', 'mayor 80.00')
+        ->call('seleccionarResultado', $variante->id)
+        ->assertSet('lineas.0.precio_unitario', '100.00')
+        ->assertSet('lineas.0.nota_precio', 'mayor 80.00')
+        ->call('seleccionarCliente', $mayorista->id)
+        ->assertSet('mostrarEleccionPrecio', true)
+        ->assertSet('clienteId', null)
+        ->assertSet('lineas.0.precio_unitario', '100.00')
+        ->assertSee('está definido como mayorista')
+        ->call('confirmarListaPrecio', 'mayor')
+        ->assertSet('mostrarEleccionPrecio', false)
+        ->assertSet('clienteId', $mayorista->id)
+        ->assertSet('listaPrecio', 'mayor')
+        ->assertSet('lineas.0.precio_unitario', '80.00')
+        ->assertSet('lineas.0.nota_precio', 'menor 100.00')
+        ->assertSee('Mayorista · esta venta a mayor')
+        ->call('seleccionarCliente', $mayorista->id)
+        ->assertSet('mostrarEleccionPrecio', false)
+        ->call('quitarCliente')
+        ->assertSet('clienteId', null)
+        ->assertSet('listaPrecio', 'menor')
+        ->assertSet('lineas.0.precio_unitario', '100.00')
+        ->call('seleccionarCliente', $mayorista->id)
+        ->call('confirmarListaPrecio', 'mayor')
+        ->set('pagos.0.monto', '80')
+        ->call('completar')
+        ->assertSet('ultimoCodigo', 'VNT-000001');
+
+    expect(Venta::query()->first()?->total)->toBe('80.00')
+        ->and($pagina->get('clienteId'))->toBe($mayorista->id);
+});
+
+it('cancela la elección del mayorista y puede cobrarle al por menor', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('precio-cancelar');
+
+    cargarStock($variante, $almacen, $cajero, $ocasional, '2');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '10'], $cajero);
+    $mayorista = Cliente::factory()->mayor()->create();
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')
+        ->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)
+        ->call('seleccionarCliente', $mayorista->id)
+        ->call('cancelarEleccionPrecio')
+        ->assertSet('mostrarEleccionPrecio', false)
+        ->assertSet('clienteId', null)
+        ->assertSet('lineas.0.precio_unitario', '100.00')
+        ->call('seleccionarCliente', $mayorista->id)
+        ->call('confirmarListaPrecio', 'menor')
+        ->assertSet('clienteId', $mayorista->id)
+        ->assertSet('listaPrecio', 'menor')
+        ->assertSet('lineas.0.precio_unitario', '100.00')
+        ->assertSee('Mayorista · esta venta a menor')
+        ->set('pagos.0.monto', '100')
+        ->call('completar')
+        ->assertSet('ultimoCodigo', 'VNT-000001');
+
+    expect(Venta::query()->value('total'))->toBe('100.00');
+});
+
+it('cambia a precio mayor sin cliente', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('precio-sin-cliente');
+
+    cargarStock($variante, $almacen, $cajero, $ocasional, '1');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '10'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')
+        ->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)
+        ->assertSet('mostrarEleccionPrecio', false)
+        ->call('cambiarListaPrecio', 'mayor')
+        ->assertSet('listaPrecio', 'mayor')
+        ->assertSet('lineas.0.precio_unitario', '80.00')
+        ->assertSet('lineas.0.nota_precio', 'menor 100.00')
+        ->set('busqueda', $variante->sku)
+        ->assertSet('resultadosBusqueda.0.precio', '80.00');
+});
+
 it('hace compra flash con stock en cero y luego vende', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante] = negocioConMostrador('flash');
 

@@ -99,7 +99,10 @@
                             <span class="sm:hidden text-gray-400">Stock </span>{{ $stockTxt }}@if ($unidadSimbolo !== '') <span class="font-normal text-gray-400">{{ $unidadSimbolo }}</span>@endif
                         </div>
                         <div class="text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200 sm:text-right">
-                            {{ number_format((float) $resultado['precio'], 2, '.', ',') }}
+                            <div>{{ number_format((float) $resultado['precio'], 2, '.', ',') }}</div>
+                            @if (($resultado['nota_precio'] ?? '') !== '')
+                                <div class="text-[10px] font-normal {{ $resultado['nota_precio'] === 'sin precio mayor' ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400' }}">{{ $resultado['nota_precio'] }}</div>
+                            @endif
                         </div>
                         <div class="flex sm:justify-end">
                             <x-filament::button type="button" size="xs" color="gray" wire:click="seleccionarResultado({{ $resultado['id'] }})">

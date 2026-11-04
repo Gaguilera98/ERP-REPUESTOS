@@ -51,7 +51,12 @@
                         <span class="tabular-nums {{ $sinStock || $pasaStock ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-gray-700 dark:text-gray-200' }}">
                             Stock {{ $stockTxt }}@if ($unidadSimbolo !== '') {{ $unidadSimbolo }}@endif
                         </span>
-                        <span class="tabular-nums text-gray-500 dark:text-gray-400">{{ $moneda }} {{ number_format((float) $linea['precio_unitario'], 2, '.', ',') }}</span>
+                        <span class="text-right tabular-nums text-gray-500 dark:text-gray-400">
+                            <span class="block">{{ $moneda }} {{ number_format((float) $linea['precio_unitario'], 2, '.', ',') }}</span>
+                            @if (($linea['nota_precio'] ?? '') !== '')
+                                <span class="block text-[10px] font-normal {{ $linea['nota_precio'] === 'sin precio mayor' ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400' }}">{{ $linea['nota_precio'] }}</span>
+                            @endif
+                        </span>
                     </div>
                     <div class="mt-2 flex items-center justify-between gap-3">
                         @include('components.negocio.mostrador.linea-cantidad')
@@ -67,7 +72,7 @@
             <colgroup>
                 <col>
                 <col class="w-[4.75rem]">
-                <col class="w-[5.25rem]">
+                <col class="w-[6.5rem]">
                 <col class="w-[6.75rem]">
                 <col class="w-[4.75rem]">
                 <col class="w-9">
@@ -105,8 +110,11 @@
                         <td class="whitespace-nowrap px-2 py-2.5 text-right tabular-nums {{ $sinStock || $pasaStock ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-gray-950 dark:text-white' }}">
                             {{ $stockTxt }}@if ($unidadSimbolo !== '') <span class="font-normal text-gray-400"> {{ $unidadSimbolo }}</span>@endif
                         </td>
-                        <td class="whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-gray-950 dark:text-white">
-                            {{ number_format((float) $linea['precio_unitario'], 2, '.', ',') }}
+                        <td class="px-2 py-2.5 text-right tabular-nums text-gray-950 dark:text-white">
+                            <div>{{ number_format((float) $linea['precio_unitario'], 2, '.', ',') }}</div>
+                            @if (($linea['nota_precio'] ?? '') !== '')
+                                <div class="text-[10px] font-normal {{ $linea['nota_precio'] === 'sin precio mayor' ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400' }}">{{ $linea['nota_precio'] }}</div>
+                            @endif
                         </td>
                         <td class="px-2 py-2.5">
                             <div class="flex justify-center">

@@ -39,6 +39,7 @@ class CompletarVentaContado
         private ReservarCodigoVenta $codigos,
         private FactorUnidad $factores,
         private MetodoPagoFactory $metodosPago,
+        private PrecioDeLista $precios,
     ) {}
 
     /**
@@ -46,6 +47,7 @@ class CompletarVentaContado
      *     sucursal_id: mixed,
      *     almacen_id: mixed,
      *     cliente_id?: mixed,
+     *     tipo_precio?: mixed,
      *     notes_internas?: mixed,
      *     tipo_descuento?: mixed,
      *     valor_descuento?: mixed,
@@ -123,6 +125,7 @@ class CompletarVentaContado
                 ]);
             }
 
+            $lista = $this->listaPedida($data, $cliente);
             $lineasPreparadas = [];
             $varianteIds = [];
 
@@ -136,7 +139,7 @@ class CompletarVentaContado
                 $lineasPreparadas[] = $this->prepararLinea(
                     $linea,
                     $indice,
-                    $cliente,
+                    $lista,
                     $topePorcentaje,
                     $topeImporte,
                 );
@@ -416,7 +419,7 @@ class CompletarVentaContado
     private function prepararLinea(
         array $linea,
         int $indice,
-        ?Cliente $cliente,
+        TipoPrecioCliente $lista,
         string $topePorcentaje,
         string $topeImporte,
     ): array {
@@ -457,7 +460,7 @@ class CompletarVentaContado
         $factor = $this->factores->haciaBase($variante->productoMaestro, $unidadId);
         $cantidadBase = Montos::multiplicar($cantidad, $factor, 4);
 
-        $precioUnitario = $this->precioDeLista($variante, $cliente);
+        $precioUnitario = $this->precioDeLista($variante, $lista);
         $bruto = Montos::multiplicar($cantidadBase, $precioUnitario, 2);
 
         $descuento = $this->resolverDescuento(
@@ -575,15 +578,31 @@ class CompletarVentaContado
         ];
     }
 
-    private function precioDeLista(ProductoVariante $variante, ?Cliente $cliente): string
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function listaPedida(array $data, ?Cliente $cliente): TipoPrecioCliente
     {
-        if ($cliente?->tipo_precio === TipoPrecioCliente::Mayor
-            && $variante->precio_mayor !== null
-            && Montos::comparar((string) $variante->precio_mayor, '0', 2) === 1) {
-            return Montos::dos((string) $variante->precio_mayor);
+        $raw = $data['tipo_precio'] ?? null;
+
+        if ($raw === null || $raw === '') {
+            return $cliente?->tipo_precio ?? TipoPrecioCliente::Menor;
         }
 
-        return Montos::dos((string) $variante->precio_venta);
+        $lista = TipoPrecioCliente::tryFrom(is_string($raw) ? $raw : '');
+
+        if ($lista === null) {
+            throw ValidationException::withMessages([
+                'tipo_precio' => 'La lista es menor o mayor.',
+            ]);
+        }
+
+        return $lista;
+    }
+
+    private function precioDeLista(ProductoVariante $variante, TipoPrecioCliente $lista): string
+    {
+        return $this->precios->de($variante, $lista);
     }
 
     private function id(mixed $valor, string $campo, string $mensaje): int

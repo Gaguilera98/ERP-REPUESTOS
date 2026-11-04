@@ -34,6 +34,7 @@ return [
         'ventas',
         'caja_sesion_medios',
         'cajas_sesiones',
+        'cajas_dias',
         'movimientos_inventario',
         'orden_compra_detalles',
         'ordenes_compra',

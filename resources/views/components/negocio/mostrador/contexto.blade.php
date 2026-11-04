@@ -2,6 +2,7 @@
     'sucursales',
     'almacenes',
     'clienteSeleccionado',
+    'listaPrecio' => 'menor',
     'panel',
 ])
 
@@ -47,6 +48,25 @@
                 @endif
                 <x-filament::icon icon="heroicon-m-magnifying-glass" class="size-4 shrink-0 text-warning-500" />
             </button>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+                <div class="inline-flex rounded-lg bg-gray-100 p-0.5 dark:bg-white/10" role="group" aria-label="Precio de esta venta">
+                    <button
+                        type="button"
+                        wire:click="cambiarListaPrecio('menor')"
+                        class="rounded-md px-2.5 py-1 text-xs font-bold {{ $listaPrecio === 'menor' ? 'bg-white text-gray-950 shadow-sm dark:bg-white/15 dark:text-white' : 'text-gray-500 dark:text-gray-400' }}"
+                    >Menor</button>
+                    <button
+                        type="button"
+                        wire:click="cambiarListaPrecio('mayor')"
+                        class="rounded-md px-2.5 py-1 text-xs font-bold {{ $listaPrecio === 'mayor' ? 'bg-white text-gray-950 shadow-sm dark:bg-white/15 dark:text-white' : 'text-gray-500 dark:text-gray-400' }}"
+                    >Mayor</button>
+                </div>
+                @if ($clienteSeleccionado?->tipo_precio === \App\Enums\TipoPrecioCliente::Mayor)
+                    <span class="text-[11px] font-semibold text-warning-700 dark:text-warning-300">
+                        Mayorista · esta venta a {{ $listaPrecio === 'mayor' ? 'mayor' : 'menor' }}
+                    </span>
+                @endif
+            </div>
         </div>
     </div>
 </section>

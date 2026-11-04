@@ -16,6 +16,7 @@
                 :sucursales="$sucursales"
                 :almacenes="$almacenes"
                 :cliente-seleccionado="$clienteSeleccionado"
+                :lista-precio="$listaPrecio"
                 :panel="$panel"
             />
 
@@ -72,6 +73,16 @@
         :moneda="$moneda"
     />
 
+    <x-negocio.mostrador.eleccion-precio
+        :mostrar="$mostrarEleccionPrecio"
+        :nombre="$clientePendienteNombre"
+        :filas="$comparacionPrecio"
+        :total-menor="$totalMenorPendiente"
+        :total-mayor="$totalMayorPendiente"
+        :antes-de-descuento="$eleccionAntesDeDescuento"
+        :moneda="$moneda"
+    />
+
     <x-negocio.mostrador.cliente
         :mostrar="$mostrarCliente"
         :registrando="$mostrandoRegistroCliente"
@@ -89,5 +100,6 @@
         :flash-precio-venta="$flashPrecioVenta"
         :flash-costo="$flashCosto"
         :flash-cantidad="$flashCantidad"
+        :moneda="$moneda"
     />
 </div>

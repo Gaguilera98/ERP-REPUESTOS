@@ -15,6 +15,12 @@
         $sesionesVendedor = $this->sesionesDelVendedor();
         $nombreVendedor = $sesionesVendedor[0]['cajero'] ?? 'Vendedor';
         $sesionDetalle = $this->sesionSeleccionada();
+        $cierreDia = $this->cierreDia();
+        $puedeCerrarDia = is_array($consolidado)
+            && $cierreDia === null
+            && $consolidado['sesiones_abiertas'] === 0
+            && $consolidado['sesiones_pendientes'] === 0
+            && $consolidado['sesiones_cerradas'] > 0;
     @endphp
 
     <div class="mx-auto w-full max-w-5xl space-y-5">
@@ -108,6 +114,23 @@
                     </span>
                 </div>
             </div>
+
+            @if ($cierreDia)
+                <div class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-950 dark:bg-emerald-400/10 dark:text-emerald-100">
+                    Día cerrado por {{ $cierreDia->usuario?->name ?? 'el encargado' }}
+                    el {{ $cierreDia->fecha_cierre?->format('d/m/Y H:i') }}.
+                    No se abren más sesiones de esta fecha.
+                </div>
+            @elseif ($puedeCerrarDia)
+                <form wire:submit="cerrarDia" class="flex flex-wrap items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+                    <x-filament::button type="submit" icon="heroicon-m-lock-closed">
+                        Cerrar el día
+                    </x-filament::button>
+                    <p class="text-sm text-gray-600 dark:text-gray-300">
+                        Firma las sesiones ya contadas. Después nadie abre otra de esta fecha.
+                    </p>
+                </form>
+            @endif
 
             @if ($porDeclarar > 0 || $hayFaltante || $haySobra)
                 <div @class([

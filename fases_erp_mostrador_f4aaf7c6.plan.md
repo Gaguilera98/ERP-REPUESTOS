@@ -70,13 +70,15 @@ flowchart LR
 
 Tablas: `negocio_configuracion`, `sucursales`, `almacenes`, `sucursal_almacenes`. No se agrega columna `rol` en `users`.
 
-Permisos: Filament Shield en el panel `negocio`, con Spatie y equipos. El equipo es el `tenant_id`. Las tablas de roles y permisos viven en el pool, no en la central, y entran en la lista de limpieza. Al crear un negocio se siembran dos roles de ese equipo: `cajero` y `supervisor`. El panel `admin` de la plataforma no usa Shield: sigue entrando solo el usuario admin.
+Permisos: Filament Shield en el panel `negocio`, con Spatie y equipos. El equipo es el `tenant_id`. Las tablas de roles y permisos viven en el pool, no en la central, y entran en la lista de limpieza. Al crear un negocio se siembran hoy dos roles: `cajero` y `supervisor`. El panel `admin` de la plataforma no usa el `super_admin` de Shield: el rol de plataforma es `admin`.
 
-Reglas: el tenant es el negocio; `tenant_id` en todo el pool; el almacén no tiene `sucursal_id`; la pivote es el único vínculo y `es_principal` vive ahí; un almacén compartido es dos filas de la misma pila; dos saldos distintos son dos almacenes. `moneda` nace en `BOB` y `modo_moneda` en `solo_moneda` *(Pendiente: evaluar migrar `moneda` a `varchar(3)` ISO 4217 para no limitar el SaaS a 3 países)*. El dólar no aparece todavía. Donde el documento dice `users.rol` o «rol supervisor», el código pregunta el rol de Shield de ese negocio. En esta fase se actualiza esa frase en `esstructuraybasecondiciones.md`. Las fases siguientes autorizan con ese mismo rol o con un permiso de Shield, no con una columna.
+Reglas: el tenant es el negocio; `tenant_id` en todo el pool; el almacén no tiene `sucursal_id`; la pivote es el único vínculo y `es_principal` vive ahí; un almacén compartido es dos filas de la misma pila; dos saldos distintos son dos almacenes. `moneda` nace en `BOB` y `modo_moneda` en `solo_moneda` *(Pendiente: evaluar migrar `moneda` a `varchar(3)` ISO 4217 para no limitar el SaaS a 3 países)*. El dólar no aparece todavía. Las fases siguientes deben autorizar por **permiso** Shield/Spatie, no por nombre de rol hardcodeado ni por columna en `users`.
 
 Pantalla: resources de sucursales y almacenes, y asignar almacenes a la sucursal. El rol de Shield se asigna al crear el usuario del negocio. El cajero no administra roles.
 
-Tener en cuenta (no está): al crear el usuario no se le asignan sucursales. Falta una pivote `user_sucursales` y, al iniciar sesión, una home que pregunte **en qué sucursal quiere iniciar** (solo las suyas; si tiene una, entrar ahí). Esa sucursal es el contexto: ve solo datos de esa (ventas, caja, listados). Si quiere otra, cambia de sucursal; no se mezclan. Hoy cualquiera ve todas. Ver `esstructuraybasecondiciones.md` punto 15 y futuro ítem 11. No implementarlo en esta fase.
+Tener en cuenta (no está — ver `esstructuraybasecondiciones.md` punto 15 y futuros 11 y 14):
+- Plantilla **`encargado`** (matriz: usuarios, roles, sucursales, config + ver todas las sucursales). `supervisor` operativo sin administración del sistema. Roles custom en Shield sin tocar código. No roles por sucursal. No `super_admin` de Shield.
+- Pivote `user_sucursales` + **switch de sucursal en el menú** (contexto de operación). Usuarios y roles **fuera** del switch. Hoy cualquiera ve todas las sucursales. No implementarlo en esta fase.
 
 ## Fase 2. Catálogo — hecha
 

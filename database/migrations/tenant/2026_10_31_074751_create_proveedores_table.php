@@ -33,6 +33,7 @@ return new class extends Migration
         );
 
         if ($driver === 'pgsql') {
+            Schema::getConnection()->statement('drop function if exists proveedores_ocasional_protegido() cascade');
             Schema::getConnection()->statement(<<<'SQL'
                 create function proveedores_ocasional_protegido() returns trigger
                 language plpgsql

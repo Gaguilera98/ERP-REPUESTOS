@@ -3,6 +3,7 @@
 namespace App\Ventas;
 
 use App\Compras\Montos;
+use App\Enums\TipoPrecioCliente;
 use App\Models\ProductoVariante;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,13 +15,16 @@ class BuscarProductosMostrador
 
     public const POR_PAGINA = 8;
 
+    public function __construct(private PrecioDeLista $precios) {}
+
     /**
      * @param  array{
      *     texto?: string,
      *     almacen_id?: int|null,
      *     categoria_id?: int|null,
      *     disponibilidad?: string,
-     *     atributos?: array<string, mixed>
+     *     atributos?: array<string, mixed>,
+     *     lista?: TipoPrecioCliente|string|null
      * }  $filtros
      * @return array{items: list<array<string, mixed>>, total: int}
      */
@@ -34,12 +38,13 @@ class BuscarProductosMostrador
 
         $consulta = $this->consulta($filtros);
         $total = (clone $consulta)->count();
+        $lista = $this->listaDe($filtros);
         $items = $consulta
             ->orderBy('sku')
             ->orderBy('id')
             ->limit(self::SUGERENCIAS)
             ->get()
-            ->map(fn (ProductoVariante $variante): array => $this->mapear($variante, $filtros['almacen_id'] ?? null))
+            ->map(fn (ProductoVariante $variante): array => $this->mapear($variante, $filtros['almacen_id'] ?? null, $lista))
             ->all();
 
         return ['items' => $items, 'total' => $total];
@@ -52,7 +57,8 @@ class BuscarProductosMostrador
      *     categoria_id?: int|null,
      *     disponibilidad?: string,
      *     atributos?: array<string, mixed>,
-     *     pagina?: int
+     *     pagina?: int,
+     *     lista?: TipoPrecioCliente|string|null
      * }  $filtros
      * @return LengthAwarePaginator<int, array<string, mixed>>
      */
@@ -66,14 +72,33 @@ class BuscarProductosMostrador
             ->paginate(self::POR_PAGINA, ['*'], 'page', $pagina);
 
         $almacenId = $filtros['almacen_id'] ?? null;
+        $lista = $this->listaDe($filtros);
 
         $paginator->setCollection(
             $paginator->getCollection()->map(
-                fn (ProductoVariante $variante): array => $this->mapear($variante, $almacenId)
+                fn (ProductoVariante $variante): array => $this->mapear($variante, $almacenId, $lista)
             )
         );
 
         return $paginator;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filtros
+     */
+    private function listaDe(array $filtros): TipoPrecioCliente
+    {
+        $lista = $filtros['lista'] ?? null;
+
+        if ($lista instanceof TipoPrecioCliente) {
+            return $lista;
+        }
+
+        if (is_string($lista)) {
+            return TipoPrecioCliente::tryFrom($lista) ?? TipoPrecioCliente::Menor;
+        }
+
+        return TipoPrecioCliente::Menor;
     }
 
     public function exacta(string $texto): ?ProductoVariante
@@ -199,17 +224,19 @@ class BuscarProductosMostrador
     }
 
     /**
-     * @return array{id: int, sku: string, nombre: string, precio: string, disponible: string, unidad_simbolo: string, sin_stock: bool, ficha: string}
+     * @return array{id: int, sku: string, nombre: string, precio: string, nota_precio: string, disponible: string, unidad_simbolo: string, sin_stock: bool, ficha: string}
      */
-    public function mapear(ProductoVariante $variante, mixed $almacenId): array
+    public function mapear(ProductoVariante $variante, mixed $almacenId, ?TipoPrecioCliente $lista = null): array
     {
+        $lista ??= TipoPrecioCliente::Menor;
         $disponible = $this->disponibleEn($variante, $almacenId);
 
         return [
             'id' => (int) $variante->id,
             'sku' => (string) $variante->sku,
             'nombre' => (string) ($variante->productoMaestro?->nombre ?? '—'),
-            'precio' => (string) $variante->precio_venta,
+            'precio' => $this->precios->de($variante, $lista),
+            'nota_precio' => $this->precios->nota($variante, $lista),
             'disponible' => $disponible,
             'unidad_simbolo' => $this->simboloDe($variante),
             'sin_stock' => Montos::comparar($disponible, '0', 4) !== 1,

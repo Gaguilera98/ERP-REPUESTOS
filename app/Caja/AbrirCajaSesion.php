@@ -4,6 +4,7 @@ namespace App\Caja;
 
 use App\Compras\Montos;
 use App\Enums\EstadoCajaSesion;
+use App\Models\CajaDia;
 use App\Models\CajaSesion;
 use App\Models\Sucursal;
 use App\Models\TenantUser;
@@ -28,6 +29,18 @@ class AbrirCajaSesion
 
         return DB::transaction(function () use ($sucursalId, $monto, $usuario): CajaSesion {
             app(CongelarTurnosVencidos::class)->de($usuario, $sucursalId);
+
+            $diaCerrado = CajaDia::query()
+                ->where('sucursal_id', $sucursalId)
+                ->whereDate('fecha', now()->toDateString())
+                ->lockForUpdate()
+                ->exists();
+
+            if ($diaCerrado) {
+                throw ValidationException::withMessages([
+                    'sucursal_id' => 'Ese día ya está cerrado en la sucursal. No se abren más sesiones.',
+                ]);
+            }
 
             $yaAbierta = CajaSesion::query()
                 ->where('sucursal_id', $sucursalId)

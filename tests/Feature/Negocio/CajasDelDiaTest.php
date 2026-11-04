@@ -2,6 +2,7 @@
 
 use App\Caja\AbrirCajaSesion;
 use App\Caja\ArqueoCajaSesion;
+use App\Caja\CerrarCajaDia;
 use App\Caja\CerrarCajaSesion;
 use App\Caja\ConsolidarCajasDelDia;
 use App\Compras\GuardarOrdenCompra;
@@ -22,6 +23,7 @@ use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -257,6 +259,175 @@ it('agrupa el día por vendedor y abre ventas solo al elegir la sesión', functi
         ->call('verSesion', $primera->id)
         ->assertSee($codigo)
         ->assertSee('100.00');
+});
+
+it('cierra el día y marca solo las sesiones cerradas', function () {
+    [
+        'supervisor' => $supervisor,
+        'cajeroA' => $cajeroA,
+        'cajeroB' => $cajeroB,
+        'sucursal' => $sucursal,
+        'almacen' => $almacen,
+        'variante' => $variante,
+        'ocasional' => $ocasional,
+    ] = negocioConCajasDelDia('cierre-dia');
+
+    stockParaCajasDelDia($variante, $almacen, $cajeroA, $ocasional, '4');
+
+    $conVentas = app(AbrirCajaSesion::class)->abrir([
+        'sucursal_id' => $sucursal->id,
+        'monto_apertura' => '10',
+    ], $cajeroA);
+
+    app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id,
+        'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => MetodoPago::Efectivo->value, 'monto' => '100']],
+    ], $cajeroA);
+
+    app(CerrarCajaSesion::class)->cerrar($conVentas->fresh(), [
+        'medios_declarados' => mediosParaCajasDelDia($conVentas->fresh()),
+    ], $cajeroA);
+
+    $vacia = app(AbrirCajaSesion::class)->abrir([
+        'sucursal_id' => $sucursal->id,
+        'monto_apertura' => '5',
+    ], $cajeroB);
+
+    $anulada = app(CerrarCajaSesion::class)->cerrar($vacia, [], $cajeroB);
+
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($supervisor, 'tenant')
+        ->test(CajasDelDia::class)
+        ->set('data.sucursal_id', $sucursal->id)
+        ->set('data.fecha', now()->toDateString())
+        ->assertSee('Cerrar el día')
+        ->call('cerrarDia')
+        ->assertSee('Día cerrado');
+
+    expect($conVentas->fresh()->caja_dia_id)->not->toBeNull()
+        ->and($anulada->fresh()->caja_dia_id)->toBeNull()
+        ->and($anulada->estado_sesion)->toBe(EstadoCajaSesion::Anulada);
+});
+
+it('no cierra el día si queda una sesión por contar', function () {
+    [
+        'supervisor' => $supervisor,
+        'cajeroA' => $cajeroA,
+        'cajeroB' => $cajeroB,
+        'sucursal' => $sucursal,
+        'almacen' => $almacen,
+        'variante' => $variante,
+        'ocasional' => $ocasional,
+    ] = negocioConCajasDelDia('cierre-pendiente');
+
+    stockParaCajasDelDia($variante, $almacen, $cajeroA, $ocasional, '2');
+
+    $cerrada = app(AbrirCajaSesion::class)->abrir([
+        'sucursal_id' => $sucursal->id,
+        'monto_apertura' => '10',
+    ], $cajeroA);
+
+    app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id,
+        'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => MetodoPago::Efectivo->value, 'monto' => '100']],
+    ], $cajeroA);
+
+    app(CerrarCajaSesion::class)->cerrar($cerrada->fresh(), [
+        'medios_declarados' => mediosParaCajasDelDia($cerrada->fresh()),
+    ], $cajeroA);
+
+    app(AbrirCajaSesion::class)->abrir([
+        'sucursal_id' => $sucursal->id,
+        'monto_apertura' => '5',
+    ], $cajeroB);
+
+    expect(fn () => app(CerrarCajaDia::class)->cerrar($sucursal->id, now()->toDateString(), $supervisor))
+        ->toThrow(ValidationException::class);
+});
+
+it('no vuelve a cerrar un día ya firmado', function () {
+    [
+        'supervisor' => $supervisor,
+        'cajeroA' => $cajeroA,
+        'sucursal' => $sucursal,
+        'almacen' => $almacen,
+        'variante' => $variante,
+        'ocasional' => $ocasional,
+    ] = negocioConCajasDelDia('cierre-dos-veces');
+
+    stockParaCajasDelDia($variante, $almacen, $cajeroA, $ocasional, '2');
+
+    $sesion = app(AbrirCajaSesion::class)->abrir([
+        'sucursal_id' => $sucursal->id,
+        'monto_apertura' => '10',
+    ], $cajeroA);
+
+    app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id,
+        'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => MetodoPago::Efectivo->value, 'monto' => '100']],
+    ], $cajeroA);
+
+    app(CerrarCajaSesion::class)->cerrar($sesion->fresh(), [
+        'medios_declarados' => mediosParaCajasDelDia($sesion->fresh()),
+    ], $cajeroA);
+
+    app(CerrarCajaDia::class)->cerrar($sucursal->id, now()->toDateString(), $supervisor);
+
+    expect(fn () => app(CerrarCajaDia::class)->cerrar($sucursal->id, now()->toDateString(), $supervisor))
+        ->toThrow(ValidationException::class);
+});
+
+it('impide abrir otra sesión el día cerrado y deja abrir el día siguiente', function () {
+    [
+        'cajeroA' => $cajeroA,
+        'supervisor' => $supervisor,
+        'sucursal' => $sucursal,
+        'almacen' => $almacen,
+        'variante' => $variante,
+        'ocasional' => $ocasional,
+    ] = negocioConCajasDelDia('cierre-bloquea');
+
+    stockParaCajasDelDia($variante, $almacen, $cajeroA, $ocasional, '2');
+
+    $sesion = app(AbrirCajaSesion::class)->abrir([
+        'sucursal_id' => $sucursal->id,
+        'monto_apertura' => '10',
+    ], $cajeroA);
+
+    app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id,
+        'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => MetodoPago::Efectivo->value, 'monto' => '100']],
+    ], $cajeroA);
+
+    app(CerrarCajaSesion::class)->cerrar($sesion->fresh(), [
+        'medios_declarados' => mediosParaCajasDelDia($sesion->fresh()),
+    ], $cajeroA);
+
+    app(CerrarCajaDia::class)->cerrar($sucursal->id, now()->toDateString(), $supervisor);
+
+    expect(fn () => app(AbrirCajaSesion::class)->abrir([
+        'sucursal_id' => $sucursal->id,
+        'monto_apertura' => '8',
+    ], $cajeroA))->toThrow(ValidationException::class);
+
+    Carbon::setTestNow(now()->addDay()->setTime(9, 0));
+
+    $manana = app(AbrirCajaSesion::class)->abrir([
+        'sucursal_id' => $sucursal->id,
+        'monto_apertura' => '8',
+    ], $cajeroA);
+
+    expect($manana->estado_sesion)->toBe(EstadoCajaSesion::Abierta)
+        ->and($manana->fecha_apertura->toDateString())->toBe(now()->toDateString());
 });
 
 it('deja ver Cajas del día al supervisor y se la niega al cajero', function () {

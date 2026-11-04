@@ -2,14 +2,17 @@
 
 namespace App\Filament\Negocio\Pages;
 
+use App\Caja\CerrarCajaDia;
 use App\Caja\ConsolidarCajasDelDia;
 use App\Compras\Montos;
+use App\Models\CajaDia;
 use App\Models\NegocioConfiguracion;
 use App\Models\Sucursal;
 use App\Models\TenantUser;
 use BackedEnum;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
@@ -120,6 +123,42 @@ class CajasDelDia extends Page implements HasSchemas
     {
         $this->sesionId = $sesionId;
         $this->dispatch('open-modal', id: 'ventas-sesion');
+    }
+
+    public function cerrarDia(): void
+    {
+        $usuario = auth('tenant')->user();
+        $consolidado = $this->consolidado();
+
+        abort_unless(
+            $usuario instanceof TenantUser
+            && $usuario->can('View:CajasDelDia')
+            && $consolidado !== null,
+            403,
+        );
+
+        app(CerrarCajaDia::class)->cerrar($consolidado['sucursal_id'], $consolidado['fecha'], $usuario);
+
+        Notification::make()
+            ->title('Día cerrado')
+            ->body('No se abren más sesiones de esta fecha en la sucursal.')
+            ->success()
+            ->send();
+    }
+
+    public function cierreDia(): ?CajaDia
+    {
+        $consolidado = $this->consolidado();
+
+        if ($consolidado === null) {
+            return null;
+        }
+
+        return CajaDia::query()
+            ->with('usuario')
+            ->where('sucursal_id', $consolidado['sucursal_id'])
+            ->whereDate('fecha', $consolidado['fecha'])
+            ->first();
     }
 
     /**
