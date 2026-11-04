@@ -14,6 +14,8 @@ use App\Models\NegocioConfiguracion;
 use App\Models\Sucursal;
 use App\Models\TenantUser;
 use BackedEnum;
+use Filament\Actions\Action;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -25,13 +27,23 @@ use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\FiltersLayout;
+use Filament\Tables\Filters\Filter;
+use Filament\Tables\Table;
+use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
 use UnitEnum;
 
-class CajaDelNegocio extends Page implements HasSchemas
+class CajaDelNegocio extends Page implements HasSchemas, HasTable
 {
     use InteractsWithSchemas;
+    use InteractsWithTable;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;
 
@@ -80,6 +92,19 @@ class CajaDelNegocio extends Page implements HasSchemas
         }
 
         $this->rellenarFormulario();
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('historialSesiones')
+                ->label('Historial de sesiones')
+                ->icon(Heroicon::OutlinedClock)
+                ->color('gray')
+                ->action(function (): void {
+                    $this->dispatch('open-modal', id: 'historial-sesiones-caja');
+                }),
+        ];
     }
 
     public function form(Schema $schema): Schema
@@ -253,24 +278,75 @@ class CajaDelNegocio extends Page implements HasSchemas
         $this->rellenarFormulario();
     }
 
-    /**
-     * @return Collection<int, CajaSesion>
-     */
-    public function historial(): Collection
+    public function table(Table $table): Table
     {
-        $usuario = auth('tenant')->user();
+        return $table
+            ->heading('Mis días de caja')
+            ->extraAttributes(['class' => 'caja-mobile-table'])
+            ->description('Una fila por día de apertura. Entrá en Ver sesiones para consultar los turnos de esa fecha.')
+            ->query(CajaSesion::query()
+                ->where('user_id', auth('tenant')->id())
+                ->selectRaw('MIN(id) as id, DATE(fecha_apertura) as dia, COUNT(*) as sesiones')
+                ->selectRaw("SUM(CASE WHEN estado_sesion = 'abierta' THEN 1 ELSE 0 END) as abiertas")
+                ->selectRaw("SUM(CASE WHEN estado_sesion = 'pendiente_arqueo' THEN 1 ELSE 0 END) as pendientes")
+                ->selectRaw("SUM(CASE WHEN estado_sesion = 'cerrada' THEN 1 ELSE 0 END) as cerradas")
+                ->selectRaw("SUM(CASE WHEN estado_sesion = 'anulada' THEN 1 ELSE 0 END) as anuladas")
+                ->groupByRaw('DATE(fecha_apertura)'))
+            ->defaultSort('dia', 'desc')
+            ->defaultKeySort(false)
+            ->defaultPaginationPageOption(10)
+            ->paginationPageOptions([10, 25, 50])
+            ->columns([
+                TextColumn::make('dia')->label('Día')->extraCellAttributes(['data-label' => 'Día'])->date('d/m/Y'),
+                TextColumn::make('sesiones')->label('Sesiones')->extraCellAttributes(['data-label' => 'Sesiones']),
+                TextColumn::make('abiertas')->label('Abiertas')->extraCellAttributes(['data-label' => 'Abiertas'])->badge()->color(EstadoCajaSesion::Abierta->getColor()),
+                TextColumn::make('pendientes')->label('Por contar')->extraCellAttributes(['data-label' => 'Por contar'])->badge()->color(EstadoCajaSesion::PendienteArqueo->getColor()),
+                TextColumn::make('cerradas')->label('Cerradas')->extraCellAttributes(['data-label' => 'Cerradas'])->badge()->color(EstadoCajaSesion::Cerrada->getColor()),
+                TextColumn::make('anuladas')->label('Anuladas')->extraCellAttributes(['data-label' => 'Anuladas'])->badge()->color(EstadoCajaSesion::Anulada->getColor()),
+            ])
+            ->filters([
+                Filter::make('dia')
+                    ->schema([DatePicker::make('fecha')->label('Día de apertura')->native(false)->displayFormat('d/m/Y')])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $fecha = $data['fecha'] ?? null;
 
-        if (! $usuario instanceof TenantUser) {
-            return collect();
-        }
+                        if (blank($fecha)) {
+                            return $query;
+                        }
 
-        return CajaSesion::query()
-            ->with(['sucursal', 'medios'])
-            ->where('user_id', $usuario->id)
-            ->where('estado_sesion', EstadoCajaSesion::Cerrada)
-            ->orderByDesc('fecha_cierre')
-            ->limit(10)
-            ->get();
+                        if (! validator(['fecha' => $fecha], ['fecha' => ['date_format:Y-m-d']])->passes()) {
+                            return $query->whereKey(0);
+                        }
+
+                        return $query->whereDate('fecha_apertura', $fecha);
+                    }),
+            ], layout: FiltersLayout::AboveContent)
+            ->deferFilters(false)
+            ->recordActions([
+                Action::make('verSesiones')
+                    ->label('Ver sesiones')
+                    ->icon(Heroicon::OutlinedEye)
+                    ->modalHeading(fn (CajaSesion $record): string => 'Sesiones del '.Carbon::parse($record->getAttribute('dia'))->format('d/m/Y'))
+                    ->modalWidth('5xl')
+                    ->extraModalWindowAttributes(['class' => 'caja-modal-window'])
+                    ->stickyModalHeader()
+                    ->stickyModalFooter()
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Cerrar')
+                    ->modalContent(fn (CajaSesion $record): View => $this->sesionesDelDia((string) $record->getAttribute('dia'))),
+            ])
+            ->emptyStateHeading('No hay sesiones para mostrar')
+            ->emptyStateDescription('Abrí tu primera caja o elegí otra fecha.');
+    }
+
+    public function sesionesDelDia(string $fecha): View
+    {
+        abort_unless(validator(['fecha' => $fecha], ['fecha' => ['required', 'date_format:Y-m-d']])->passes(), 404);
+
+        return view('filament.negocio.pages.caja.sesiones-del-dia', [
+            'fecha' => $fecha,
+            'moneda' => $this->moneda(),
+        ]);
     }
 
     /**

@@ -10,9 +10,15 @@
 
 {{-- Vista: sesión abierta — referencia mock 2 (chips + resumen + declaración) --}}
 <div class="space-y-5">
+    @if ($sesion->estado_sesion === \App\Enums\EstadoCajaSesion::PendienteArqueo)
+        <div class="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
+            <p class="font-semibold">Estás contando la sesión #{{ $sesion->id }} del {{ $sesion->fecha_apertura?->format('d/m/Y') }}</p>
+            <p class="text-sm">Este turno es de un día anterior. El cierre corresponde a esa sesión, no a la caja de hoy.</p>
+        </div>
+    @endif
     {{-- Chips de estado --}}
-    <div class="flex flex-wrap items-stretch gap-3">
-        <div class="flex min-w-[10rem] flex-1 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div class="col-span-2 flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 sm:col-span-1 dark:bg-gray-900 dark:ring-white/10">
             <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
                 <x-filament::icon icon="heroicon-o-building-storefront" class="size-5" />
             </div>
@@ -22,7 +28,7 @@
             </div>
         </div>
 
-        <div class="flex min-w-[9rem] flex-1 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+        <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-3 py-3 shadow-sm ring-1 ring-gray-950/5 sm:px-4 dark:bg-gray-900 dark:ring-white/10">
             <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
                 <x-filament::icon icon="heroicon-o-wallet" class="size-5" />
             </div>
@@ -32,7 +38,7 @@
             </div>
         </div>
 
-        <div class="flex min-w-[10rem] flex-1 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+        <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-3 py-3 shadow-sm ring-1 ring-gray-950/5 sm:px-4 dark:bg-gray-900 dark:ring-white/10">
             <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
                 <x-filament::icon icon="heroicon-o-banknotes" class="size-5" />
             </div>
@@ -42,28 +48,37 @@
             </div>
         </div>
 
-        <div class="flex items-center">
-            <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">
-                <span class="size-1.5 rounded-full bg-emerald-500"></span>
-                Turno abierto · {{ $sesion->fecha_apertura?->format('H:i') }}
-            </span>
-        </div>
     </div>
 
     {{-- Resumen del turno --}}
     <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
-        <header class="flex flex-wrap items-end justify-between gap-2 border-b border-gray-200 px-5 py-3.5 dark:border-white/10">
+        <header class="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 border-b border-gray-200 px-5 py-3.5 dark:border-white/10">
             <div>
-                <h3 class="text-sm font-semibold text-gray-950 dark:text-white">Resumen del turno</h3>
+                <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="text-sm font-semibold text-gray-950 dark:text-white">Resumen del turno</h3>
+                    @if ($mediosConDif > 0)
+                        <span class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">
+                            {{ $mediosConDif }} {{ $mediosConDif === 1 ? 'medio descuadrado' : 'medios descuadrados' }}
+                        </span>
+                    @endif
+                </div>
                 <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                     Esperado por medio. Al cerrar confirmás cada uno.
                 </p>
             </div>
-            @if ($mediosConDif > 0)
-                <span class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">
-                    {{ $mediosConDif }} {{ $mediosConDif === 1 ? 'medio descuadrado' : 'medios descuadrados' }}
+            <p class="grid gap-0.5 sm:justify-items-end">
+                <span @class([
+                    'inline-flex items-center gap-2 text-lg leading-tight font-bold',
+                    'text-emerald-700 dark:text-emerald-300' => $sesion->estaAbierta(),
+                    'text-amber-700 dark:text-amber-300' => ! $sesion->estaAbierta(),
+                ])>
+                    <span aria-hidden="true" class="size-2.5 shrink-0 rounded-full bg-current"></span>
+                    {{ $sesion->estado_sesion->etiqueta() }}
                 </span>
-            @endif
+                <span class="text-xs tabular-nums text-gray-500 dark:text-gray-400">
+                    Apertura <time datetime="{{ $sesion->fecha_apertura->toAtomString() }}">{{ $sesion->fecha_apertura->format('d/m/Y H:i') }}</time>
+                </span>
+            </p>
         </header>
         <div class="overflow-x-auto">
             <table class="w-full text-sm text-start">
@@ -180,7 +195,7 @@
                         color="gray"
                         size="lg"
                         icon="heroicon-m-x-circle"
-                        class="min-w-40"
+                        class="w-full min-w-40 sm:w-auto"
                     >
                         Anular turno vacío
                     </x-filament::button>
@@ -195,7 +210,7 @@
                         icon="heroicon-m-lock-closed"
                         wire:click="revisarCierre"
                         :disabled="$cierreBloqueado"
-                        class="min-w-40"
+                        class="w-full min-w-40 sm:w-auto"
                     >
                         Revisar cierre
                     </x-filament::button>
@@ -212,7 +227,7 @@
                         color="danger"
                         size="lg"
                         icon="heroicon-m-lock-closed"
-                        class="min-w-40"
+                        class="w-full min-w-40 sm:w-auto"
                     >
                         Confirmar cierre
                     </x-filament::button>

@@ -5,7 +5,7 @@
         $sesion = $this->sesionParaCerrar();
         $abierta = $sesion !== null;
         $pendientes = $this->pendientes();
-        $historial = $this->historial();
+
         $declarados = is_array($this->data['medios_declarados'] ?? null)
             ? $this->data['medios_declarados']
             : [];
@@ -15,11 +15,7 @@
         $cierreBloqueado = $abierta && $mediosConDif > 0 && $justificacion === '';
     @endphp
 
-    <div @class([
-        'mx-auto w-full space-y-5',
-        'max-w-3xl' => ! $abierta,
-        'max-w-5xl' => $abierta,
-    ])>
+    <div class="w-full space-y-5">
         @if ($pendientes->isNotEmpty() && $this->sesionEnConteo === null)
             <section class="space-y-3">
                 @foreach ($pendientes as $pendiente)
@@ -59,9 +55,16 @@
             @endif
         </form>
 
-        @include('filament.negocio.pages.caja.historial', [
-            'historial' => $historial,
-            'moneda' => $moneda,
-        ])
     </div>
+
+    <x-filament::modal
+        id="historial-sesiones-caja"
+        class="caja-historial-modal"
+        sticky-header
+        width="7xl"
+        heading="Historial de mi caja por día"
+        description="Elegí un día para ver sus sesiones y después las ventas de cada turno."
+    >
+        {{ $this->table }}
+    </x-filament::modal>
 </x-filament-panels::page>

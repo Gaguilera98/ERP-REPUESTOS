@@ -289,13 +289,9 @@
                                 >
                                     <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">{{ $moneda }} {{ $fila['monto_apertura'] }}</td>
                                     <td class="px-3 py-2">
-                                        @if ($fila['abierta'])
-                                            <span class="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">Abierta</span>
-                                        @elseif ($fila['pendiente'])
-                                            <span class="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">Por contar</span>
-                                        @else
-                                            <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-700 dark:bg-white/10 dark:text-gray-200">Cerrada</span>
-                                        @endif
+                                        <x-filament::badge :color="\App\Enums\EstadoCajaSesion::from($fila['estado'])->getColor()">
+                                            {{ $fila['etiqueta'] }}
+                                        </x-filament::badge>
                                     </td>
                                     <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">
                                         {{ $fila['fecha_apertura'] ?? '—' }}

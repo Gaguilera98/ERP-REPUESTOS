@@ -11,15 +11,23 @@ use App\Enums\TipoPrecioCliente;
 use App\Filament\Negocio\Pages\CajaDelNegocio;
 use App\Filament\Negocio\Resources\Clientes\Pages\CreateCliente;
 use App\Filament\Negocio\Resources\Impuestos\Pages\ManageImpuestos;
+use App\Livewire\Negocio\Caja\SesionesDelDia;
+use App\Livewire\Negocio\Caja\VentasDeSesion;
+use App\Models\Almacen;
 use App\Models\CajaSesion;
 use App\Models\Cliente;
 use App\Models\ClienteDocumento;
 use App\Models\Impuesto;
+use App\Models\Pago;
+use App\Models\PagoAplicacion;
 use App\Models\Sucursal;
+use App\Models\SucursalAlmacen;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\TipoDocumentoAtributo;
 use App\Models\TipoDocumentoIdentidad;
+use App\Models\Venta;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -290,4 +298,151 @@ it('anula el turno vacío aunque un supervisor lo cierre', function () {
 
     expect($cerrada->estado_sesion)->toBe(EstadoCajaSesion::Anulada)
         ->and($cerrada->supervisor_id)->toBeNull();
+});
+
+it('pagina mis sesiones y filtra por un día sin mostrar las de otro vendedor', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal] = negocioConCaja('historial-sesiones');
+    $sesiones = CajaSesion::factory()->count(12)->sequence(fn ($sequence) => [
+        'fecha_apertura' => now()->subDays($sequence->index + 1)->startOfDay(),
+    ])->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada]);
+    $ajena = CajaSesion::factory()->create(['user_id' => $supervisor->id, 'sucursal_id' => $sucursal->id]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(CajaDelNegocio::class)
+        ->assertCanSeeTableRecords($sesiones->take(10), inOrder: true)
+        ->assertCanNotSeeTableRecords([$sesiones[10], $sesiones[11], $ajena])
+        ->call('gotoPage', 2)
+        ->assertCanSeeTableRecords([$sesiones[10], $sesiones[11]])
+        ->filterTable('dia', ['fecha' => $sesiones[0]->fecha_apertura->toDateString()])
+        ->assertCanSeeTableRecords([$sesiones[0]])
+        ->assertCountTableRecords(1)
+        ->resetTableFilters()
+        ->assertCountTableRecords(12);
+});
+
+it('muestra las ventas de la sesión elegida sin duplicar pagos divididos ni mezclar sesiones', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal] = negocioConCaja('detalle-sesion');
+    $almacen = Almacen::factory()->create();
+    SucursalAlmacen::query()->create(['sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'es_principal' => true]);
+    $sesion = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id]);
+    $venta = Venta::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'codigo' => 'VNT-PRUEBA-SESION']);
+    foreach (['40.00', '60.00'] as $monto) {
+        $pago = Pago::factory()->create(['caja_sesion_id' => $sesion->id, 'monto' => $monto]);
+        PagoAplicacion::factory()->create(['pago_id' => $pago->id, 'venta_id' => $venta->id, 'monto' => $monto]);
+    }
+    $otraVenta = Venta::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'codigo' => 'VNT-OTRA-SESION']);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $pagina = Livewire::actingAs($cajero, 'tenant')->test(CajaDelNegocio::class)
+        ->mountAction(TestAction::make('verSesiones')->table($sesion))
+        ->assertActionMounted(TestAction::make('verSesiones')->table($sesion));
+
+    $tabla = Livewire::actingAs($cajero, 'tenant')->test(SesionesDelDia::class, ['fecha' => $sesion->fecha_apertura->toDateString()])
+        ->mountAction(TestAction::make('verSesion')->table($sesion))
+        ->assertActionMounted(TestAction::make('verSesion')->table($sesion));
+    Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $sesion->id])
+        ->assertCanSeeTableRecords([$venta])
+        ->assertCanNotSeeTableRecords([$otraVenta])
+        ->assertCountTableRecords(1);
+
+    $detalle = $tabla->instance()->getMountedAction()->getModalContent()->getData();
+
+    expect($detalle['arqueo']['total_cobros'])->toBe('100.00');
+});
+
+it('rechaza consultar el detalle de la sesión de otro vendedor', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal] = negocioConCaja('detalle-ajeno');
+    $ajena = CajaSesion::factory()->create(['user_id' => $supervisor->id, 'sucursal_id' => $sucursal->id]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    Livewire::actingAs($cajero, 'tenant')->test(SesionesDelDia::class, ['fecha' => $ajena->fecha_apertura->toDateString()])
+        ->mountAction(TestAction::make('verSesion')->table($ajena))
+        ->assertActionNotMounted();
+});
+
+it('abre el historial desde las acciones superiores de caja', function () {
+    ['cajero' => $cajero] = negocioConCaja('menu-historial');
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(CajaDelNegocio::class)
+        ->assertActionExists('historialSesiones')
+        ->callAction('historialSesiones')
+        ->assertDispatched('open-modal', id: 'historial-sesiones-caja');
+});
+
+it('agrupa varias sesiones por apertura y conserva el día aunque cierre después de medianoche', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'supervisor' => $supervisor] = negocioConCaja('dias-agrupados');
+    $primera = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada, 'fecha_apertura' => '2026-10-01 18:00:00', 'fecha_cierre' => '2026-10-01 19:00:00']);
+    $segunda = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada, 'fecha_apertura' => '2026-10-01 20:00:00', 'fecha_cierre' => '2026-10-02 00:20:00']);
+    $otra = CajaSesion::factory()->create(['user_id' => $supervisor->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada, 'fecha_apertura' => '2026-10-01 20:00:00']);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $pagina = Livewire::actingAs($cajero, 'tenant')->test(CajaDelNegocio::class)
+        ->assertCountTableRecords(1)
+        ->mountAction(TestAction::make('verSesiones')->table($primera))
+        ->assertActionMounted(TestAction::make('verSesiones')->table($primera));
+
+    $dias = $pagina->instance()->getTableRecords();
+    expect((int) $dias->first()->sesiones)->toBe(2);
+    expect((int) $dias->first()->cerradas)->toBe(2);
+    $fecha = $pagina->instance()->getMountedAction()->getModalContent()->getData()['fecha'];
+    Livewire::actingAs($cajero, 'tenant')->test(SesionesDelDia::class, ['fecha' => $fecha])
+        ->assertCanSeeTableRecords([$primera, $segunda])
+        ->assertCanNotSeeTableRecords([$otra]);
+});
+
+it('pagina sesiones del día y permite ampliar a 25 filas', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal] = negocioConCaja('sesiones-paginadas');
+    $sesiones = CajaSesion::factory()->count(12)->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $tabla = Livewire::actingAs($cajero, 'tenant')->test(SesionesDelDia::class, ['fecha' => now()->toDateString()]);
+    expect($tabla->instance()->getTableRecords())->toHaveCount(10);
+    $tabla->call('gotoPage', 2, 'sesionesDelDiaPage');
+    expect($tabla->instance()->getTableRecords())->toHaveCount(2);
+    $tabla->set('tableRecordsPerPage', 25)->assertCanSeeTableRecords($sesiones);
+    expect($tabla->instance()->getTableRecords())->toHaveCount(12);
+    $tabla->mountAction(TestAction::make('verSesion')->table($sesiones[0]))
+        ->assertActionMounted(TestAction::make('verSesion')->table($sesiones[0]));
+});
+
+it('pagina ventas y bloquea el acceso a ventas de sesiones ajenas', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'supervisor' => $supervisor] = negocioConCaja('ventas-paginadas');
+    $almacen = Almacen::factory()->create();
+    SucursalAlmacen::query()->create(['sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'es_principal' => true]);
+    $sesion = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id]);
+    $ventas = Venta::factory()->count(12)->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id]);
+    foreach ($ventas as $venta) {
+        $pago = Pago::factory()->create(['caja_sesion_id' => $sesion->id]);
+        PagoAplicacion::factory()->create(['pago_id' => $pago->id, 'venta_id' => $venta->id]);
+    }
+    $ajena = CajaSesion::factory()->create(['user_id' => $supervisor->id, 'sucursal_id' => $sucursal->id]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $tabla = Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $sesion->id]);
+    expect($tabla->instance()->getTableRecords())->toHaveCount(10);
+    $tabla->call('gotoPage', 2, 'ventasDeSesionPage');
+    expect($tabla->instance()->getTableRecords())->toHaveCount(2);
+    $tabla->set('tableRecordsPerPage', 25)->assertCanSeeTableRecords($ventas);
+    expect($tabla->instance()->getTableRecords())->toHaveCount(12);
+    Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $ajena->id])->assertNotFound();
+});
+
+it('abre el detalle completo al primer intento y al alternar entre sesiones', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal] = negocioConCaja('modal-sesion-repetida');
+    $primera = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada, 'monto_apertura' => '17.00']);
+    $segunda = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada, 'monto_apertura' => '34.00']);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $tabla = Livewire::actingAs($cajero, 'tenant')->test(SesionesDelDia::class, ['fecha' => now()->toDateString()]);
+
+    foreach ([$primera, $segunda, $primera] as $sesion) {
+        $tabla->mountAction(TestAction::make('verSesion')->table($sesion))
+            ->assertActionMounted(TestAction::make('verSesion')->table($sesion));
+        $accion = $tabla->instance()->getMountedAction();
+        expect($accion->getModalHeading())->toBe('Sesión #'.$sesion->id);
+        $vista = $accion->getModalContent();
+        expect($vista->getData()['sesion']->id)->toBe($sesion->id);
+        expect($vista->getData()['arqueo']['apertura'])->toBe($sesion->monto_apertura);
+        expect($vista->render())->toContain('Arqueo por medio');
+        $tabla->unmountAction();
+    }
 });
