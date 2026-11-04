@@ -18,7 +18,7 @@
                         {{ $flashVarianteId ? 'Entrada express' : 'Producto + entrada express' }}
                     </div>
                     <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Compra flash al mismo almacén de la venta. Queda stock listo para vender.
+                        Compra al proveedor ocasional para este almacén. Suma stock y costo; no descuenta dinero de caja.
                     </div>
                 </div>
                 <button type="button" wire:click="cerrarFlash" class="rounded-lg px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">✕</button>
@@ -61,9 +61,14 @@
                 </div>
             </div>
 
+            <label class="mt-4 flex items-center gap-3 text-sm text-gray-950 dark:text-white">
+                <x-filament::input.checkbox wire:model="flashConfirmo" />
+                <span>Confirmo estos costos por unidad</span>
+            </label>
+
             <div class="mt-5 flex justify-end gap-2">
                 <x-filament::button type="button" color="gray" wire:click="cerrarFlash">Cancelar</x-filament::button>
-                <x-filament::button type="button" color="warning" wire:click="ejecutarFlash">Confirmar entrada</x-filament::button>
+                <x-filament::button type="button" color="warning" wire:click="ejecutarFlash" wire:loading.attr="disabled">Confirmar entrada</x-filament::button>
             </div>
         </div>
     </div>

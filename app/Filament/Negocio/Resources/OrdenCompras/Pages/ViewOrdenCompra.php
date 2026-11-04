@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Resources\OrdenCompras\Pages;
 
+use App\Filament\Negocio\Resources\OrdenCompras\Actions\ReasignarProveedorFlashAction;
 use App\Filament\Negocio\Resources\OrdenCompras\Actions\RecibirMercaderiaAction;
 use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
 use App\Filament\Negocio\Resources\OrdenCompras\Schemas\OrdenCompraForm;
@@ -15,6 +16,7 @@ class ViewOrdenCompra extends ViewRecord
     {
         return [
             RecibirMercaderiaAction::make(),
+            ReasignarProveedorFlashAction::make(),
         ];
     }
 

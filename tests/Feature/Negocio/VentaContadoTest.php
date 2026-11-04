@@ -2,6 +2,7 @@
 
 use App\Caja\AbrirCajaSesion;
 use App\Compras\GuardarOrdenCompra;
+use App\Compras\ReasignarProveedorFlash;
 use App\Compras\RecibirMercaderia;
 use App\Enums\EstadoVenta;
 use App\Enums\MetodoPago;
@@ -9,6 +10,8 @@ use App\Enums\TipoCliente;
 use App\Enums\TipoDescuento;
 use App\Enums\TipoMovimientoInventario;
 use App\Filament\Negocio\Pages\MostradorDelNegocio;
+use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
+use App\Filament\Negocio\Resources\OrdenCompras\Pages\ViewOrdenCompra;
 use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
@@ -17,6 +20,7 @@ use App\Models\ClienteDocumento;
 use App\Models\InventarioStock;
 use App\Models\MovimientoInventario;
 use App\Models\NegocioConfiguracion;
+use App\Models\OrdenCompra;
 use App\Models\Pago;
 use App\Models\PagoAplicacion;
 use App\Models\ProductoMaestro;
@@ -36,6 +40,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 uses(RefreshDatabase::class);
 
@@ -898,4 +903,114 @@ it('registra una empresa rápida desde el mostrador', function () {
         ->and($cliente->nombres)->toBeNull()
         ->and($pagina->get('clienteId'))->toBe($cliente->id)
         ->and($cliente->documentos->first()->valores_json['numero'])->toBe('102938475');
+});
+
+it('exige confirmar costo en entrada express sin mover caja', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante] = negocioConMostrador('express-ui');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '50'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $pagina = Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)
+        ->assertSet('mostrarFlash', true)
+        ->set('flashCantidad', '2')
+        ->set('flashCosto', '15')
+        ->call('ejecutarFlash')
+        ->assertSet('mostrarFlash', true)
+        ->set('flashConfirmo', true)
+        ->call('ejecutarFlash')
+        ->assertSet('mostrarFlash', false)
+        ->assertHasNoErrors();
+
+    expect($pagina->get('lineas'))->toHaveCount(1);
+    expect($variante->fresh()->precio_costo)->toBe('15.0000');
+    expect(InventarioStock::query()->where('producto_variante_id', $variante->id)->where('almacen_id', $almacen->id)->value('cantidad_actual'))->toBe('2.0000');
+    expect(Pago::query()->count())->toBe(0);
+    expect(MovimientoInventario::query()->count())->toBe(1);
+    $pagina->call('ejecutarFlash');
+    expect(MovimientoInventario::query()->count())->toBe(1);
+});
+
+it('crea una pieza express desde el mostrador con ficha mínima y SKU automático', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal] = negocioConMostrador('express-minima');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('abrirFlashNuevo')
+        ->set('flashNombre', 'Bujía express')
+        ->set('flashPrecioVenta', '28')
+        ->set('flashConfirmo', true)
+        ->set('flashCosto', '15')
+        ->call('ejecutarFlash')
+        ->assertSet('mostrarFlash', false);
+
+    $pieza = ProductoMaestro::query()->where('nombre', 'Bujía express')->firstOrFail();
+    expect($pieza->categoria->nombre)->toBe('General');
+    expect($pieza->unidadBase->simbolo)->toBe('pza');
+    expect($pieza->marca_id)->toBeNull();
+    expect(ProductoVariante::query()->where('producto_maestro_id', $pieza->id)->firstOrFail()->sku)->toStartWith('FLASH-');
+});
+
+it('reasigna proveedor desde compras sin duplicar stock ni alterar costo o caja', function () {
+    ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante] = negocioConMostrador('express-proveedor');
+    $flash = app(CompraFlash::class)->ejecutar(['almacen_id' => $almacen->id, 'producto_variante_id' => $variante->id, 'cantidad' => '2', 'costo_unitario' => '15', 'confirmo_costos' => true], $supervisor);
+    $proveedor = Proveedor::factory()->create();
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($supervisor, 'tenant')->test(ViewOrdenCompra::class, ['record' => $flash['orden']->id])
+        ->callAction('reasignarProveedor', data: ['proveedor_id' => $proveedor->id])
+        ->assertHasNoActionErrors()
+        ->assertRedirect(OrdenCompraResource::getUrl('view', ['record' => $flash['orden']]));
+
+    Livewire::actingAs($supervisor, 'tenant')->test(ViewOrdenCompra::class, ['record' => $flash['orden']->id])
+        ->assertFormSet(['proveedor_id' => $proveedor->id])
+        ->assertActionHidden('reasignarProveedor');
+
+    expect($flash['orden']->fresh()->proveedor_id)->toBe($proveedor->id);
+    expect($flash['orden']->fresh()->total)->toBe('30.00');
+    expect(InventarioStock::query()->where('producto_variante_id', $variante->id)->where('almacen_id', $almacen->id)->value('cantidad_actual'))->toBe('2.0000');
+    expect($variante->fresh()->precio_costo)->toBe('15.0000');
+    expect(MovimientoInventario::query()->count())->toBe(1);
+    expect(Pago::query()->count())->toBe(0);
+});
+
+it('impide al cajero reasignar proveedor de una express', function () {
+    ['cajero' => $cajero, 'almacen' => $almacen, 'variante' => $variante] = negocioConMostrador('express-permiso');
+    $flash = app(CompraFlash::class)->ejecutar(['almacen_id' => $almacen->id, 'producto_variante_id' => $variante->id, 'cantidad' => '1', 'costo_unitario' => '15', 'confirmo_costos' => true], $cajero);
+    $proveedor = Proveedor::factory()->create();
+
+    expect(fn () => app(ReasignarProveedorFlash::class)->ejecutar($flash['orden'], $proveedor->id, $cajero))->toThrow(HttpException::class);
+    expect($flash['orden']->fresh()->proveedor_id)->not->toBe($proveedor->id);
+});
+it('rechaza costo inválido en express sin crear compra ni movimiento', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'variante' => $variante] = negocioConMostrador('express-invalida');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)
+        ->set('flashConfirmo', true)
+        ->set('flashCosto', '0')
+        ->call('ejecutarFlash')
+        ->assertSet('mostrarFlash', true);
+
+    expect(OrdenCompra::query()->count())->toBe(0);
+    expect(MovimientoInventario::query()->count())->toBe(0);
+    expect(Pago::query()->count())->toBe(0);
+});
+
+it('rechaza proveedor de otro negocio al reasignar express', function () {
+    ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante] = negocioConMostrador('express-aislada');
+    $tenant = tenant();
+    $flash = app(CompraFlash::class)->ejecutar(['almacen_id' => $almacen->id, 'producto_variante_id' => $variante->id, 'cantidad' => '1', 'costo_unitario' => '15', 'confirmo_costos' => true], $supervisor);
+    tenancy()->end();
+    $otro = Tenant::factory()->create();
+    tenancy()->initialize($otro);
+    $proveedor = Proveedor::factory()->create();
+    tenancy()->end();
+    tenancy()->initialize($tenant);
+
+    expect(fn () => app(ReasignarProveedorFlash::class)->ejecutar($flash['orden'], $proveedor->id, $supervisor))->toThrow(ValidationException::class);
+    expect($flash['orden']->fresh()->proveedor_id)->not->toBe($proveedor->id);
 });

@@ -584,8 +584,8 @@ trait ManejaMostrador
     public function cerrarFlash(): void
     {
         $this->mostrarFlash = false;
-        $this->flashVarianteId = null;
         $this->flashConfirmo = false;
+        $this->flashVarianteId = null;
     }
 
     public function limpiarUltimaVenta(): void
@@ -636,6 +636,10 @@ trait ManejaMostrador
 
     public function ejecutarFlash(CompraFlash $compraFlash): void
     {
+        if (! $this->mostrarFlash) {
+            return;
+        }
+
         $usuario = $this->usuario();
 
         try {
@@ -658,6 +662,7 @@ trait ManejaMostrador
 
             $resultado = $compraFlash->ejecutar($payload, $usuario);
             $this->mostrarFlash = false;
+            $this->flashConfirmo = false;
             $this->agregarVariante($resultado['variante']);
             $this->busqueda = '';
 

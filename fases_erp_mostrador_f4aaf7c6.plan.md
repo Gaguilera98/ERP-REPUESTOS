@@ -129,7 +129,7 @@ Tener en cuenta: el select de sucursal del mostrador lista todas las activas. Cu
 
 Tener en cuenta (hablarlo después): aviso al cobrar **sin cliente**. Hoy el contado puede ir sin ficha («Mostrador · Consumidor final») y eso es válido. Un modal de «¿estás seguro?» en cada nota frena el mostrador y el cajero lo salta. No implementarlo ahora. Cuando se hable: no bloquear el cobro de todos los días; si hay aviso, que sea suave o solo cuando sin cliente la venta queda mal (factura, seña, fiado: ahí ya es obligatorio, no pregunta). Opcional: chip visible, o preguntar solo si el total o el descuento son altos.
 
-Tener en cuenta (falta análisis, no tocar): **compra flash / entrada express**. El servicio y el modal ya están, pero no se pulen ni se prueban hasta hablarlo. Hoy «Confirmar entrada» no marca `confirmo_costos` (el servicio rechaza). Tampoco está el alta de proveedor/contacto ni reasignar el ocasional. Ver `esstructuraybasecondiciones.md` punto 5 y futuro ítem 13.
+**Cierre de entrada express:** antes de «Confirmar entrada» se exige el check «Confirmo estos costos por unidad», igual que al recibir mercadería. Producto existente o alta mínima (nombre, cantidad, costo y precio; SKU opcional, General / pza, sin marca). Compra ocasional completada con kardex y PPP, sin mover caja. En la vista de Compras, «Asignar proveedor real» requiere permiso de actualizar y solo cambia proveedor/contacto, sin repetir stock ni costos. El proveedor se crea en su catálogo. Egreso de caja: fase 10; corrección de costo: fase 9.
 
 ## Fase 6. Seña, fiado y adelanto
 
