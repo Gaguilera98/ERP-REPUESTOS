@@ -52,6 +52,7 @@
             :tipos-descuento="$tiposDescuento"
             :mostrar-descuento-venta="$mostrarDescuentoVenta"
             :tipo-descuento-venta="$tipoDescuentoVenta"
+            :comprobantes-obligatorios="$comprobantesObligatorios"
             :panel="$panel"
         />
     </div>

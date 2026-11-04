@@ -682,7 +682,7 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `sentido` (enum: 'cobro', 'reembolso') -- Default: 'cobro'
   * `metodo_pago` (varchar) -- En v1: `efectivo`, `qr_externo`, `voucher_tarjeta`, `transferencia`. Sin pasarela. Handlers en `App\Ventas\Pagos`
   * `monto` (decimal 10,2) -- Siempre positivo. El sentido dice si entra o sale
-  * `comprobante_archivo_path` (varchar, Nullable) -- Ruta relativa en disco local. El tenancy separa por tenant; S3 después
+  * `comprobante_archivo_path` (varchar, Nullable) -- Ruta relativa en disco local. El tenancy separa por tenant; S3 después. Solo PDF o imagen (jpg, jpeg, png, webp), máx. 5 MB. En `negocio_configuracion`: `comprobante_obligatorio_qr_externo`, `comprobante_obligatorio_transferencia` y `comprobante_obligatorio_voucher_tarjeta` (boolean, default false) dicen si ese medio exige el archivo. Efectivo no acepta adjunto.
   * `numero_referencia_banco` (varchar, Nullable)
   * `qr_id_transaccion_banco` (varchar, Nullable)
   * `estado_pago` (enum: 'pendiente', 'aprobado', 'expirado') -- Default: 'aprobado'. Solo `aprobado` cuenta para el saldo

@@ -5,6 +5,7 @@ namespace App\Ventas\Pagos\Concerns;
 use App\Compras\Montos;
 use App\Enums\MetodoPago;
 use App\Models\CajaSesion;
+use App\Models\NegocioConfiguracion;
 use Illuminate\Validation\ValidationException;
 
 trait PreparaPagoBase
@@ -36,6 +37,15 @@ trait PreparaPagoBase
         $qr = is_string($qr) ? trim($qr) : null;
         $path = $pago['comprobante_archivo_path'] ?? null;
         $path = is_string($path) ? trim($path) : null;
+        $path = $path !== '' ? $path : null;
+
+        if ($metodo->aceptaComprobanteArchivo()
+            && NegocioConfiguracion::query()->first()?->exigeComprobanteArchivo($metodo)
+            && $path === null) {
+            throw ValidationException::withMessages([
+                "pagos.{$indice}.comprobante" => 'Adjuntá el comprobante (PDF o imagen).',
+            ]);
+        }
 
         return [
             'metodo_pago' => $metodo,
@@ -44,7 +54,7 @@ trait PreparaPagoBase
             'caja_sesion_id' => $caja->id,
             'numero_referencia_banco' => $referencia !== '' ? $referencia : null,
             'qr_id_transaccion_banco' => $qr !== '' ? $qr : null,
-            'comprobante_archivo_path' => $path !== '' ? $path : null,
+            'comprobante_archivo_path' => $path,
         ];
     }
 

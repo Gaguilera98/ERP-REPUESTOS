@@ -12,6 +12,7 @@
     'tiposDescuento',
     'mostrarDescuentoVenta',
     'tipoDescuentoVenta',
+    'comprobantesObligatorios' => [],
     'panel',
 ])
 
@@ -190,8 +191,10 @@
                 @foreach ($pagos as $i => $pago)
                     @php
                         $metodo = $pago['metodo_pago'] ?? '';
+                        $metodoEnum = \App\Enums\MetodoPago::tryFrom($metodo);
                         $pideRef = in_array($metodo, ['transferencia', 'qr_externo', 'voucher_tarjeta'], true);
-                        $pideAdjunto = in_array($metodo, ['transferencia', 'voucher_tarjeta'], true);
+                        $pideAdjunto = $metodoEnum?->aceptaComprobanteArchivo() ?? false;
+                        $adjuntoObligatorio = (bool) ($comprobantesObligatorios[$metodo] ?? false);
                         $iconoMetodo = match ($metodo) {
                             'efectivo' => 'heroicon-m-banknotes',
                             'qr_externo' => 'heroicon-m-qr-code',
@@ -245,8 +248,19 @@
                             @endif
                             @if ($pideAdjunto)
                                 <div wire:key="adjunto-{{ $i }}-{{ $metodo }}">
-                                    <x-negocio.label>Adjunto</x-negocio.label>
-                                    <input type="file" wire:model="pagos.{{ $i }}.comprobante" class="block w-full text-xs text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-gray-700 hover:file:bg-gray-200 dark:file:bg-white/10 dark:file:text-gray-200" />
+                                    <x-negocio.label>
+                                        Adjunto
+                                        @if ($adjuntoObligatorio)
+                                            <span class="text-warning-600">*</span>
+                                        @endif
+                                        <span class="font-normal normal-case tracking-normal">(PDF o imagen)</span>
+                                    </x-negocio.label>
+                                    <input
+                                        type="file"
+                                        accept=".pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                                        wire:model="pagos.{{ $i }}.comprobante"
+                                        class="block w-full text-xs text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-gray-700 hover:file:bg-gray-200 dark:file:bg-white/10 dark:file:text-gray-200"
+                                    />
                                     @error('pagos.'.$i.'.comprobante')
                                         <p class="mt-1 text-xs font-semibold text-danger-600">{{ $message }}</p>
                                     @enderror

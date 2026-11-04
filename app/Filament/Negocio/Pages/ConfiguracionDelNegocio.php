@@ -9,6 +9,7 @@ use App\Models\TenantUser;
 use BackedEnum;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Utilities\Get;
@@ -63,6 +64,9 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
             'descuento_max_importe' => $configuracion->descuento_max_importe,
             'moneda' => $configuracion->moneda->value,
             'modo_moneda' => $configuracion->modo_moneda->value,
+            'comprobante_obligatorio_qr_externo' => $configuracion->comprobante_obligatorio_qr_externo,
+            'comprobante_obligatorio_transferencia' => $configuracion->comprobante_obligatorio_transferencia,
+            'comprobante_obligatorio_voucher_tarjeta' => $configuracion->comprobante_obligatorio_voucher_tarjeta,
         ]);
     }
 
@@ -105,6 +109,18 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
                     )->all())
                     ->required()
                     ->native(false),
+                Toggle::make('comprobante_obligatorio_qr_externo')
+                    ->label('Comprobante obligatorio en QR')
+                    ->helperText('PDF o imagen. Si está apagado, el adjunto es opcional.')
+                    ->inline(false),
+                Toggle::make('comprobante_obligatorio_transferencia')
+                    ->label('Comprobante obligatorio en transferencia')
+                    ->helperText('PDF o imagen. La referencia del banco sigue siendo obligatoria.')
+                    ->inline(false),
+                Toggle::make('comprobante_obligatorio_voucher_tarjeta')
+                    ->label('Comprobante obligatorio en voucher')
+                    ->helperText('PDF o imagen. El número del voucher sigue siendo obligatorio.')
+                    ->inline(false),
             ])
             ->statePath('data');
     }

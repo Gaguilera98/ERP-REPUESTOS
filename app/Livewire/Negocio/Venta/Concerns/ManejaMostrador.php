@@ -687,6 +687,8 @@ trait ManejaMostrador
         $this->resetValidation();
 
         try {
+            $this->validarComprobantesDePago();
+
             $pagos = [];
 
             foreach ($this->pagos as $indice => $pago) {
@@ -902,8 +904,42 @@ trait ManejaMostrador
             $this->pagos[$indice]['qr_id_transaccion_banco'] = '';
         }
 
-        if (! in_array($metodo, ['transferencia', 'voucher_tarjeta'], true)) {
+        $metodoEnum = MetodoPago::tryFrom($metodo);
+
+        if ($metodoEnum === null || ! $metodoEnum->aceptaComprobanteArchivo()) {
             $this->pagos[$indice]['comprobante'] = null;
+        }
+    }
+
+    private function validarComprobantesDePago(): void
+    {
+        $config = NegocioConfiguracion::query()->first();
+        $mimes = implode(',', NegocioConfiguracion::COMPROBANTE_EXTENSIONES);
+        $reglas = [];
+        $mensajes = [];
+
+        foreach ($this->pagos as $indice => $pago) {
+            $metodo = MetodoPago::tryFrom((string) ($pago['metodo_pago'] ?? ''));
+
+            if ($metodo === null || ! $metodo->aceptaComprobanteArchivo()) {
+                continue;
+            }
+
+            $campo = "pagos.{$indice}.comprobante";
+            $obligatorio = $config?->exigeComprobanteArchivo($metodo) ?? false;
+            $reglas[$campo] = [
+                $obligatorio ? 'required' : 'nullable',
+                'file',
+                'mimes:'.$mimes,
+                'max:'.NegocioConfiguracion::COMPROBANTE_MAX_KB,
+            ];
+            $mensajes["{$campo}.required"] = 'Adjuntá el comprobante (PDF o imagen).';
+            $mensajes["{$campo}.mimes"] = 'El comprobante tiene que ser PDF o imagen.';
+            $mensajes["{$campo}.max"] = 'El comprobante no puede pasar de 5 MB.';
+        }
+
+        if ($reglas !== []) {
+            $this->validate($reglas, $mensajes);
         }
     }
 
@@ -920,6 +956,7 @@ trait ManejaMostrador
             'metodos' => MetodoPago::cases(),
             'tiposDescuento' => TipoDescuento::cases(),
             'moneda' => NegocioConfiguracion::codigoMoneda(),
+            'comprobantesObligatorios' => NegocioConfiguracion::query()->first()?->comprobantesObligatorios() ?? [],
             'cajaAbierta' => $this->cajaAbierta(),
             'subtotalBruto' => $this->subtotalBrutoTentativo(),
             'descuentoTotal' => $this->descuentoTotalTentativo(),

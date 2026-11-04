@@ -23,4 +23,12 @@ enum MetodoPago: string
     {
         return $this === self::Efectivo;
     }
+
+    public function aceptaComprobanteArchivo(): bool
+    {
+        return match ($this) {
+            self::QrExterno, self::VoucherTarjeta, self::Transferencia => true,
+            self::Efectivo => false,
+        };
+    }
 }

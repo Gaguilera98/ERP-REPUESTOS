@@ -276,6 +276,68 @@ it('no deja descuento de venta mayor al total', function () {
     ], $cajero))->toThrow(ValidationException::class);
 });
 
+it('exige el comprobante del QR si la configuración lo pide', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('qr-comprobante');
+
+    cargarStock($variante, $almacen, $cajero, $ocasional, '1');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '10'], $cajero);
+    NegocioConfiguracion::query()->update(['comprobante_obligatorio_qr_externo' => true]);
+
+    expect(fn () => app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id,
+        'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [[
+            'metodo_pago' => MetodoPago::QrExterno->value,
+            'monto' => '100',
+        ]],
+    ], $cajero))->toThrow(ValidationException::class);
+
+    app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id,
+        'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [[
+            'metodo_pago' => MetodoPago::QrExterno->value,
+            'monto' => '100',
+            'comprobante_archivo_path' => 'pagos/qr-1.pdf',
+        ]],
+    ], $cajero);
+
+    expect(Pago::query()->value('comprobante_archivo_path'))->toBe('pagos/qr-1.pdf');
+});
+
+it('muestra el adjunto del QR y lo exige desde el mostrador si está configurado', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('qr-adjunto-ui');
+
+    cargarStock($variante, $almacen, $cajero, $ocasional, '1');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '10'], $cajero);
+    NegocioConfiguracion::query()->update(['comprobante_obligatorio_qr_externo' => true]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')
+        ->test(MostradorDelNegocio::class)
+        ->set('pagos.0.metodo_pago', MetodoPago::QrExterno->value)
+        ->set('pagos.0.monto', '100')
+        ->set('lineas', [[
+            'producto_variante_id' => $variante->id,
+            'sku' => $variante->sku,
+            'nombre' => 'Pieza',
+            'cantidad' => '1',
+            'precio_unitario' => '100.00',
+            'nota_precio' => '',
+            'precio_costo' => '40.0000',
+            'tipo_descuento' => '',
+            'valor_descuento' => '',
+            'disponible' => '1',
+            'unidad_simbolo' => 'pza',
+        ]])
+        ->assertSee('Adjunto')
+        ->assertSee('PDF o imagen')
+        ->call('completar')
+        ->assertHasErrors(['pagos.0.comprobante']);
+});
+
 it('permite cobro mixto y guarda path de comprobante', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('mixto');
 

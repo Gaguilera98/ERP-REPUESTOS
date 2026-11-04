@@ -17,6 +17,9 @@ return new class extends Migration
             $table->enum('moneda', ['BOB', 'PEN', 'BRL'])->default('BOB');
             $table->enum('modo_moneda', ['solo_moneda', 'con_dolar'])->default('solo_moneda');
             $table->unsignedBigInteger('siguiente_numero_venta')->default(1);
+            $table->boolean('comprobante_obligatorio_qr_externo')->default(false);
+            $table->boolean('comprobante_obligatorio_transferencia')->default(false);
+            $table->boolean('comprobante_obligatorio_voucher_tarjeta')->default(false);
             $table->timestamps();
 
             $table->unique('tenant_id');
