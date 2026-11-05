@@ -2,14 +2,18 @@
 
 namespace App\Livewire\Negocio\Caja;
 
+use App\Enums\EstadoVenta;
 use App\Filament\Negocio\Pages\CajaDelNegocio;
 use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
 use App\Models\Venta;
+use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
+use Filament\Support\Colors\Color;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -52,6 +56,44 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                 TextColumn::make('codigo')->label('Venta')->extraCellAttributes(['data-label' => 'Venta']),
                 TextColumn::make('created_at')->label('Fecha y hora')->extraCellAttributes(['data-label' => 'Fecha y hora'])->dateTime('d/m/Y H:i'),
                 TextColumn::make('total')->label('Total')->extraCellAttributes(['data-label' => 'Total'])->money(NegocioConfiguracion::codigoMoneda()),
+            ])
+            ->recordActions([
+                Action::make('verDetalle')
+                    ->label('Ver detalle')
+                    ->icon(Heroicon::OutlinedEye)
+                    ->authorize(fn (Venta $record): bool => (bool) auth('tenant')->user()?->can('view', $record))
+                    ->modalHeading(fn (Venta $record): string => $record->tipo_comprobante->etiqueta().' · '.$record->codigo)
+                    ->modalWidth('5xl')
+                    ->extraModalWindowAttributes(['class' => 'caja-modal-window'])
+                    ->stickyModalHeader()
+                    ->stickyModalFooter()
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Cerrar')
+                    ->modalContent(function (Venta $record): View {
+                        abort_unless(auth('tenant')->user()?->can('view', $record), 403);
+
+                        $record->loadMissing([
+                            'cliente',
+                            'usuario',
+                            'sucursal',
+                            'almacen',
+                            'detalles.variante.productoMaestro.unidadBase',
+                            'detalles.unidad',
+                            'impuestos',
+                            'aplicacionesPago.pago',
+                        ]);
+
+                        return view('filament.negocio.pages.caja.detalle-venta', [
+                            'venta' => $record,
+                            'moneda' => NegocioConfiguracion::codigoMoneda(),
+                            'colorEstado' => match ($record->estado) {
+                                EstadoVenta::Completada => Color::Emerald,
+                                EstadoVenta::Anulada, EstadoVenta::Vencida => Color::Red,
+                                EstadoVenta::Pendiente => Color::Amber,
+                                EstadoVenta::Reserva => Color::Blue,
+                            },
+                        ]);
+                    }),
             ])
             ->emptyStateHeading('Esta sesión no tiene ventas registradas');
     }

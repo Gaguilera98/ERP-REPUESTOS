@@ -195,11 +195,8 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
                             ->required()
                             ->default('0'),
                     ]),
-                Grid::make([
-                    'default' => 1,
-                    'sm' => 2,
-                    'xl' => 4,
-                ])
+                Grid::make(1)
+                    ->extraAttributes(['class' => 'caja-declaracion-medios'])
                     ->visible(fn (): bool => $this->sesionParaCerrar() instanceof CajaSesion)
                     ->schema($camposMedios),
                 Textarea::make('justificacion_diferencia')

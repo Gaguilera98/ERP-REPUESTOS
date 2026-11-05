@@ -16,40 +16,49 @@
             <p class="text-sm">Este turno es de un día anterior. El cierre corresponde a esa sesión, no a la caja de hoy.</p>
         </div>
     @endif
-    {{-- Chips de estado --}}
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div class="col-span-2 flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 sm:col-span-1 dark:bg-gray-900 dark:ring-white/10">
+    <div class="space-y-1 text-sm text-gray-600 dark:text-gray-300">
+        <p class="font-semibold text-gray-950 dark:text-white">Sesión #{{ $sesion->id }} · {{ auth('tenant')->user()?->name }}</p>
+        <p>Apertura <time datetime="{{ $sesion->fecha_apertura->toAtomString() }}">{{ $sesion->fecha_apertura->format('d/m/Y H:i') }}</time></p>
+    </div>
+
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
             <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
                 <x-filament::icon icon="heroicon-o-building-storefront" class="size-5" />
             </div>
             <div class="min-w-0">
                 <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Sucursal</p>
-                <p class="truncate text-sm font-semibold text-gray-950 dark:text-white">{{ $sesion->sucursal?->nombre }}</p>
+                <p class="break-words text-sm font-semibold text-gray-950 dark:text-white">{{ $sesion->sucursal?->nombre }}</p>
             </div>
         </div>
-
-        <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-3 py-3 shadow-sm ring-1 ring-gray-950/5 sm:px-4 dark:bg-gray-900 dark:ring-white/10">
+        <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
             <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
                 <x-filament::icon icon="heroicon-o-wallet" class="size-5" />
             </div>
             <div class="min-w-0">
-                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Apertura</p>
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Fondo de apertura</p>
                 <p class="text-sm font-semibold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $arqueo['apertura'] }}</p>
             </div>
         </div>
-
-        <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-3 py-3 shadow-sm ring-1 ring-gray-950/5 sm:px-4 dark:bg-gray-900 dark:ring-white/10">
+        <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+            <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
+                <x-filament::icon icon="heroicon-o-receipt-percent" class="size-5" />
+            </div>
+            <div class="min-w-0">
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Cobrado en esta sesión</p>
+                <p class="text-sm font-semibold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $arqueo['total_cobros'] }}</p>
+            </div>
+        </div>
+        <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-emerald-600/40 dark:bg-gray-900 dark:ring-emerald-400/50">
             <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
                 <x-filament::icon icon="heroicon-o-banknotes" class="size-5" />
             </div>
             <div class="min-w-0">
-                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Teórico efectivo</p>
-                <p class="text-sm font-semibold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $arqueo['teorico_efectivo'] }}</p>
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Efectivo esperado en cajón</p>
+                <p class="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{{ $moneda }} {{ $arqueo['teorico_efectivo'] }}</p>
             </div>
         </div>
-
     </div>
-
     {{-- Resumen del turno --}}
     <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
         <header class="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 border-b border-gray-200 px-5 py-3.5 dark:border-white/10">
@@ -104,7 +113,7 @@
                         @endif
                     </tr>
                     @foreach ($arqueo['por_metodo'] as $fila)
-                        @php($dif = $diferencias[$fila['metodo']] ?? '0.00')
+                        @php $dif = $diferencias[$fila['metodo']] ?? '0.00'; @endphp
                         <tr @class([
                             'border-b border-gray-100 last:border-0 dark:border-white/5',
                             'bg-danger-50/70 dark:bg-danger-500/10' => $mediosConDif > 0 && $dif !== '0.00' && str_starts_with($dif, '-'),
@@ -148,9 +157,9 @@
     {{-- Declaración al cerrar --}}
     <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
         <header class="border-b border-gray-200 px-5 py-3.5 dark:border-white/10">
-            <h3 class="text-sm font-semibold text-gray-950 dark:text-white">Declaración al cerrar</h3>
+            <h3 class="text-sm font-semibold text-gray-950 dark:text-white">Cerrar esta sesión</h3>
             <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                Prellenado con lo esperado. Si cuadra, no toques nada.
+                Revisá lo esperado y declar&aacute; lo contado para cada medio.
             </p>
         </header>
         <div class="space-y-4 p-5">
@@ -172,6 +181,20 @@
             @endif
 
             {{ $this->form }}
+
+            @php
+                $declaracionesCompletas = collect($arqueo['por_metodo'])->every(function (array $fila): bool {
+                    $valor = $this->data['medios_declarados'][$fila['metodo']] ?? null;
+
+                    return is_numeric($valor) && (float) $valor >= 0;
+                });
+            @endphp
+            @if ($declaracionesCompletas && $mediosConDif === 0)
+                <p class="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300" role="status">
+                    <x-filament::icon icon="heroicon-o-check-circle" class="size-5 shrink-0" />
+                    Los importes declarados coinciden con lo esperado.
+                </p>
+            @endif
 
             @if ($justificacionCompleta)
                 <div class="flex gap-3 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 dark:border-emerald-400/40 dark:bg-emerald-400/10 dark:text-emerald-100">

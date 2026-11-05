@@ -20,13 +20,17 @@ use App\Models\ClienteDocumento;
 use App\Models\Impuesto;
 use App\Models\Pago;
 use App\Models\PagoAplicacion;
+use App\Models\ProductoVariante;
 use App\Models\Sucursal;
 use App\Models\SucursalAlmacen;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\TipoDocumentoAtributo;
 use App\Models\TipoDocumentoIdentidad;
+use App\Models\UnidadMedida;
 use App\Models\Venta;
+use App\Models\VentaDetalle;
+use App\Models\VentaImpuesto;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\QueryException;
@@ -445,4 +449,91 @@ it('abre el detalle completo al primer intento y al alternar entre sesiones', fu
         expect($vista->render())->toContain('Arqueo por medio');
         $tabla->unmountAction();
     }
+});
+
+it('abre el detalle de venta con cantidades, precios históricos y montos aplicados', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal] = negocioConCaja('comprobante-venta');
+    $almacen = Almacen::factory()->create();
+    SucursalAlmacen::query()->create(['sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'es_principal' => true]);
+    $sesion = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id]);
+    $venta = Venta::factory()->create([
+        'user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'subtotal' => '120.00', 'descuento' => '30.00', 'total' => '90.00',
+        'notes_internas' => '<script>alert("nota")</script>',
+    ]);
+    $pieza = ProductoVariante::factory()->create(['sku' => 'BUJIA-HIST', 'precio_venta' => '9999.00']);
+    $pieza->productoMaestro->update(['nombre' => 'BUJÍA HISTÓRICA']);
+    $unidad = UnidadMedida::factory()->create(['nombre' => 'Paquete de prueba', 'simbolo' => 'paq']);
+    VentaDetalle::factory()->create([
+        'venta_id' => $venta->id, 'producto_variante_id' => $pieza->id, 'unidad_medida_id' => $unidad->id,
+        'cantidad' => '2', 'factor_a_base' => '4', 'cantidad_base' => '8', 'precio_unitario' => '15.00',
+        'descuento_aplicado' => '20.00', 'total_linea' => '100.00',
+    ]);
+    VentaImpuesto::factory()->create(['venta_id' => $venta->id, 'nombre_impuesto_snapshot' => 'IVA histórico', 'porcentaje_aplicado_snapshot' => '13.00', 'monto_calculado' => '11.70']);
+    foreach ([['efectivo', '40.00'], ['qr_externo', '50.00']] as [$metodo, $monto]) {
+        $pago = Pago::factory()->create(['caja_sesion_id' => $sesion->id, 'metodo_pago' => $metodo, 'monto' => '800.00']);
+        PagoAplicacion::factory()->create(['pago_id' => $pago->id, 'venta_id' => $venta->id, 'monto' => $monto]);
+    }
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $tabla = Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $sesion->id])
+        ->mountAction(TestAction::make('verDetalle')->table($venta))
+        ->assertActionMounted(TestAction::make('verDetalle')->table($venta));
+
+    $accion = $tabla->instance()->getMountedAction();
+    expect($accion->getModalHeading())->toBe('Nota de venta · '.$venta->codigo);
+    $contenido = $accion->getModalContent()->render();
+    expect($contenido)->toContain('Consumidor final', 'Bujía Histórica', 'BUJIA-HIST', '2 paq', '8 pza', 'BOB 15.00', 'BOB 100.00', 'BOB 120.00', 'BOB 30.00', 'BOB 90.00', 'IVA histórico (13%)', 'BOB 11.70', 'Efectivo', 'QR externo', 'BOB 40.00', 'BOB 50.00');
+    expect($contenido)->not->toContain('9999.00', 'BOB 800.00', '<script>');
+    expect($contenido)->toContain('&lt;script&gt;');
+});
+
+it('impide abrir el detalle de una venta ajena a la sesión seleccionada', function (bool $otroNegocio) {
+    ['cajero' => $cajero, 'sucursal' => $sucursal] = negocioConCaja('detalle-venta-aislado');
+    $tenant = tenant();
+    $primera = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada]);
+    $usuarioVenta = $cajero;
+
+    if ($otroNegocio) {
+        tenancy()->end();
+        tenancy()->initialize(Tenant::factory()->create());
+        $usuarioVenta = TenantUser::factory()->create();
+        $sucursal = Sucursal::factory()->create();
+    }
+
+    $almacen = Almacen::factory()->create();
+    SucursalAlmacen::query()->create(['sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'es_principal' => true]);
+    $segunda = CajaSesion::factory()->create(['user_id' => $usuarioVenta->id, 'sucursal_id' => $sucursal->id]);
+    $venta = Venta::factory()->create(['user_id' => $usuarioVenta->id, 'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id]);
+    $pago = Pago::factory()->create(['caja_sesion_id' => $segunda->id]);
+    PagoAplicacion::factory()->create(['pago_id' => $pago->id, 'venta_id' => $venta->id]);
+
+    if ($otroNegocio) {
+        tenancy()->end();
+        tenancy()->initialize($tenant);
+    }
+
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $primera->id])
+        ->mountAction(TestAction::make('verDetalle')->table($venta))
+        ->assertActionNotMounted();
+})->with(['otra sesión propia' => false, 'otro negocio' => true]);
+
+it('exige permiso para consultar el detalle de una venta', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal] = negocioConCaja('detalle-venta-permiso');
+    $cajero->syncRoles([]);
+    $cajero->givePermissionTo('View:CajaDelNegocio');
+    $almacen = Almacen::factory()->create();
+    SucursalAlmacen::query()->create(['sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'es_principal' => true]);
+    $sesion = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id]);
+    $venta = Venta::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id]);
+    $pago = Pago::factory()->create(['caja_sesion_id' => $sesion->id]);
+    PagoAplicacion::factory()->create(['pago_id' => $pago->id, 'venta_id' => $venta->id]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $sesion->id])
+        ->assertActionHidden(TestAction::make('verDetalle')->table($venta))
+        ->mountAction(TestAction::make('verDetalle')->table($venta))
+        ->assertActionNotMounted();
 });
