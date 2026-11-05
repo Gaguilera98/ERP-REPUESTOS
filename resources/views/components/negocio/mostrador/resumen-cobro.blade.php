@@ -180,10 +180,10 @@
             <div class="mb-2 flex items-center justify-between gap-2">
                 <div class="inline-flex items-center gap-1.5 font-semibold text-gray-950 dark:text-white">
                     <x-filament::icon icon="heroicon-m-banknotes" class="size-4 text-gray-400 dark:text-gray-500" />
-                    Medios de cobro
+                    Métodos de pago
                 </div>
                 <x-filament::button type="button" size="xs" color="gray" icon="heroicon-m-plus" wire:click="agregarPago">
-                    Medio
+                    Método
                 </x-filament::button>
             </div>
 
@@ -207,7 +207,7 @@
                         <div class="mb-2 flex items-center justify-between gap-2">
                             <div class="inline-flex items-center gap-1.5">
                                 <x-filament::icon :icon="$iconoMetodo" class="size-4 text-gray-400 dark:text-gray-500" />
-                                <x-negocio.label class="mb-0">Medio {{ $i + 1 }}</x-negocio.label>
+                                <x-negocio.label class="mb-0">Método {{ $i + 1 }}</x-negocio.label>
                             </div>
                             @if (count($pagos) > 1)
                                 <button type="button" wire:click="quitarPago({{ $i }})" class="text-xs font-semibold text-danger-600 hover:underline">Quitar</button>

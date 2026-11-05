@@ -18,15 +18,7 @@
             <div class="font-bold text-gray-950 dark:text-white">Buscar productos</div>
             <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">SKU, código o nombre. Enter agrega el resaltado.</div>
         </div>
-        <x-filament::button
-            type="button"
-            size="xs"
-            color="gray"
-            icon="heroicon-m-funnel"
-            wire:click="abrirBusquedaAvanzada"
-        >
-            Búsqueda avanzada
-        </x-filament::button>
+
     </div>
     <div class="flex flex-col gap-2 sm:flex-row">
         <div class="negocio-field flex min-w-0 flex-1 items-center gap-2">
@@ -57,7 +49,12 @@
                 class="negocio-field-control"
             />
         </div>
-        <x-filament::button type="button" color="gray" wire:click="abrirFlashNuevo" class="w-full shrink-0 sm:w-auto">
+    </div>
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+        <x-filament::button type="button" size="xs" color="gray" icon="heroicon-m-funnel" wire:click="abrirBusquedaAvanzada">
+            Búsqueda avanzada
+        </x-filament::button>
+        <x-filament::button type="button" size="xs" color="gray" icon="heroicon-m-bolt" wire:click="abrirFlashNuevo">
             Entrada express
         </x-filament::button>
     </div>

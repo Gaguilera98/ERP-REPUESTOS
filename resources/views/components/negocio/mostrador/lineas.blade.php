@@ -37,8 +37,8 @@
                 <div wire:key="linea-m-{{ $i }}-{{ $linea['producto_variante_id'] }}" class="rounded-xl border p-3 {{ $pasaStock ? 'border-amber-500/40 bg-amber-50/70 dark:border-amber-400/20 dark:bg-amber-400/5' : 'border-gray-200 dark:border-white/10' }}">
                     <div class="flex items-start justify-between gap-2">
                         <div class="min-w-0">
-                            <div class="text-sm font-semibold text-gray-950 dark:text-white">{{ $linea['sku'] ?: '—' }}</div>
-                            <div class="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400">{{ $linea['nombre'] }}</div>
+                            <div class="text-sm font-semibold text-gray-950 dark:text-white">{{ $linea['nombre'] }}</div>
+                            <div class="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400">{{ $linea['sku'] ?: '—' }}</div>
                             @if ($pasaStock)
                                 <span class="mt-1.5 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">Pasa el stock</span>
                             @endif
@@ -101,8 +101,8 @@
                     @endphp
                     <tr wire:key="linea-d-{{ $i }}-{{ $linea['producto_variante_id'] }}" class="{{ $pasaStock ? 'bg-amber-50/70 dark:bg-amber-400/5' : '' }}">
                         <td class="px-4 py-2.5 align-middle">
-                            <div class="truncate font-semibold text-gray-950 dark:text-white">{{ $linea['sku'] ?: '—' }}</div>
-                            <div class="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400" title="{{ $linea['nombre'] }}">{{ $linea['nombre'] }}</div>
+                            <div class="truncate font-semibold text-gray-950 dark:text-white" title="{{ $linea['nombre'] }}">{{ $linea['nombre'] }}</div>
+                            <div class="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400">{{ $linea['sku'] ?: '—' }}</div>
                             @if ($pasaStock)
                                 <span class="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">Pasa el stock</span>
                             @endif

@@ -2,7 +2,7 @@
     $panel = 'negocio-panel';
 @endphp
 
-<div class="min-w-0 space-y-4 overflow-x-hidden max-lg:pb-28">
+<div class="min-w-0 space-y-4 overflow-x-hidden p-px max-lg:pb-28">
     <x-negocio.mostrador.banners
         :ultimo-codigo="$ultimoCodigo"
         :ultimo-total="$ultimoTotal"
@@ -10,15 +10,15 @@
         :moneda="$moneda"
     />
 
-    <div class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
+    <x-negocio.mostrador.contexto
+        :sucursales="$sucursales"
+        :almacenes="$almacenes"
+        :cliente-seleccionado="$clienteSeleccionado"
+        :lista-precio="$listaPrecio"
+        :panel="$panel"
+    />
+    <div class="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
         <div class="min-w-0 space-y-4">
-            <x-negocio.mostrador.contexto
-                :sucursales="$sucursales"
-                :almacenes="$almacenes"
-                :cliente-seleccionado="$clienteSeleccionado"
-                :lista-precio="$listaPrecio"
-                :panel="$panel"
-            />
 
             <x-negocio.mostrador.busqueda
                 :panel="$panel"
