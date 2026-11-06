@@ -46,8 +46,6 @@ class CajasDelDia extends Page implements HasSchemas
 
     public ?int $vendedorId = null;
 
-    public ?int $sesionId = null;
-
     public static function canAccess(): bool
     {
         if (! tenancy()->initialized) {
@@ -106,23 +104,13 @@ class CajasDelDia extends Page implements HasSchemas
     public function updatedData(): void
     {
         $this->vendedorId = null;
-        $this->sesionId = null;
         $this->dispatch('close-modal', id: 'turnos-vendedor');
-        $this->dispatch('close-modal', id: 'ventas-sesion');
     }
 
     public function verVendedor(int $userId): void
     {
         $this->vendedorId = $userId;
-        $this->sesionId = null;
-        $this->dispatch('close-modal', id: 'ventas-sesion');
         $this->dispatch('open-modal', id: 'turnos-vendedor');
-    }
-
-    public function verSesion(int $sesionId): void
-    {
-        $this->sesionId = $sesionId;
-        $this->dispatch('open-modal', id: 'ventas-sesion');
     }
 
     public function cerrarDia(): void
@@ -278,24 +266,6 @@ class CajasDelDia extends Page implements HasSchemas
             $consolidado['sesiones'],
             fn (array $sesion): bool => (int) $sesion['user_id'] === $this->vendedorId,
         ));
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    public function sesionSeleccionada(): ?array
-    {
-        if ($this->sesionId === null) {
-            return null;
-        }
-
-        foreach ($this->sesionesDelVendedor() as $sesion) {
-            if ((int) $sesion['id'] === $this->sesionId) {
-                return $sesion;
-            }
-        }
-
-        return null;
     }
 
     public function moneda(): string

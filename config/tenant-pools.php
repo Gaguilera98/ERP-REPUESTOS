@@ -29,7 +29,6 @@ return [
         'roles',
         'pago_aplicaciones',
         'pagos',
-        'venta_impuestos',
         'venta_detalles',
         'ventas',
         'caja_sesion_medios',

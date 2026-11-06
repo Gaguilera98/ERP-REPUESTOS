@@ -30,7 +30,6 @@ use App\Models\TipoDocumentoIdentidad;
 use App\Models\UnidadMedida;
 use App\Models\Venta;
 use App\Models\VentaDetalle;
-use App\Models\VentaImpuesto;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\QueryException;
@@ -347,7 +346,11 @@ it('muestra las ventas de la sesión elegida sin duplicar pagos divididos ni mez
     Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $sesion->id])
         ->assertCanSeeTableRecords([$venta])
         ->assertCanNotSeeTableRecords([$otraVenta])
-        ->assertCountTableRecords(1);
+        ->assertCountTableRecords(1)
+        ->searchTable('PRUEBA-SESION')
+        ->assertCanSeeTableRecords([$venta])
+        ->searchTable('OTRA-SESION')
+        ->assertCountTableRecords(0);
 
     $detalle = $tabla->instance()->getMountedAction()->getModalContent()->getData();
 
@@ -469,7 +472,6 @@ it('abre el detalle de venta con cantidades, precios históricos y montos aplica
         'cantidad' => '2', 'factor_a_base' => '4', 'cantidad_base' => '8', 'precio_unitario' => '15.00',
         'descuento_aplicado' => '20.00', 'total_linea' => '100.00',
     ]);
-    VentaImpuesto::factory()->create(['venta_id' => $venta->id, 'nombre_impuesto_snapshot' => 'IVA histórico', 'porcentaje_aplicado_snapshot' => '13.00', 'monto_calculado' => '11.70']);
     foreach ([['efectivo', '40.00'], ['qr_externo', '50.00']] as [$metodo, $monto]) {
         $pago = Pago::factory()->create(['caja_sesion_id' => $sesion->id, 'metodo_pago' => $metodo, 'monto' => '800.00']);
         PagoAplicacion::factory()->create(['pago_id' => $pago->id, 'venta_id' => $venta->id, 'monto' => $monto]);
@@ -483,8 +485,8 @@ it('abre el detalle de venta con cantidades, precios históricos y montos aplica
     $accion = $tabla->instance()->getMountedAction();
     expect($accion->getModalHeading())->toBe('Nota de venta · '.$venta->codigo);
     $contenido = $accion->getModalContent()->render();
-    expect($contenido)->toContain('Consumidor final', 'Bujía Histórica', 'BUJIA-HIST', '2 paq', '8 pza', 'BOB 15.00', 'BOB 100.00', 'BOB 120.00', 'BOB 30.00', 'BOB 90.00', 'IVA histórico (13%)', 'BOB 11.70', 'Efectivo', 'QR externo', 'BOB 40.00', 'BOB 50.00');
-    expect($contenido)->not->toContain('9999.00', 'BOB 800.00', '<script>');
+    expect($contenido)->toContain('Consumidor final', 'Bujía Histórica', 'BUJIA-HIST', '2 paq', '8 pza', 'BOB 15.00', 'BOB 100.00', 'BOB 120.00', 'BOB 30.00', 'BOB 90.00', 'Efectivo', 'QR externo', 'BOB 40.00', 'BOB 50.00');
+    expect($contenido)->not->toContain('Impuestos registrados', '9999.00', 'BOB 800.00', '<script>');
     expect($contenido)->toContain('&lt;script&gt;');
 });
 

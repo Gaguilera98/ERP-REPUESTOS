@@ -97,11 +97,6 @@ class Venta extends Model
         return $this->hasMany(VentaDetalle::class);
     }
 
-    public function impuestos(): HasMany
-    {
-        return $this->hasMany(VentaImpuesto::class);
-    }
-
     public function aplicacionesPago(): HasMany
     {
         return $this->hasMany(PagoAplicacion::class);

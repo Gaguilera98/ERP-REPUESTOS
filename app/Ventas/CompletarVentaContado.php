@@ -16,7 +16,6 @@ use App\Enums\TipoPrecioCliente;
 use App\Inventario\FactorUnidad;
 use App\Models\CajaSesion;
 use App\Models\Cliente;
-use App\Models\Impuesto;
 use App\Models\InventarioStock;
 use App\Models\MovimientoInventario;
 use App\Models\NegocioConfiguracion;
@@ -28,7 +27,6 @@ use App\Models\TenantUser;
 use App\Models\UnidadMedida;
 use App\Models\Venta;
 use App\Models\VentaDetalle;
-use App\Models\VentaImpuesto;
 use App\Ventas\Pagos\MetodoPagoFactory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -238,21 +236,6 @@ class CompletarVentaContado
             );
             $descuentoTotal = Montos::sumar($descuentoTotal, $descuentoVenta['aplicado'], 2);
             $base = Montos::sumar($base, bcmul($descuentoVenta['aplicado'], '-1', 2), 2);
-            $impuestosActivos = Impuesto::query()->where('is_active', true)->orderBy('nombre')->get();
-            $montoImpuestos = '0.00';
-            $snapshots = [];
-
-            foreach ($impuestosActivos as $impuesto) {
-                $monto = Montos::porcentaje($base, (string) $impuesto->porcentaje, 2);
-                $montoImpuestos = Montos::sumar($montoImpuestos, $monto, 2);
-                $snapshots[] = [
-                    'nombre_impuesto_snapshot' => $impuesto->nombre,
-                    'porcentaje_aplicado_snapshot' => Montos::dos((string) $impuesto->porcentaje),
-                    'monto_calculado' => $monto,
-                ];
-            }
-
-            // Los precios de mostrador ya son lo que paga el cliente; el snapshot fiscal no suma al total.
             $total = $base;
 
             $pagosRaw = $data['pagos'] ?? null;
@@ -363,13 +346,6 @@ class CompletarVentaContado
                 ]);
             }
 
-            foreach ($snapshots as $snapshot) {
-                VentaImpuesto::query()->create([
-                    'venta_id' => $venta->id,
-                    ...$snapshot,
-                ]);
-            }
-
             foreach ($pagosPreparados as $pagoData) {
                 $pago = Pago::query()->create([
                     'cliente_id' => $clienteId,
@@ -394,7 +370,7 @@ class CompletarVentaContado
             }
 
             return [
-                'venta' => $venta->refresh()->load(['detalles', 'impuestos']),
+                'venta' => $venta->refresh()->load('detalles'),
                 'alertas_perdida' => $alertas,
             ];
         });

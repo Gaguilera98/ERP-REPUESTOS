@@ -10,7 +10,12 @@ use App\Compras\RecibirMercaderia;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\MetodoPago;
 use App\Filament\Negocio\Pages\CajasDelDia;
+use App\Livewire\Negocio\Caja\SesionesDelDia;
+use App\Livewire\Negocio\Caja\VentasDeSesion;
 use App\Models\Almacen;
+use App\Models\CajaSesion;
+use App\Models\Pago;
+use App\Models\PagoAplicacion;
 use App\Models\ProductoVariante;
 use App\Models\Proveedor;
 use App\Models\Sucursal;
@@ -19,6 +24,7 @@ use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\Venta;
 use App\Ventas\CompletarVentaContado;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -125,6 +131,35 @@ function mediosParaCajasDelDia($sesion, array $cambios = []): array
 
     return $medios;
 }
+
+it('permite al supervisor consultar sesiones y ventas del vendedor seleccionado sin ampliar el historial personal', function () {
+    ['supervisor' => $supervisor, 'cajeroA' => $cajero, 'cajeroB' => $otro, 'sucursal' => $sucursal, 'almacen' => $almacen] = negocioConCajasDelDia('supervision-sesiones');
+    $sesion = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada, 'fecha_apertura' => '2026-10-01 10:00:00']);
+    $ajena = CajaSesion::factory()->create(['user_id' => $otro->id, 'sucursal_id' => $sucursal->id, 'fecha_apertura' => '2026-10-01 11:00:00']);
+    $otraFecha = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'estado_sesion' => EstadoCajaSesion::Cerrada, 'fecha_apertura' => '2026-10-02 10:00:00']);
+    $otraSucursal = CajaSesion::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => Sucursal::factory()->create()->id, 'fecha_apertura' => '2026-10-01 10:00:00']);
+    $venta = Venta::factory()->create(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id]);
+    $pago = Pago::factory()->create(['caja_sesion_id' => $sesion->id]);
+    PagoAplicacion::factory()->create(['pago_id' => $pago->id, 'venta_id' => $venta->id]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($supervisor, 'tenant')->test(SesionesDelDia::class, ['fecha' => '2026-10-01', 'vendedorId' => $cajero->id, 'sucursalId' => $sucursal->id])
+        ->assertCanSeeTableRecords([$sesion])
+        ->assertCanNotSeeTableRecords([$ajena, $otraFecha, $otraSucursal])
+        ->mountAction(TestAction::make('verSesion')->table($sesion))
+        ->assertActionMounted(TestAction::make('verSesion')->table($sesion));
+    Livewire::actingAs($supervisor, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $sesion->id, 'supervision' => true])
+        ->assertCanSeeTableRecords([$venta])
+        ->searchTable($venta->codigo)
+        ->assertCanSeeTableRecords([$venta])
+        ->searchTable('CODIGO-INEXISTENTE')
+        ->assertCountTableRecords(0)
+        ->searchTable('')
+        ->mountAction(TestAction::make('verDetalle')->table($venta))
+        ->assertActionMounted(TestAction::make('verDetalle')->table($venta));
+    Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $ajena->id, 'supervision' => true])->assertForbidden();
+    Livewire::actingAs($cajero, 'tenant')->test(SesionesDelDia::class, ['fecha' => '2026-10-01', 'vendedorId' => $otro->id, 'sucursalId' => $sucursal->id])->assertForbidden();
+});
 
 it('suma las sesiones de dos cajeros en el consolidado de la sucursal', function () {
     [
@@ -255,10 +290,15 @@ it('agrupa el día por vendedor y abre ventas solo al elegir la sesión', functi
 
     $pagina->call('verVendedor', $cajeroA->id)
         ->assertSet('vendedorId', $cajeroA->id)
-        ->assertDontSee($codigo)
-        ->call('verSesion', $primera->id)
-        ->assertSee($codigo)
-        ->assertSee('100.00');
+        ->assertDontSee($codigo);
+
+    Livewire::actingAs($supervisor, 'tenant')->test(SesionesDelDia::class, ['fecha' => now()->toDateString(), 'vendedorId' => $cajeroA->id, 'sucursalId' => $sucursal->id])
+        ->assertCanSeeTableRecords([$primera])
+        ->mountAction(TestAction::make('verSesion')->table($primera))
+        ->assertActionMounted(TestAction::make('verSesion')->table($primera));
+
+    Livewire::actingAs($supervisor, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $primera->id, 'supervision' => true])
+        ->assertCanSeeTableRecords([Venta::query()->where('codigo', $codigo)->firstOrFail()]);
 });
 
 it('cierra el día y marca solo las sesiones cerradas', function () {

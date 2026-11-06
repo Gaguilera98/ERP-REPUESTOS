@@ -152,20 +152,6 @@
         </div>
 </dl>
 
-    @if ($venta->impuestos->isNotEmpty())
-        <section class="space-y-2 text-sm">
-            <h3 class="font-semibold text-gray-950 dark:text-white">Impuestos registrados</h3>
-            <dl class="space-y-1 text-gray-600 dark:text-gray-300">
-                @foreach ($venta->impuestos as $impuesto)
-                    <div class="flex justify-between gap-4">
-                        <dt>{{ $impuesto->nombre_impuesto_snapshot }} ({{ Montos::sinCeros($impuesto->porcentaje_aplicado_snapshot, 2) }}%)</dt>
-                        <dd class="tabular-nums">{{ $moneda }} {{ $impuesto->monto_calculado }}</dd>
-                    </div>
-                @endforeach
-            </dl>
-        </section>
-    @endif
-
         </div>
         </aside>
     </div>

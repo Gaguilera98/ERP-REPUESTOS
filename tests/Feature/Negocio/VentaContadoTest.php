@@ -17,6 +17,7 @@ use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
 use App\Models\Cliente;
 use App\Models\ClienteDocumento;
+use App\Models\Impuesto;
 use App\Models\InventarioStock;
 use App\Models\MovimientoInventario;
 use App\Models\NegocioConfiguracion;
@@ -125,6 +126,7 @@ function cargarStock(ProductoVariante $variante, Almacen $almacen, TenantUser $u
 
 it('completa una venta de contado con código VNT, kardex y pago aplicado', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador();
+    Impuesto::factory()->create(['nombre' => 'Impuesto de prueba', 'porcentaje' => '13.00', 'is_active' => true]);
 
     cargarStock($variante, $almacen, $cajero, $ocasional, '3');
     app(AbrirCajaSesion::class)->abrir([

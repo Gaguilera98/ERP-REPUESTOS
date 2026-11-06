@@ -14,7 +14,6 @@
         $vendedores = $this->vendedores();
         $sesionesVendedor = $this->sesionesDelVendedor();
         $nombreVendedor = $sesionesVendedor[0]['cajero'] ?? 'Vendedor';
-        $sesionDetalle = $this->sesionSeleccionada();
         $cierreDia = $this->cierreDia();
         $puedeCerrarDia = is_array($consolidado)
             && $cierreDia === null
@@ -23,7 +22,7 @@
             && $consolidado['sesiones_cerradas'] > 0;
     @endphp
 
-    <div class="mx-auto w-full max-w-5xl space-y-5">
+    <div class="w-full space-y-5">
         <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
             <header class="border-b border-gray-200 px-5 py-3.5 dark:border-white/10">
                 <h2 class="text-sm font-semibold text-gray-950 dark:text-white">Filtro</h2>
@@ -60,78 +59,45 @@
                 </div>
             </section>
         @else
-            <div class="flex flex-wrap items-stretch gap-3">
-                <div class="flex min-w-[9rem] flex-1 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
-                    <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
-                        <x-filament::icon icon="heroicon-o-building-storefront" class="size-5" />
-                    </div>
-                    <div class="min-w-0">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Sucursal</p>
-                        <p class="truncate text-sm font-semibold text-gray-950 dark:text-white">{{ $consolidado['sucursal'] }}</p>
-                    </div>
-                </div>
-                <div class="flex min-w-[8rem] flex-1 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
-                    <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
-                        <x-filament::icon icon="heroicon-o-calendar-days" class="size-5" />
-                    </div>
-                    <div class="min-w-0">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Día</p>
-                        <p class="text-sm font-semibold tabular-nums text-gray-950 dark:text-white">{{ \Illuminate\Support\Carbon::parse($consolidado['fecha'])->format('d/m/Y') }}</p>
-                    </div>
-                </div>
-                <div class="flex min-w-[8rem] flex-1 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
-                    <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
-                        <x-filament::icon icon="heroicon-o-wallet" class="size-5" />
-                    </div>
-                    <div class="min-w-0">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Aperturas (cambio)</p>
-                        <p class="text-sm font-semibold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $consolidado['total_apertura'] }}</p>
-                    </div>
-                </div>
-                <div class="flex min-w-[8rem] flex-1 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
                     <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
                         <x-filament::icon icon="heroicon-o-banknotes" class="size-5" />
                     </div>
                     <div class="min-w-0">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Total cobrado</p>
-                        <p class="text-sm font-semibold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $consolidado['total_cobros'] }}</p>
+                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Cobrado en el día</p>
+                        <p class="text-base font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $consolidado['total_cobros'] }}</p>
                     </div>
                 </div>
-                <div class="flex flex-col justify-center gap-2">
-                    @if ($consolidado['sesiones_abiertas'] > 0)
-                        <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">
-                            <span class="size-1.5 rounded-full bg-emerald-500"></span>
-                            {{ $consolidado['sesiones_abiertas'] }} abierta{{ $consolidado['sesiones_abiertas'] === 1 ? '' : 's' }}
-                        </span>
-                    @endif
-                    @if ($consolidado['sesiones_pendientes'] > 0)
-                        <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">
-                            {{ $consolidado['sesiones_pendientes'] }} por contar
-                        </span>
-                    @endif
-                    <span class="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700 dark:bg-white/10 dark:text-gray-200">
-                        {{ $consolidado['sesiones_cerradas'] }} cerrada{{ $consolidado['sesiones_cerradas'] === 1 ? '' : 's' }}
-                    </span>
+                <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+                    <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
+                        <x-filament::icon icon="heroicon-o-wallet" class="size-5" />
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Fondos de apertura</p>
+                        <p class="text-base font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $consolidado['total_apertura'] }}</p>
+                    </div>
+                </div>
+                <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+                    <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
+                        <x-filament::icon icon="heroicon-o-check-circle" class="size-5" />
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Sesiones cerradas</p>
+                        <p class="text-base font-bold tabular-nums text-gray-950 dark:text-white">{{ $consolidado['sesiones_cerradas'] }} de {{ count($consolidado['sesiones']) }}</p>
+                    </div>
+                </div>
+                <div class="flex min-w-0 items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+                    <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300">
+                        <x-filament::icon icon="heroicon-o-scale" class="size-5" />
+                    </div>
+                    <div class="min-w-0">
+                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Diferencia neta declarada</p>
+                        <p class="text-base font-bold tabular-nums text-gray-950 dark:text-white">{{ $consolidado['sesiones_cerradas'] > 0 && collect($consolidado['por_metodo'])->contains(fn (array $fila): bool => $fila['diferencia'] !== null) ? $moneda.' '.$faltante : '—' }}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Solo sesiones cerradas</p>
+                    </div>
                 </div>
             </div>
-
-            @if ($cierreDia)
-                <div class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-950 dark:bg-emerald-400/10 dark:text-emerald-100">
-                    Día cerrado por {{ $cierreDia->usuario?->name ?? 'el encargado' }}
-                    el {{ $cierreDia->fecha_cierre?->format('d/m/Y H:i') }}.
-                    No se abren más sesiones de esta fecha.
-                </div>
-            @elseif ($puedeCerrarDia)
-                <form wire:submit="cerrarDia" class="flex flex-wrap items-center gap-3 rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
-                    <x-filament::button type="submit" icon="heroicon-m-lock-closed">
-                        Cerrar el día
-                    </x-filament::button>
-                    <p class="text-sm text-gray-600 dark:text-gray-300">
-                        Firma las sesiones ya contadas. Después nadie abre otra de esta fecha.
-                    </p>
-                </form>
-            @endif
-
             @if ($porDeclarar > 0 || $hayFaltante || $haySobra)
                 <div @class([
                     'space-y-1 rounded-xl px-4 py-3 text-sm',
@@ -139,7 +105,7 @@
                     'bg-amber-50 text-amber-950 dark:bg-amber-400/10 dark:text-amber-100' => ! $hayFaltante,
                 ])>
                     @if ($porDeclarar > 0)
-                        <p>Hay {{ $porDeclarar }} {{ $porDeclarar === 1 ? 'sesión de caja pendiente' : 'sesiones de caja pendientes' }} de declarar: {{ $moneda }} {{ $consolidado['pendiente_contar'] }}.</p>
+                        <p>Hay {{ $porDeclarar }} {{ $porDeclarar === 1 ? 'sesión de caja pendiente' : 'sesiones de caja pendientes' }} de declarar: {{ $moneda }} {{ $consolidado['pendiente_contar'] }}. Cerrá o contá esas sesiones para habilitar el cierre general.</p>
                     @endif
                     @if ($hayFaltante)
                         <p>Falta {{ $moneda }} {{ ltrim($faltante, '-') }} en las sesiones ya cerradas.</p>
@@ -151,9 +117,9 @@
 
             <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
                 <header class="border-b border-gray-200 px-5 py-3.5 dark:border-white/10">
-                    <h3 class="text-sm font-semibold text-gray-950 dark:text-white">Totales de turnos cerrados</h3>
+                    <h3 class="text-sm font-semibold text-gray-950 dark:text-white">Consolidado por método de pago</h3>
                     <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                        Esperado y declarado son solo de lo ya contado. La columna Pendiente es lo que sigue abierto.
+                        Esperado y declarado corresponden a sesiones cerradas. Pendiente incluye sesiones abiertas y por contar.
                     </p>
                 </header>
                 <div class="overflow-x-auto">
@@ -265,101 +231,39 @@
                 </div>
             </section>
 
-            <x-filament::modal id="turnos-vendedor" width="7xl" heading="Sesiones de {{ $nombreVendedor }}" description="Clic en una sesión para ver sus ventas.">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm text-start">
-                        <thead>
-                            <tr class="border-b border-gray-200 dark:border-white/10">
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Inicio</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Estado</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Horario</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Cobros</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Efectivo teor.</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Efectivo contado</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Cuadre</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Ventas</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse ($sesionesVendedor as $fila)
-                                <tr
-                                    class="cursor-pointer border-b border-gray-100 last:border-0 hover:bg-gray-50 dark:border-white/5 dark:hover:bg-white/5"
-                                    wire:click="verSesion({{ $fila['id'] }})"
-                                    wire:key="sesion-{{ $fila['id'] }}"
-                                >
-                                    <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">{{ $moneda }} {{ $fila['monto_apertura'] }}</td>
-                                    <td class="px-3 py-2">
-                                        <x-filament::badge :color="\App\Enums\EstadoCajaSesion::from($fila['estado'])->getColor()">
-                                            {{ $fila['etiqueta'] }}
-                                        </x-filament::badge>
-                                    </td>
-                                    <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">
-                                        {{ $fila['fecha_apertura'] ?? '—' }}
-                                        @if ($fila['fecha_cierre'])
-                                            → {{ $fila['fecha_cierre'] }}
-                                        @endif
-                                    </td>
-                                    <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">{{ $moneda }} {{ $fila['total_cobros'] }}</td>
-                                    <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">{{ $moneda }} {{ $fila['teorico_efectivo'] }}</td>
-                                    <td class="px-3 py-2 text-gray-700 dark:text-gray-200">
-                                        @if ($fila['sin_declaracion'])
-                                            Sin declarar
-                                        @elseif ($fila['declarado_efectivo'] === null)
-                                            —
-                                        @else
-                                            <span class="tabular-nums">{{ $moneda }} {{ $fila['declarado_efectivo'] }}</span>
-                                        @endif
-                                    </td>
-                                    <td @class([
-                                        'px-3 py-2 font-medium',
-                                        'text-gray-400 dark:text-gray-500' => $this->tonoCuadre($fila['diferencia_efectivo'], $fila['sin_declaracion']) === 'muted',
-                                        'text-danger-600 dark:text-danger-400' => $this->tonoCuadre($fila['diferencia_efectivo'], $fila['sin_declaracion']) === 'danger',
-                                        'text-amber-700 dark:text-amber-300' => $this->tonoCuadre($fila['diferencia_efectivo'], $fila['sin_declaracion']) === 'warning',
-                                    ])>
-                                        {{ $this->textoCuadre($fila['diferencia_efectivo'], $fila['sin_declaracion']) }}
-                                    </td>
-                                    <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">{{ count($fila['ventas']) }}</td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="8" class="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">Elegí un vendedor.</td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
+            <section class="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-white px-5 py-4 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
+                <div class="flex items-start gap-3">
+                    <x-filament::icon icon="heroicon-o-lock-closed" class="mt-0.5 size-5 shrink-0 text-gray-500 dark:text-gray-400" />
+                    <div>
+                        <h3 class="text-sm font-semibold text-gray-950 dark:text-white">Cierre general de la sucursal</h3>
+                        @if ($cierreDia)
+                            <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">Día cerrado por {{ $cierreDia->usuario?->name ?? 'el encargado' }} el {{ $cierreDia->fecha_cierre?->format('d/m/Y H:i') }}. No se abren más sesiones de esta fecha.</p>
+                        @elseif ($porDeclarar > 0)
+                            <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">{{ $consolidado['sesiones_cerradas'] }} cerrada{{ $consolidado['sesiones_cerradas'] === 1 ? '' : 's' }} · {{ $porDeclarar }} pendiente{{ $porDeclarar === 1 ? '' : 's' }} de declarar. Cerrá o contá las sesiones pendientes para continuar.</p>
+                        @elseif ($puedeCerrarDia)
+                            <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">Las sesiones están contadas. Al cerrar el día no se podrán abrir más sesiones de esta fecha.</p>
+                        @else
+                            <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">Se necesita al menos una sesión cerrada para cerrar el día.</p>
+                        @endif
+                    </div>
                 </div>
-            </x-filament::modal>
-
-            <x-filament::modal
-                id="ventas-sesion"
-                width="3xl"
-                heading="Ventas de la sesión"
-                :description="$sesionDetalle ? trim(($sesionDetalle['fecha_apertura'] ?? '').($sesionDetalle['fecha_cierre'] ? ' → '.$sesionDetalle['fecha_cierre'] : '')) : null"
-            >
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm text-start">
-                        <thead>
-                            <tr class="border-b border-gray-200 dark:border-white/10">
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Código</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Hora</th>
-                                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @forelse ($sesionDetalle['ventas'] ?? [] as $venta)
-                                <tr class="border-b border-gray-100 last:border-0 dark:border-white/5" wire:key="venta-{{ $venta['codigo'] }}">
-                                    <td class="px-3 py-2 font-medium text-gray-950 dark:text-white">{{ $venta['codigo'] }}</td>
-                                    <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">{{ $venta['hora'] ?? '—' }}</td>
-                                    <td class="px-3 py-2 tabular-nums text-gray-700 dark:text-gray-200">{{ $moneda }} {{ $venta['total'] }}</td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="3" class="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">Sin ventas en este turno.</td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-                </div>
+                @if (! $cierreDia)
+                    <form wire:submit="cerrarDia">
+                        <x-filament::button type="submit" icon="heroicon-m-lock-closed" :disabled="! $puedeCerrarDia">
+                            Cerrar el día
+                        </x-filament::button>
+                    </form>
+                @endif
+            </section>
+            <x-filament::modal id="turnos-vendedor" class="caja-historial-modal" sticky-header width="7xl" heading="Sesiones de {{ $nombreVendedor }}" description="Consultá las sesiones de este vendedor y sus ventas.">
+                @if ($this->vendedorId !== null && $consolidado !== null && $sesionesVendedor !== [])
+                    <livewire:negocio.caja.sesiones-del-dia
+                        :fecha="$consolidado['fecha']"
+                        :vendedor-id="$this->vendedorId"
+                        :sucursal-id="$consolidado['sucursal_id']"
+                        :key="'supervision-'.$consolidado['sucursal_id'].'-'.$consolidado['fecha'].'-'.$this->vendedorId"
+                    />
+                @endif
             </x-filament::modal>
         @endif
     </div>

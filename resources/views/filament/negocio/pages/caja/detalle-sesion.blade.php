@@ -50,5 +50,5 @@
         <p class="text-sm text-gray-600 dark:text-gray-300"><span class="font-semibold">Justificación:</span> {{ $sesion->justificacion_diferencia }}</p>
     @endif
 
-    <livewire:negocio.caja.ventas-de-sesion :sesion-id="$sesion->id" :key="'ventas-sesion-'.$sesion->id" />
+    <livewire:negocio.caja.ventas-de-sesion :sesion-id="$sesion->id" :supervision="$supervision ?? false" :key="'ventas-sesion-'.$sesion->id.'-'.(int) ($supervision ?? false)" />
 </div>

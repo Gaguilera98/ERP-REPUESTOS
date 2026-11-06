@@ -4,6 +4,7 @@ namespace App\Livewire\Negocio\Caja;
 
 use App\Enums\EstadoVenta;
 use App\Filament\Negocio\Pages\CajaDelNegocio;
+use App\Filament\Negocio\Pages\CajasDelDia;
 use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
 use App\Models\Venta;
@@ -32,28 +33,35 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
     #[Locked]
     public int $sesionId;
 
-    public function mount(int $sesionId): void
+    #[Locked]
+    public bool $supervision = false;
+
+    public function mount(int $sesionId, bool $supervision = false): void
     {
-        abort_unless(CajaDelNegocio::canAccess(), 403);
-        CajaSesion::query()->where('user_id', auth('tenant')->id())->findOrFail($sesionId);
+        abort_unless($supervision ? CajasDelDia::canAccess() : CajaDelNegocio::canAccess(), 403);
+        CajaSesion::query()->when(! $supervision, fn (Builder $query) => $query->where('user_id', auth('tenant')->id()))->findOrFail($sesionId);
         $this->sesionId = $sesionId;
+        $this->supervision = $supervision;
     }
 
     public function table(Table $table): Table
     {
+        abort_unless($this->supervision ? CajasDelDia::canAccess() : CajaDelNegocio::canAccess(), 403);
+
         return $table
             ->heading('Ventas de esta sesión')
             ->extraAttributes(['class' => 'caja-mobile-table'])
             ->query(Venta::query()->whereHas('aplicacionesPago.pago', function (Builder $query): void {
                 $query->where('caja_sesion_id', $this->sesionId)
-                    ->whereHas('cajaSesion', fn (Builder $sesiones): Builder => $sesiones->where('user_id', auth('tenant')->id()));
+                    ->when(! $this->supervision, fn (Builder $pagos): Builder => $pagos->whereHas('cajaSesion', fn (Builder $sesiones): Builder => $sesiones->where('user_id', auth('tenant')->id())));
             }))
             ->defaultSort('created_at', 'desc')
             ->queryStringIdentifier('ventasDeSesion')
             ->defaultPaginationPageOption(10)
             ->paginationPageOptions([10, 25, 50])
+            ->searchPlaceholder('Buscar por código de venta')
             ->columns([
-                TextColumn::make('codigo')->label('Venta')->extraCellAttributes(['data-label' => 'Venta']),
+                TextColumn::make('codigo')->label('Venta')->searchable()->extraCellAttributes(['data-label' => 'Venta']),
                 TextColumn::make('created_at')->label('Fecha y hora')->extraCellAttributes(['data-label' => 'Fecha y hora'])->dateTime('d/m/Y H:i'),
                 TextColumn::make('total')->label('Total')->extraCellAttributes(['data-label' => 'Total'])->money(NegocioConfiguracion::codigoMoneda()),
             ])
@@ -79,7 +87,6 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                             'almacen',
                             'detalles.variante.productoMaestro.unidadBase',
                             'detalles.unidad',
-                            'impuestos',
                             'aplicacionesPago.pago',
                         ]);
 

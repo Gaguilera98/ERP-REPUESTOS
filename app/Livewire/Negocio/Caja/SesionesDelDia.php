@@ -5,6 +5,7 @@ namespace App\Livewire\Negocio\Caja;
 use App\Caja\ArqueoCajaSesion;
 use App\Enums\EstadoCajaSesion;
 use App\Filament\Negocio\Pages\CajaDelNegocio;
+use App\Filament\Negocio\Pages\CajasDelDia;
 use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
 use Filament\Actions\Action;
@@ -30,19 +31,33 @@ class SesionesDelDia extends Component implements HasActions, HasSchemas, HasTab
     #[Locked]
     public string $fecha;
 
-    public function mount(string $fecha): void
+    #[Locked]
+    public ?int $vendedorId = null;
+
+    #[Locked]
+    public ?int $sucursalId = null;
+
+    public function mount(string $fecha, ?int $vendedorId = null, ?int $sucursalId = null): void
     {
-        abort_unless(CajaDelNegocio::canAccess(), 403);
+        abort_unless($vendedorId === null ? CajaDelNegocio::canAccess() : CajasDelDia::canAccess(), 403);
+        abort_if(($vendedorId === null) !== ($sucursalId === null), 404);
         abort_unless(validator(['fecha' => $fecha], ['fecha' => ['required', 'date_format:Y-m-d']])->passes(), 404);
         $this->fecha = $fecha;
+        $this->vendedorId = $vendedorId;
+        $this->sucursalId = $sucursalId;
     }
 
     public function table(Table $table): Table
     {
+        abort_unless($this->vendedorId === null ? CajaDelNegocio::canAccess() : CajasDelDia::canAccess(), 403);
+
         return $table
             ->heading('Sesiones del día')
             ->extraAttributes(['class' => 'caja-mobile-table'])
-            ->query(CajaSesion::query()->with('sucursal')->where('user_id', auth('tenant')->id())->whereDate('fecha_apertura', $this->fecha))
+            ->query(CajaSesion::query()->with('sucursal')
+                ->where('user_id', $this->vendedorId ?? auth('tenant')->id())
+                ->when($this->sucursalId !== null, fn ($query) => $query->where('sucursal_id', $this->sucursalId)->where('estado_sesion', '!=', EstadoCajaSesion::Anulada))
+                ->whereDate('fecha_apertura', $this->fecha))
             ->defaultSort('fecha_apertura', 'asc')
             ->queryStringIdentifier('sesionesDelDia')
             ->defaultPaginationPageOption(10)
@@ -73,6 +88,7 @@ class SesionesDelDia extends Component implements HasActions, HasSchemas, HasTab
                             'sesion' => $record,
                             'arqueo' => app(ArqueoCajaSesion::class)->de($record),
                             'moneda' => NegocioConfiguracion::codigoMoneda(),
+                            'supervision' => $this->vendedorId !== null,
                         ]);
                     }),
             ])
