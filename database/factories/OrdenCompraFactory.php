@@ -28,7 +28,6 @@ class OrdenCompraFactory extends Factory
             'es_compra_flash' => false,
             'estado' => EstadoOrdenCompra::Pendiente,
             'subtotal' => 0,
-            'impuestos' => 0,
             'total' => 0,
             'fecha_emision' => now(),
         ];

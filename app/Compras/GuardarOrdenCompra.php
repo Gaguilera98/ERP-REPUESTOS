@@ -26,7 +26,7 @@ class GuardarOrdenCompra
     {
         return DB::transaction(function () use ($data, $usuario): OrdenCompra {
             $lineas = $this->lineas($data['lineas'] ?? null);
-            $cabecera = $this->conImpuesto($this->cabecera($data), $data, $this->subtotalDeLineas($lineas), null);
+            $cabecera = $this->cabecera($data);
 
             $orden = OrdenCompra::query()->create([
                 ...$cabecera,
@@ -66,7 +66,7 @@ class GuardarOrdenCompra
             }
 
             $lineas = $this->lineas($data['lineas'] ?? null);
-            $cabecera = $this->conImpuesto($this->cabecera($data, $orden), $data, $this->subtotalDeLineas($lineas), $orden);
+            $cabecera = $this->cabecera($data, $orden);
 
             $orden->fill([
                 ...$cabecera,
@@ -139,69 +139,6 @@ class GuardarOrdenCompra
             'persona_recibe_trabajador_id' => $trabajadorId,
             'fecha_emision' => $data['fecha_emision'] ?? $orden?->fecha_emision ?? now(),
         ];
-    }
-
-    /**
-     * @param  array{
-     *     proveedor_id: int,
-     *     proveedor_contacto_id: int|null,
-     *     almacen_destino_id: int,
-     *     persona_entrega_nombre: string|null,
-     *     persona_recibe_trabajador_id: int|null,
-     *     fecha_emision: mixed
-     * }  $cabecera
-     * @param  array<string, mixed>  $data
-     * @return array{
-     *     proveedor_id: int,
-     *     proveedor_contacto_id: int|null,
-     *     almacen_destino_id: int,
-     *     persona_entrega_nombre: string|null,
-     *     persona_recibe_trabajador_id: int|null,
-     *     fecha_emision: mixed,
-     *     porcentaje_impuesto: string|null,
-     *     impuestos: string
-     * }
-     */
-    private function conImpuesto(array $cabecera, array $data, string $subtotal, ?OrdenCompra $orden): array
-    {
-        $forma = $data['forma_impuesto'] ?? null;
-
-        if ($forma !== 'porcentaje' && $forma !== 'importe') {
-            $forma = $orden?->porcentaje_impuesto !== null ? 'porcentaje' : 'importe';
-        }
-
-        if ($forma === 'porcentaje') {
-            $porcentaje = array_key_exists('porcentaje_impuesto', $data) && $data['porcentaje_impuesto'] !== null && $data['porcentaje_impuesto'] !== ''
-                ? $this->porcentaje($data['porcentaje_impuesto'])
-                : ($orden?->porcentaje_impuesto !== null ? (string) $orden->porcentaje_impuesto : $this->porcentaje(0));
-            $cabecera['porcentaje_impuesto'] = $porcentaje;
-            $cabecera['impuestos'] = Montos::porcentaje($subtotal, $porcentaje, 2);
-
-            return $cabecera;
-        }
-
-        $cabecera['porcentaje_impuesto'] = null;
-        $cabecera['impuestos'] = $this->impuesto($data['impuestos'] ?? $orden?->impuestos ?? 0);
-
-        return $cabecera;
-    }
-
-    /**
-     * @param  list<array{producto_variante_id: int, unidad_medida_id: int, factor_a_base: string, cantidad_pedida: string, costo_anotado: string, costo_unitario: string}>  $lineas
-     */
-    private function subtotalDeLineas(array $lineas): string
-    {
-        $subtotal = '0.00';
-
-        foreach ($lineas as $linea) {
-            $subtotal = Montos::sumar(
-                $subtotal,
-                Montos::multiplicar($linea['cantidad_pedida'], $linea['costo_anotado'], 2),
-                2,
-            );
-        }
-
-        return $subtotal;
     }
 
     /**
@@ -345,50 +282,6 @@ class GuardarOrdenCompra
         }
 
         return (int) $texto;
-    }
-
-    private function impuesto(mixed $valor): string
-    {
-        if ($valor === null || $valor === '') {
-            return '0.00';
-        }
-
-        $texto = match (true) {
-            is_int($valor) => (string) $valor,
-            is_string($valor) => trim($valor),
-            is_float($valor) => number_format($valor, 2, '.', ''),
-            default => null,
-        };
-
-        if ($texto === null || preg_match('/^\d+(\.\d+)?$/', $texto) !== 1) {
-            throw ValidationException::withMessages([
-                'impuestos' => 'El impuesto tiene que ser un número de cero para arriba.',
-            ]);
-        }
-
-        return Montos::dos($texto);
-    }
-
-    private function porcentaje(mixed $valor): string
-    {
-        if ($valor === null || $valor === '') {
-            return '0.00';
-        }
-
-        $texto = match (true) {
-            is_int($valor) => (string) $valor,
-            is_string($valor) => trim($valor),
-            is_float($valor) => number_format($valor, 2, '.', ''),
-            default => null,
-        };
-
-        if ($texto === null || preg_match('/^\d+(\.\d+)?$/', $texto) !== 1 || Montos::comparar($texto, '100', 2) === 1) {
-            throw ValidationException::withMessages([
-                'porcentaje_impuesto' => 'El porcentaje tiene que ser un número de cero a cien.',
-            ]);
-        }
-
-        return Montos::dos($texto);
     }
 
     private function costo(mixed $valor, string $campo): string

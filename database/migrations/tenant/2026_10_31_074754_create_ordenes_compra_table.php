@@ -18,8 +18,6 @@ return new class extends Migration
             $table->boolean('es_compra_flash')->default(false);
             $table->enum('estado', ['pendiente', 'recibida_parcial', 'completada', 'anulada'])->default('pendiente');
             $table->decimal('subtotal', 10, 2);
-            $table->decimal('porcentaje_impuesto', 5, 2)->nullable();
-            $table->decimal('impuestos', 10, 2)->default(0);
             $table->decimal('total', 10, 2);
             $table->string('persona_entrega_nombre')->nullable();
             $table->foreignId('persona_recibe_trabajador_id')->nullable();

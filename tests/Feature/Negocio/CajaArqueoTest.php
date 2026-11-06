@@ -81,8 +81,6 @@ function stockParaArqueo(ProductoVariante $variante, Almacen $almacen, TenantUse
     $orden = app(GuardarOrdenCompra::class)->crear([
         'proveedor_id' => $ocasional->id,
         'almacen_destino_id' => $almacen->id,
-        'forma_impuesto' => 'importe',
-        'impuestos' => 0,
         'lineas' => [[
             'producto_variante_id' => $variante->id,
             'unidad_medida_id' => $variante->productoMaestro->unidad_base_id,

@@ -20,7 +20,6 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\ToggleButtons;
 use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group;
@@ -155,9 +154,6 @@ class OrdenCompraForm
                             ->reorderable(false)
                             ->disabled(fn (?OrdenCompra $record): bool => $record instanceof OrdenCompra && $record->estado !== EstadoOrdenCompra::Pendiente)
                             ->dehydrated(fn (?OrdenCompra $record): bool => ! $record instanceof OrdenCompra || $record->estado === EstadoOrdenCompra::Pendiente)
-                            ->afterStateUpdated(function (Set $set, Get $get): void {
-                                self::sincronizarImpuesto($set, $get);
-                            })
                             ->table([
                                 TableColumn::make('Producto')->markAsRequired(),
                                 TableColumn::make('Unidad')->markAsRequired()->width('12rem'),
@@ -231,64 +227,11 @@ class OrdenCompraForm
                         Grid::make(12)
                             ->schema([
                                 Group::make([
-                                    ToggleButtons::make('forma_impuesto')
-                                        ->label('Impuesto')
-                                        ->options([
-                                            'porcentaje' => 'Porcentaje',
-                                            'importe' => 'Importe',
-                                        ])
-                                        ->default('importe')
-                                        ->inline()
-                                        ->grouped()
-                                        ->live()
-                                        ->afterStateUpdated(function (Set $set, Get $get, ?string $state): void {
-                                            if ($state === 'importe' && is_numeric($get('porcentaje_impuesto'))) {
-                                                $set('impuestos', self::montoDesdePorcentaje($get('porcentaje_impuesto'), $get('lineas')));
-
-                                                return;
-                                            }
-
-                                            self::sincronizarImpuesto($set, $get);
-                                        }),
-                                    TextInput::make('porcentaje_impuesto')
-                                        ->label('Porcentaje')
-                                        ->suffix('%')
-                                        ->numeric()
-                                        ->minValue(0)
-                                        ->maxValue(100)
-                                        ->live(onBlur: true)
-                                        ->visible(fn (Get $get): bool => $get('forma_impuesto') === 'porcentaje')
-                                        ->helperText('Si cambiás los productos, se vuelve a calcular. No entra al costo.'),
-                                    TextInput::make('impuestos')
-                                        ->label('Importe')
-                                        ->prefix(NegocioConfiguracion::codigoMoneda())
-                                        ->numeric()
-                                        ->minValue(0)
-                                        ->default(0)
-                                        ->live(onBlur: true)
-                                        ->visible(fn (Get $get): bool => $get('forma_impuesto') !== 'porcentaje')
-                                        ->helperText('De la factura. No entra al costo.'),
-                                ])
-                                    ->columns(1)
-                                    ->columnSpan(['default' => 'full', 'lg' => 5]),
-                                Group::make([
-                                    Placeholder::make('subtotal_orden')
-                                        ->label('Subtotal')
-                                        ->inlineLabel()
-                                        ->content(fn (Get $get): string => self::dinero(self::subtotalOrden($get('lineas')))),
-                                    Placeholder::make('impuesto_orden')
-                                        ->label('Impuesto')
-                                        ->inlineLabel()
-                                        ->content(fn (Get $get): string => self::dinero(self::impuestoMostrado($get))),
                                     Placeholder::make('total_orden')
                                         ->label('Total')
                                         ->inlineLabel()
                                         ->weight(FontWeight::Bold)
-                                        ->content(fn (Get $get): string => self::dinero(Montos::sumar(
-                                            self::subtotalOrden($get('lineas')),
-                                            self::impuestoMostrado($get),
-                                            2,
-                                        ))),
+                                        ->content(fn (Get $get): string => self::dinero(self::subtotalOrden($get('lineas')))),
                                 ])
                                     ->columns(1)
                                     ->columnStart(['lg' => 8])
@@ -367,39 +310,6 @@ class OrdenCompraForm
         return $subtotal;
     }
 
-    private static function sincronizarImpuesto(Set $set, Get $get): void
-    {
-        if ($get('forma_impuesto') !== 'porcentaje' || ! is_numeric($get('porcentaje_impuesto'))) {
-            return;
-        }
-
-        $importe = self::montoDesdePorcentaje($get('porcentaje_impuesto'), $get('lineas'));
-
-        if ((string) $get('impuestos') === $importe) {
-            return;
-        }
-
-        $set('impuestos', $importe);
-    }
-
-    private static function impuestoMostrado(Get $get): string
-    {
-        if ($get('forma_impuesto') === 'porcentaje' && is_numeric($get('porcentaje_impuesto'))) {
-            return self::montoDesdePorcentaje($get('porcentaje_impuesto'), $get('lineas'));
-        }
-
-        return self::impuestoEnPantalla($get('impuestos'));
-    }
-
-    private static function montoDesdePorcentaje(mixed $porcentaje, mixed $lineas): string
-    {
-        if (! is_numeric($porcentaje) || (float) $porcentaje < 0 || (float) $porcentaje > 100) {
-            return '0.00';
-        }
-
-        return Montos::porcentaje(self::subtotalOrden($lineas), $porcentaje, 2);
-    }
-
     /**
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
@@ -420,8 +330,6 @@ class OrdenCompraForm
                 'costo_unitario' => $detalle->costo_anotado ?? $detalle->costo_unitario,
             ])
             ->all();
-        $data['forma_impuesto'] = $orden->porcentaje_impuesto === null ? 'importe' : 'porcentaje';
-        $data['porcentaje_impuesto'] = $orden->porcentaje_impuesto;
 
         return $data;
     }
@@ -435,15 +343,6 @@ class OrdenCompraForm
         }
 
         return $texto === '' ? '0' : $texto;
-    }
-
-    private static function impuestoEnPantalla(mixed $valor): string
-    {
-        if (! is_numeric($valor) || (float) $valor < 0) {
-            return '0.00';
-        }
-
-        return Montos::dos($valor);
     }
 
     private static function dinero(string $monto): string

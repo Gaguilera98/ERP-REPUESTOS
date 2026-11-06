@@ -107,8 +107,6 @@ class CompraFlash
                 'es_compra_flash' => true,
                 'estado' => EstadoOrdenCompra::Pendiente,
                 'subtotal' => $subtotal,
-                'porcentaje_impuesto' => null,
-                'impuestos' => '0.00',
                 'total' => $subtotal,
                 'persona_entrega_nombre' => null,
                 'persona_recibe_trabajador_id' => null,

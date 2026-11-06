@@ -21,8 +21,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'es_compra_flash',
     'estado',
     'subtotal',
-    'porcentaje_impuesto',
-    'impuestos',
     'total',
     'persona_entrega_nombre',
     'persona_recibe_trabajador_id',
@@ -39,7 +37,6 @@ class OrdenCompra extends Model
     protected $attributes = [
         'es_compra_flash' => false,
         'estado' => 'pendiente',
-        'impuestos' => 0,
     ];
 
     /**
@@ -51,8 +48,6 @@ class OrdenCompra extends Model
             'es_compra_flash' => 'boolean',
             'estado' => EstadoOrdenCompra::class,
             'subtotal' => 'decimal:2',
-            'porcentaje_impuesto' => 'decimal:2',
-            'impuestos' => 'decimal:2',
             'total' => 'decimal:2',
             'fecha_emision' => 'datetime',
             'fecha_recepcion' => 'datetime',
@@ -63,9 +58,8 @@ class OrdenCompra extends Model
     {
         static::saving(function (OrdenCompra $orden): void {
             if (! $orden->exists || ! $orden->detalles()->exists()) {
-                $orden->impuestos = Montos::dos($orden->impuestos ?? '0');
                 $orden->subtotal = Montos::dos($orden->subtotal ?? '0');
-                $orden->total = Montos::sumar($orden->subtotal, $orden->impuestos, 2);
+                $orden->total = $orden->subtotal;
 
                 return;
             }
@@ -77,10 +71,7 @@ class OrdenCompra extends Model
             }
 
             $orden->subtotal = $subtotal;
-            $orden->impuestos = $orden->porcentaje_impuesto !== null
-                ? Montos::porcentaje($subtotal, $orden->porcentaje_impuesto, 2)
-                : Montos::dos($orden->impuestos ?? '0');
-            $orden->total = Montos::sumar($orden->subtotal, $orden->impuestos, 2);
+            $orden->total = $orden->subtotal;
         });
     }
 

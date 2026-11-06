@@ -294,15 +294,13 @@ it('al recibir recalcula el costo promedio de toda la pieza, escribe kardex y no
     ]))->toThrow(ValidationException::class);
 
     expect($detalle->fresh()->costo_unitario)->toBe('8.0000')
-        ->and($parcial->fresh()->proveedor_id)->toBe($proveedor->id)
-        ->and($parcial->fresh()->impuestos)->toBe('0.00');
+        ->and($parcial->fresh()->proveedor_id)->toBe($proveedor->id);
 
     $otroProveedor = Proveedor::factory()->create(['nombre_empresa' => 'Otro']);
 
     expect(fn () => $guardar->actualizar($parcial->fresh(), [
         'proveedor_id' => $otroProveedor->id,
         'almacen_destino_id' => $deposito->id,
-        'impuestos' => '50',
         'lineas' => [[
             'producto_variante_id' => $variante->id,
             'cantidad_pedida' => 1,
@@ -311,7 +309,6 @@ it('al recibir recalcula el costo promedio de toda la pieza, escribe kardex y no
     ]))->toThrow(ValidationException::class);
 
     expect($parcial->fresh()->proveedor_id)->toBe($proveedor->id)
-        ->and($parcial->fresh()->impuestos)->toBe('0.00')
         ->and($detalle->fresh()->costo_unitario)->toBe('8.0000');
 
     expect(fn () => $recibir->recibir($parcial->fresh(), [
@@ -491,14 +488,13 @@ it('guarda cédula y celular y no repite la cédula dentro del negocio', functio
     expect(Trabajador::factory()->create(['cedula' => '1234567'])->cedula)->toBe('1234567');
 });
 
-it('suma el impuesto de la factura al total y no al costo del producto', function () {
+it('usa el costo final anotado para el total y el costo recibido', function () {
     ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante] = negocioConPieza();
     $proveedor = Proveedor::factory()->create(['nombre_empresa' => 'SKF']);
 
     $orden = app(GuardarOrdenCompra::class)->crear([
         'proveedor_id' => $proveedor->id,
         'almacen_destino_id' => $almacen->id,
-        'impuestos' => '104',
         'lineas' => [[
             'producto_variante_id' => $variante->id,
             'cantidad_pedida' => 4,
@@ -507,9 +503,7 @@ it('suma el impuesto de la factura al total y no al costo del producto', functio
     ], $supervisor);
 
     expect($orden->subtotal)->toBe('800.00')
-        ->and($orden->porcentaje_impuesto)->toBeNull()
-        ->and($orden->impuestos)->toBe('104.00')
-        ->and($orden->total)->toBe('904.00');
+        ->and($orden->total)->toBe('800.00');
 
     app(RecibirMercaderia::class)->recibir($orden, [
         ['detalle_id' => $orden->detalles->first()->id, 'cantidad' => 4],
@@ -518,7 +512,7 @@ it('suma el impuesto de la factura al total y no al costo del producto', functio
     expect($variante->fresh()->precio_costo)->toBe('200.0000');
 });
 
-it('calcula el impuesto como porcentaje del subtotal y no lo mete en el costo', function () {
+it('muestra y guarda el total de los productos en el formulario de compra', function () {
     ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConPieza();
 
     Filament::setCurrentPanel(Filament::getPanel('negocio'));
@@ -529,24 +523,20 @@ it('calcula el impuesto como porcentaje del subtotal y no lo mete en el costo', 
             'proveedor_id' => $ocasional->id,
             'almacen_destino_id' => $almacen->id,
             'fecha_emision' => now()->format('Y-m-d H:i:s'),
-            'forma_impuesto' => 'porcentaje',
-            'porcentaje_impuesto' => '13',
             'lineas' => [[
                 'producto_variante_id' => $variante->id,
                 'cantidad_pedida' => 4,
                 'costo_unitario' => '200',
             ]],
         ])
-        ->assertSee('BOB 904.00')
+        ->assertSee('BOB 800.00')
         ->call('create')
         ->assertHasNoFormErrors();
 
     $orden = OrdenCompra::query()->first();
 
     expect($orden->subtotal)->toBe('800.00')
-        ->and($orden->porcentaje_impuesto)->toBe('13.00')
-        ->and($orden->impuestos)->toBe('104.00')
-        ->and($orden->total)->toBe('904.00');
+        ->and($orden->total)->toBe('800.00');
 
     app(RecibirMercaderia::class)->recibir($orden, [
         ['detalle_id' => $orden->detalles->first()->id, 'cantidad' => 4],
@@ -641,7 +631,7 @@ it('muestra ver en una compra recibida y edit en una pendiente', function () {
         ->assertActionHidden('recibir');
 });
 
-it('al editar recuerda el porcentaje y recalcula el importe', function () {
+it('al editar conserva los datos de la compra y recalcula el total', function () {
     ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante] = negocioConPieza();
     $proveedor = Proveedor::factory()->create(['nombre_empresa' => 'SKF']);
     $otro = ProductoVariante::factory()->create([
@@ -653,8 +643,6 @@ it('al editar recuerda el porcentaje y recalcula el importe', function () {
     $orden = app(GuardarOrdenCompra::class)->crear([
         'proveedor_id' => $proveedor->id,
         'almacen_destino_id' => $almacen->id,
-        'forma_impuesto' => 'porcentaje',
-        'porcentaje_impuesto' => '13',
         'lineas' => [[
             'producto_variante_id' => $variante->id,
             'cantidad_pedida' => 4,
@@ -666,10 +654,7 @@ it('al editar recuerda el porcentaje y recalcula el importe', function () {
 
     Livewire::actingAs($supervisor, 'tenant')
         ->test(EditOrdenCompra::class, ['record' => $orden->getRouteKey()])
-        ->assertFormSet([
-            'forma_impuesto' => 'porcentaje',
-            'porcentaje_impuesto' => '13.00',
-        ]);
+        ->assertFormSet(['proveedor_id' => $proveedor->id]);
 
     $orden = app(GuardarOrdenCompra::class)->actualizar($orden, [
         'proveedor_id' => $proveedor->id,
@@ -688,13 +673,11 @@ it('al editar recuerda el porcentaje y recalcula el importe', function () {
         ],
     ]);
 
-    expect($orden->porcentaje_impuesto)->toBe('13.00')
-        ->and($orden->subtotal)->toBe('1000.00')
-        ->and($orden->impuestos)->toBe('130.00')
-        ->and($orden->total)->toBe('1130.00');
+    expect($orden->subtotal)->toBe('1000.00')
+        ->and($orden->total)->toBe('1000.00');
 });
 
-it('recalcula el porcentaje al agregar un producto y guarda el importe nuevo', function () {
+it('recalcula y guarda el total al agregar un producto', function () {
     ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConPieza();
     $otro = ProductoVariante::factory()->create([
         'sku' => '6205-2RS',
@@ -710,15 +693,13 @@ it('recalcula el porcentaje al agregar un producto y guarda el importe nuevo', f
             'proveedor_id' => $ocasional->id,
             'almacen_destino_id' => $almacen->id,
             'fecha_emision' => now()->format('Y-m-d H:i:s'),
-            'forma_impuesto' => 'porcentaje',
-            'porcentaje_impuesto' => '13',
             'lineas' => [[
                 'producto_variante_id' => $variante->id,
                 'cantidad_pedida' => 4,
                 'costo_unitario' => '200',
             ]],
         ])
-        ->assertSee('BOB 904.00')
+        ->assertSee('BOB 800.00')
         ->fillForm([
             'lineas' => [
                 [
@@ -733,16 +714,14 @@ it('recalcula el porcentaje al agregar un producto y guarda el importe nuevo', f
                 ],
             ],
         ])
-        ->assertSee('BOB 1130.00')
+        ->assertSee('BOB 1000.00')
         ->call('create')
         ->assertHasNoFormErrors();
 
     $orden = OrdenCompra::query()->first();
 
     expect($orden->subtotal)->toBe('1000.00')
-        ->and($orden->porcentaje_impuesto)->toBe('13.00')
-        ->and($orden->impuestos)->toBe('130.00')
-        ->and($orden->total)->toBe('1130.00');
+        ->and($orden->total)->toBe('1000.00');
 });
 
 it('convierte una caja a piezas y deja el costo por pieza', function () {
