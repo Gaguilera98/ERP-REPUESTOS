@@ -8,9 +8,11 @@ use App\Models\CajaSesion;
 use App\Models\TenantUser;
 use App\Models\Venta;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Contracts\View\View;
 use Livewire\WithFileUploads;
 use UnitEnum;
 
@@ -36,6 +38,27 @@ class MostradorDelNegocio extends Page
     public function getSubheading(): ?string
     {
         return 'Venta de contado · cobro rápido en mostrador';
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('misVentas')
+                ->label('Mis ventas')
+                ->icon(Heroicon::OutlinedReceiptPercent)
+                ->color('gray')
+                ->authorize(fn (): bool => $this->usuario()->can('viewAny', Venta::class))
+                ->disabled(fn (): bool => $this->sucursalId === null)
+                ->modalHeading('Mis ventas')
+                ->slideOver()
+                ->modalWidth('7xl')
+                ->stickyModalHeader()
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Cerrar')
+                ->modalContent(fn (): View => view('filament.negocio.pages.mostrador.mis-ventas', [
+                    'sucursalId' => $this->sucursalId,
+                ])),
+        ];
     }
 
     public static function canAccess(): bool

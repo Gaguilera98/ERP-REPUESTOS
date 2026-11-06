@@ -30,6 +30,11 @@ class VentaPolicy
         return false;
     }
 
+    public function anular(TenantUser $user, Venta $venta): bool
+    {
+        return $this->view($user, $venta) && $this->allows($user, 'Update:Venta');
+    }
+
     public function delete(TenantUser $user, Venta $venta): bool
     {
         return false;

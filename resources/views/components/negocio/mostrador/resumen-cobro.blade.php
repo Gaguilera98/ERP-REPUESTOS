@@ -1,5 +1,7 @@
 @props([
     'cajaAbierta',
+    'ventaFiada' => false,
+    'tieneCliente' => false,
     'moneda',
     'subtotalBruto',
     'descuentoTotal',
@@ -18,9 +20,10 @@
 
 @php
     $puedeCobrar = $cajaAbierta
-        && $diferenciaCobros['estado'] === 'completo'
-        && (float) $totalTentativo > 0
-        && count($pagos) > 0;
+        && ($ventaFiada
+            ? $tieneCliente && $diferenciaCobros['estado'] === 'falta'
+            : $diferenciaCobros['estado'] === 'completo' && count($pagos) > 0)
+        && (float) $totalTentativo > 0;
     $cantidadProductos = count($lineas);
     $vistaPrevia = 2;
 @endphp
@@ -44,10 +47,29 @@
     </div>
 
     <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <div class="space-y-2">
+            <x-negocio.label class="mb-0">Operación</x-negocio.label>
+            <div class="grid grid-cols-2 gap-2" role="group" aria-label="Condición de venta">
+                <x-filament::button type="button" size="sm" :color="$ventaFiada ? 'gray' : 'primary'" :aria-pressed="$ventaFiada ? 'false' : 'true'" wire:click="$set('ventaFiada', false)">
+                    Contado
+                </x-filament::button>
+                <x-filament::button type="button" size="sm" :color="$ventaFiada ? 'primary' : 'gray'" :aria-pressed="$ventaFiada ? 'true' : 'false'" wire:click="$set('ventaFiada', true)">
+                    Crédito
+                </x-filament::button>
+            </div>
+        </div>
+        @if ($ventaFiada)
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+                {{ $tieneCliente ? 'Podés dejar el cobro vacío o registrar un pago parcial.' : 'Seleccioná un cliente para vender a crédito.' }}
+            </p>
+        @endif
+        @error('cliente_id')
+            <p class="text-sm text-danger-600 dark:text-danger-400">{{ $message }}</p>
+        @enderror
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-white/5">
             <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
-                    <x-negocio.label class="mb-0">Total a cobrar</x-negocio.label>
+                    <x-negocio.label class="mb-0">{{ $ventaFiada ? 'Total de la venta' : 'Total a cobrar' }}</x-negocio.label>
                     <div class="mt-1 text-3xl font-extrabold tracking-tight tabular-nums text-gray-950 dark:text-white">
                         {{ $moneda }} {{ number_format((float) $totalTentativo, 2, '.', ',') }}
                     </div>
@@ -58,6 +80,16 @@
                 />
             </div>
             <div class="mt-3 space-y-1.5 text-sm">
+                @if ($ventaFiada)
+                    <div class="flex justify-between gap-3">
+                        <span class="text-gray-500 dark:text-gray-400">Cobrado hoy</span>
+                        <span class="tabular-nums">{{ $moneda }} {{ number_format((float) $totalRecibido, 2, '.', ',') }}</span>
+                    </div>
+                    <div class="flex justify-between gap-3 font-semibold text-amber-800 dark:text-amber-300">
+                        <span>Saldo pendiente</span>
+                        <span class="tabular-nums">{{ $moneda }} {{ number_format($diferenciaCobros['estado'] === 'falta' ? (float) $diferenciaCobros['monto'] : 0, 2, '.', ',') }}</span>
+                    </div>
+                @endif
                 <div class="flex justify-between gap-3">
                     <span class="text-gray-500 dark:text-gray-400">Subtotal</span>
                     <span class="tabular-nums">{{ $moneda }} {{ number_format((float) $subtotalBruto, 2, '.', ',') }}</span>
@@ -285,7 +317,7 @@
                     <span class="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">Completo</span>
                 @elseif ($diferenciaCobros['estado'] === 'falta')
                     <span class="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">
-                        Falta {{ $moneda }} {{ number_format((float) $diferenciaCobros['monto'], 2, '.', ',') }}
+                        {{ $ventaFiada ? 'Saldo pendiente' : 'Falta' }} {{ $moneda }} {{ number_format((float) $diferenciaCobros['monto'], 2, '.', ',') }}
                     </span>
                 @elseif ($diferenciaCobros['estado'] === 'sobra')
                     <span class="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-900 dark:bg-sky-400/15 dark:text-sky-200">
@@ -318,7 +350,7 @@
             wire:loading.attr="disabled"
             :disabled="! $puedeCobrar"
         >
-            <span wire:loading.remove wire:target="completar">Cobrar y completar</span>
+            <span wire:loading.remove wire:target="completar">{{ $ventaFiada ? 'Registrar venta a crédito' : 'Cobrar y completar' }}</span>
             <span wire:loading wire:target="completar">Procesando…</span>
         </x-filament::button>
     </div>

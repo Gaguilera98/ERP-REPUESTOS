@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use App\Enums\CondicionVenta;
+use App\Enums\EstadoPago;
 use App\Enums\EstadoVenta;
+use App\Enums\SentidoPago;
 use App\Enums\TipoComprobante;
 use App\Enums\TipoDescuento;
 use App\Models\Concerns\BelongsToTenantPool;
@@ -22,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'talonario_id',
     'cliente_id',
     'user_id',
+    'caja_sesion_id',
     'condicion',
     'estado',
     'vence_en',
@@ -58,6 +61,7 @@ class Venta extends Model
             'condicion' => CondicionVenta::class,
             'estado' => EstadoVenta::class,
             'vence_en' => 'datetime',
+            'anulada_en' => 'datetime',
             'tipo_comprobante' => TipoComprobante::class,
             'subtotal' => 'decimal:2',
             'tipo_descuento' => TipoDescuento::class,
@@ -87,6 +91,16 @@ class Venta extends Model
         return $this->belongsTo(TenantUser::class, 'user_id');
     }
 
+    public function cajaSesion(): BelongsTo
+    {
+        return $this->belongsTo(CajaSesion::class);
+    }
+
+    public function anuladaPor(): BelongsTo
+    {
+        return $this->belongsTo(TenantUser::class, 'anulada_por_id');
+    }
+
     public function supervisorDescuento(): BelongsTo
     {
         return $this->belongsTo(TenantUser::class, 'supervisor_descuento_id');
@@ -100,6 +114,19 @@ class Venta extends Model
     public function aplicacionesPago(): HasMany
     {
         return $this->hasMany(PagoAplicacion::class);
+    }
+
+    public function saldoPendiente(): string
+    {
+        if ($this->estado === EstadoVenta::Anulada) {
+            return '0.00';
+        }
+
+        $cobrado = $this->aplicacionesPago()
+            ->whereHas('pago', fn ($query) => $query->where('sentido', SentidoPago::Cobro)->where('estado_pago', EstadoPago::Aprobado))
+            ->sum('monto');
+
+        return bcsub((string) $this->total, (string) $cobrado, 2);
     }
 
     public function estaCompletada(): bool

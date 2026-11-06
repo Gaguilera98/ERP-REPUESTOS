@@ -120,6 +120,12 @@ trait ManejaMostrador
     /** @var list<array<string, mixed>> */
     public array $pagos = [];
 
+    public bool $ventaFiada = false;
+
+    public string $codigoAbono = '';
+
+    public string $montoAbono = '';
+
     public bool $mostrarDescuentoVenta = false;
 
     public string $tipoDescuentoVenta = '';
@@ -697,6 +703,9 @@ trait ManejaMostrador
             $pagos = [];
 
             foreach ($this->pagos as $indice => $pago) {
+                if ($this->ventaFiada && trim((string) $pago['monto']) === '' && empty($pago['comprobante'])) {
+                    continue;
+                }
                 $path = null;
                 $archivo = $pago['comprobante'] ?? null;
 
@@ -713,7 +722,7 @@ trait ManejaMostrador
                 ];
             }
 
-            $resultado = $completar->completar([
+            $datosVenta = [
                 'sucursal_id' => $this->sucursalId,
                 'almacen_id' => $this->almacenId,
                 'cliente_id' => $this->clienteId,
@@ -727,12 +736,16 @@ trait ManejaMostrador
                     'valor_descuento' => $linea['valor_descuento'] !== '' ? $linea['valor_descuento'] : null,
                 ])->all(),
                 'pagos' => $pagos,
-            ], $usuario);
+            ];
+            $resultado = $this->ventaFiada
+                ? $completar->venderFiado($datosVenta, $usuario)
+                : $completar->completar($datosVenta, $usuario);
 
             $this->ultimoCodigo = $resultado['venta']->codigo;
             $this->ultimoTotal = Montos::dos((string) $resultado['venta']->total);
             $this->alertasPerdida = $resultado['alertas_perdida'];
             $this->lineas = [];
+            $this->ventaFiada = false;
             $this->pagos = [[
                 'metodo_pago' => MetodoPago::Efectivo->value,
                 'monto' => '',
@@ -775,6 +788,22 @@ trait ManejaMostrador
                 ->danger()
                 ->send();
         }
+    }
+
+    public function registrarAbono(CompletarVentaContado $ventas): void
+    {
+        $this->validate([
+            'codigoAbono' => ['required', 'string', 'max:40'],
+            'montoAbono' => ['required', 'regex:/^\d{1,8}(\.\d{1,2})?$/', 'numeric', 'gt:0'],
+            'sucursalId' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $saldo = $ventas->abonarEnEfectivo(strtoupper(trim($this->codigoAbono)), (int) $this->sucursalId, $this->montoAbono, $this->usuario());
+        $this->reset('codigoAbono', 'montoAbono');
+
+        Notification::make()->title('Abono registrado')
+            ->body('Saldo pendiente: '.NegocioConfiguracion::codigoMoneda().' '.$saldo)
+            ->success()->send();
     }
 
     private function aplicarListaPrecio(): void

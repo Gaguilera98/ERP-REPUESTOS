@@ -1,17 +1,20 @@
 <?php
 
 use App\Caja\AbrirCajaSesion;
+use App\Caja\ArqueoCajaSesion;
 use App\Compras\GuardarOrdenCompra;
 use App\Compras\ReasignarProveedorFlash;
 use App\Compras\RecibirMercaderia;
 use App\Enums\EstadoVenta;
 use App\Enums\MetodoPago;
+use App\Enums\SentidoPago;
 use App\Enums\TipoCliente;
 use App\Enums\TipoDescuento;
 use App\Enums\TipoMovimientoInventario;
 use App\Filament\Negocio\Pages\MostradorDelNegocio;
 use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
 use App\Filament\Negocio\Resources\OrdenCompras\Pages\ViewOrdenCompra;
+use App\Livewire\Negocio\Caja\VentasDeSesion;
 use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
@@ -36,6 +39,7 @@ use App\Models\UnidadMedida;
 use App\Models\Venta;
 use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
@@ -157,6 +161,152 @@ it('completa una venta de contado con código VNT, kardex y pago aplicado', func
         ->and(PagoAplicacion::query()->where('venta_id', $venta->id)->count())->toBe(1)
         ->and(NegocioConfiguracion::query()->value('siguiente_numero_venta'))->toBe(2);
 });
+
+it('consulta mis ventas desde Mostrador por fecha, vendedor y sucursal aunque aún no tengan pagos', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen] = negocioConMostrador('mis-ventas');
+    $cliente = Cliente::factory()->personaNatural()->create(['nombres' => 'Camila', 'apellidos' => 'Velasco']);
+    $otraSucursal = Sucursal::factory()->create();
+    SucursalAlmacen::query()->create(['sucursal_id' => $otraSucursal->id, 'almacen_id' => $almacen->id]);
+    $ventas = Venta::factory()->state(['user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id]);
+    $hoy = $ventas->create(['condicion' => 'credito', 'cliente_id' => $cliente->id, 'created_at' => now()]);
+    $ayer = $ventas->create(['created_at' => now()->subDay()]);
+    $deOtroVendedor = $ventas->create(['user_id' => TenantUser::factory()->create()->id, 'created_at' => now()]);
+    $deOtraSucursal = $ventas->create(['sucursal_id' => $otraSucursal->id, 'created_at' => now()]);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->mountAction('misVentas')->assertActionMounted('misVentas');
+
+    Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sucursalMostradorId' => $sucursal->id])
+        ->assertCanSeeTableRecords([$hoy])
+        ->assertCanNotSeeTableRecords([$ayer, $deOtroVendedor, $deOtraSucursal])
+        ->searchTable('Camila Velasco')
+        ->assertCanSeeTableRecords([$hoy])
+        ->searchTable('')
+        ->filterTable('dia', ['fecha' => now()->subDay()->toDateString()])
+        ->assertCanSeeTableRecords([$ayer])
+        ->assertCanNotSeeTableRecords([$hoy, $deOtroVendedor, $deOtraSucursal]);
+});
+
+it('vende fiado en Mostrador y cobra el saldo en la caja de otro día sin volver a descontar stock', function (string $pagoInicial, string $saldo, string $abonoExcesivo) {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('fiado-abono');
+    $cliente = Cliente::factory()->personaNatural()->create();
+    cargarStock($variante, $almacen, $cajero, $ocasional, '3');
+    $abrirCaja = app(AbrirCajaSesion::class);
+    $primera = $abrirCaja->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)
+        ->set('ventaFiada', true)
+        ->set('pagos.0.monto', $pagoInicial)
+        ->call('completar')
+        ->assertHasErrors(['cliente_id'])
+        ->call('seleccionarCliente', $cliente->id)
+        ->call('completar')
+        ->assertHasNoErrors();
+
+    $venta = Venta::query()->sole();
+    expect($venta->condicion->value)->toBe('credito')
+        ->and($venta->cliente_id)->toBe($cliente->id)
+        ->and($venta->saldoPendiente())->toBe($saldo);
+    expect(Pago::query()->where('caja_sesion_id', $primera->id)->pluck('monto')->all())
+        ->toBe($pagoInicial === '' ? [] : ['30.00']);
+
+    $this->travel(1)->day();
+    $segunda = $abrirCaja->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+
+    $detalle = TestAction::make('verDetalle')->table($venta);
+    $abono = [$detalle, TestAction::make('registrarAbono')];
+    $tabla = Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sucursalMostradorId' => $sucursal->id])
+        ->filterTable('dia', ['fecha' => $venta->created_at->toDateString()])
+        ->callAction($abono, data: ['monto' => $abonoExcesivo])
+        ->assertNotified('No se pudo registrar el abono');
+
+    expect($venta->saldoPendiente())->toBe($saldo);
+
+    $tabla->fillForm(['monto' => $saldo])
+        ->callMountedAction()
+        ->assertNotified('Abono registrado');
+
+    expect($venta->saldoPendiente())->toBe('0.00')
+        ->and(Pago::query()->where('caja_sesion_id', $segunda->id)->sole()->monto)->toBe($saldo)
+        ->and(InventarioStock::query()->where('producto_variante_id', $variante->id)->value('cantidad_actual'))->toBe('2.0000')
+        ->and(MovimientoInventario::query()->where('tipo_movimiento', TipoMovimientoInventario::SalidaVenta)->count())->toBe(1);
+})->with([
+    'con pago parcial' => ['30', '70.00', '71'],
+    'sin pago inicial' => ['', '100.00', '101'],
+]);
+
+it('anula una venta a crédito y conserva los movimientos de sus sesiones', function (bool $conAbono) {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('anulacion');
+    $cliente = Cliente::factory()->personaNatural()->create();
+    cargarStock($variante, $almacen, $cajero, $ocasional, '3');
+    $abrirCaja = app(AbrirCajaSesion::class);
+    $abrir = fn () => $abrirCaja->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $primera = $abrir();
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)
+        ->set('ventaFiada', true)
+        ->set('pagos.0.monto', '')
+        ->call('seleccionarCliente', $cliente->id)
+        ->call('completar')
+        ->assertHasNoErrors();
+
+    $venta = Venta::query()->sole();
+    $detalle = TestAction::make('verDetalle')->table($venta);
+    $anular = [$detalle, TestAction::make('anularVenta')];
+    $misVentas = fn () => Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sucursalMostradorId' => $sucursal->id])
+        ->filterTable('dia', ['fecha' => $venta->created_at->toDateString()]);
+    $misVentas()->assertActionHidden($anular);
+    $cajero->givePermissionTo('Update:Venta');
+    $arqueo = app(ArqueoCajaSesion::class);
+
+    $this->travel(1)->day();
+    if ($conAbono) {
+        $segunda = $abrir();
+        app(CompletarVentaContado::class)->abonarEnEfectivo($venta->codigo, $sucursal->id, '30', $cajero);
+        $this->travel(1)->day();
+        $misVentas()->callAction($anular, data: ['motivo' => 'Venta duplicada'])
+            ->assertNotified('No se pudo anular la venta');
+        expect($venta->refresh()->estado)->toBe(EstadoVenta::Completada);
+        $tercera = $abrir();
+    }
+
+    $misVentas()->callAction($anular, data: ['motivo' => 'Venta duplicada'])
+        ->assertNotified('Venta anulada');
+
+    expect($venta->refresh()->estado)->toBe(EstadoVenta::Anulada)
+        ->and($venta->saldoPendiente())->toBe('0.00')
+        ->and($venta->motivo_anulacion)->toBe('Venta duplicada')
+        ->and($venta->anulada_por_id)->toBe($cajero->id)
+        ->and($venta->anulada_en)->not->toBeNull()
+        ->and(InventarioStock::query()->where('producto_variante_id', $variante->id)->sole()->cantidad_actual)->toBe('3.0000')
+        ->and(MovimientoInventario::query()->where('tipo_movimiento', TipoMovimientoInventario::Devolucion)->sole()->referencia_id)->toBe($venta->id);
+
+    Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $primera->id])
+        ->assertCanSeeTableRecords([$venta])
+        ->assertSee('Anulada')
+        ->assertActionHidden($anular);
+
+    if ($conAbono) {
+        $reembolso = Pago::query()->where('sentido', SentidoPago::Reembolso)->sole();
+        expect($reembolso->caja_sesion_id)->toBe($tercera->id)
+            ->and($reembolso->monto)->toBe('30.00')
+            ->and($reembolso->aplicaciones()->sole()->aplicacion_origen_id)->toBe(PagoAplicacion::query()->whereHas('pago', fn ($pago) => $pago->where('sentido', SentidoPago::Cobro))->sole()->id)
+            ->and($arqueo->de($segunda)['total_cobros'])->toBe('30.00')
+            ->and($arqueo->de($segunda)['total_reembolsos'])->toBe('0.00')
+            ->and($arqueo->de($tercera)['total_reembolsos'])->toBe('30.00');
+
+        Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $tercera->id])
+            ->assertCanSeeTableRecords([$venta]);
+    } else {
+        expect(Pago::query()->count())->toBe(0);
+    }
+})->with(['con abono posterior' => true, 'sin cobros' => false]);
 
 it('no vende sin caja abierta', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('sincaja');

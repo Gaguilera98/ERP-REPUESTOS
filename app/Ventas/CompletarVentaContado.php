@@ -8,6 +8,7 @@ use App\Enums\CondicionVenta;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\EstadoPago;
 use App\Enums\EstadoVenta;
+use App\Enums\MetodoPago;
 use App\Enums\SentidoPago;
 use App\Enums\TipoComprobante;
 use App\Enums\TipoDescuento;
@@ -70,7 +71,19 @@ class CompletarVentaContado
      */
     public function completar(array $data, TenantUser $usuario): array
     {
-        return DB::transaction(function () use ($data, $usuario): array {
+        return $this->registrar($data, $usuario, CondicionVenta::Contado);
+    }
+
+    public function venderFiado(array $data, TenantUser $usuario): array
+    {
+        abort_unless($usuario->can('create', Venta::class), 403);
+
+        return $this->registrar($data, $usuario, CondicionVenta::Credito);
+    }
+
+    private function registrar(array $data, TenantUser $usuario, CondicionVenta $condicion): array
+    {
+        return DB::transaction(function () use ($data, $usuario, $condicion): array {
             $sucursalId = $this->id($data['sucursal_id'] ?? null, 'sucursal_id', 'Elegí la sucursal.');
             $almacenId = $this->id($data['almacen_id'] ?? null, 'almacen_id', 'Elegí el almacén.');
 
@@ -99,6 +112,9 @@ class CompletarVentaContado
             }
 
             $clienteId = $this->idOpcional($data['cliente_id'] ?? null, 'cliente_id');
+            if ($condicion === CondicionVenta::Credito && $clienteId === null) {
+                throw ValidationException::withMessages(['cliente_id' => 'Elegí un cliente para vender a crédito.']);
+            }
             $cliente = null;
 
             if ($clienteId !== null) {
@@ -240,7 +256,7 @@ class CompletarVentaContado
 
             $pagosRaw = $data['pagos'] ?? null;
 
-            if (! is_array($pagosRaw) || $pagosRaw === []) {
+            if (! is_array($pagosRaw) || ($pagosRaw === [] && $condicion === CondicionVenta::Contado)) {
                 throw ValidationException::withMessages([
                     'pagos' => 'Registrá al menos un cobro.',
                 ]);
@@ -271,7 +287,12 @@ class CompletarVentaContado
                 $sumaPagos = Montos::sumar($sumaPagos, $preparado['monto'], 2);
             }
 
-            if (Montos::comparar($sumaPagos, $total, 2) !== 0) {
+            $comparacion = Montos::comparar($sumaPagos, $total, 2);
+            if ($condicion === CondicionVenta::Credito && $comparacion >= 0) {
+                throw ValidationException::withMessages(['pagos' => 'Para vender a crédito tiene que quedar un saldo pendiente.']);
+            }
+
+            if ($condicion === CondicionVenta::Contado && $comparacion !== 0) {
                 throw ValidationException::withMessages([
                     'pagos' => 'La suma de los cobros tiene que ser exactamente el total ('.$total.').',
                 ]);
@@ -289,7 +310,8 @@ class CompletarVentaContado
                 'talonario_id' => null,
                 'cliente_id' => $clienteId,
                 'user_id' => $usuario->id,
-                'condicion' => CondicionVenta::Contado,
+                'caja_sesion_id' => $caja->id,
+                'condicion' => $condicion,
                 'estado' => EstadoVenta::Completada,
                 'vence_en' => null,
                 'tipo_comprobante' => TipoComprobante::NotaVenta,
@@ -347,26 +369,7 @@ class CompletarVentaContado
             }
 
             foreach ($pagosPreparados as $pagoData) {
-                $pago = Pago::query()->create([
-                    'cliente_id' => $clienteId,
-                    'caja_sesion_id' => $pagoData['caja_sesion_id'],
-                    'sentido' => SentidoPago::Cobro,
-                    'metodo_pago' => $pagoData['metodo_pago'],
-                    'monto' => $pagoData['monto'],
-                    'comprobante_archivo_path' => $pagoData['comprobante_archivo_path'],
-                    'numero_referencia_banco' => $pagoData['numero_referencia_banco'],
-                    'qr_id_transaccion_banco' => $pagoData['qr_id_transaccion_banco'],
-                    'estado_pago' => EstadoPago::Aprobado,
-                    'fecha_pago' => now(),
-                ]);
-
-                PagoAplicacion::query()->create([
-                    'pago_id' => $pago->id,
-                    'venta_id' => $venta->id,
-                    'nota_credito_id' => null,
-                    'aplicacion_origen_id' => null,
-                    'monto' => $pagoData['monto'],
-                ]);
+                $this->guardarCobro($venta, $pagoData);
             }
 
             return [
@@ -374,6 +377,72 @@ class CompletarVentaContado
                 'alertas_perdida' => $alertas,
             ];
         });
+    }
+
+    public function abonarEnEfectivo(string $codigo, int $sucursalId, string $monto, TenantUser $usuario): string
+    {
+        abort_unless($usuario->can('create', Venta::class), 403);
+
+        return DB::transaction(function () use ($codigo, $sucursalId, $monto, $usuario): string {
+            app(CongelarTurnosVencidos::class)->de($usuario, $sucursalId);
+            $caja = CajaSesion::query()
+                ->where('sucursal_id', $sucursalId)
+                ->where('user_id', $usuario->id)
+                ->where('estado_sesion', EstadoCajaSesion::Abierta)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $caja instanceof CajaSesion || ! $caja->esDeHoy()) {
+                throw ValidationException::withMessages(['codigoAbono' => 'Abrí la caja de hoy para registrar el abono.']);
+            }
+
+            $venta = Venta::query()->where('codigo', $codigo)
+                ->where('sucursal_id', $sucursalId)
+                ->where('condicion', CondicionVenta::Credito)
+                ->where('estado', EstadoVenta::Completada)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $venta instanceof Venta) {
+                throw ValidationException::withMessages(['codigoAbono' => 'No hay una venta a crédito con ese código en esta sucursal.']);
+            }
+            abort_unless($usuario->can('view', $venta), 403);
+
+            $saldo = $venta->saldoPendiente();
+            $pago = $this->metodosPago->make(MetodoPago::Efectivo)->preparar(['monto' => $monto], 0, $caja);
+
+            if (Montos::comparar($pago['monto'], $saldo, 2) > 0) {
+                throw ValidationException::withMessages(['montoAbono' => 'El abono supera el saldo pendiente ('.$saldo.').']);
+            }
+
+            $this->guardarCobro($venta, $pago);
+
+            return bcsub($saldo, $pago['monto'], 2);
+        });
+    }
+
+    private function guardarCobro(Venta $venta, array $pagoData): void
+    {
+        $pago = Pago::query()->create([
+            'cliente_id' => $venta->cliente_id,
+            'caja_sesion_id' => $pagoData['caja_sesion_id'],
+            'sentido' => SentidoPago::Cobro,
+            'metodo_pago' => $pagoData['metodo_pago'],
+            'monto' => $pagoData['monto'],
+            'comprobante_archivo_path' => $pagoData['comprobante_archivo_path'],
+            'numero_referencia_banco' => $pagoData['numero_referencia_banco'],
+            'qr_id_transaccion_banco' => $pagoData['qr_id_transaccion_banco'],
+            'estado_pago' => EstadoPago::Aprobado,
+            'fecha_pago' => now(),
+        ]);
+
+        PagoAplicacion::query()->create([
+            'pago_id' => $pago->id,
+            'venta_id' => $venta->id,
+            'nota_credito_id' => null,
+            'aplicacion_origen_id' => null,
+            'monto' => $pagoData['monto'],
+        ]);
     }
 
     /**

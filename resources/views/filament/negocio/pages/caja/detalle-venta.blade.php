@@ -9,6 +9,10 @@
         <p class="text-sm font-medium text-gray-950 dark:text-white">{{ $venta->created_at?->format('d/m/Y H:i') }}</p>
         <x-filament::badge :color="$colorEstado">{{ $venta->estado->etiqueta() }}</x-filament::badge>
     </div>
+    @if ($venta->anulada_en)
+        <p>Anulada por {{ $venta->anuladaPor?->name ?? '—' }} el {{ $venta->anulada_en->format('d/m/Y H:i') }}.</p>
+        <p>Motivo: {{ $venta->motivo_anulacion }}</p>
+    @endif
 
     <div class="grid gap-5 md:grid-cols-[minmax(0,2fr)_minmax(15rem,1fr)] md:items-start">
         <div class="contents md:block md:min-w-0 md:space-y-5">
@@ -111,7 +115,12 @@
                             @endif
                         </td>
                         <td data-label="Fecha y hora" class="px-2 py-3">{{ $pago?->fecha_pago?->format('d/m/Y H:i') ?? '—' }}</td>
-                        <td data-label="Movimiento" class="px-2 py-3">{{ $pago?->sentido?->etiqueta() ?? '—' }}</td>
+                        <td data-label="Movimiento" class="px-2 py-3">
+                            {{ $pago?->sentido?->etiqueta() ?? '—' }}
+                            @if ($pago?->caja_sesion_id)
+                                <p>Sesión #{{ $pago->caja_sesion_id }}</p>
+                            @endif
+                        </td>
                         <td data-label="Estado" class="px-2 py-3">
                             <x-filament::badge :color="match ($pago?->estado_pago) { EstadoPago::Aprobado => 'success', EstadoPago::Pendiente => 'warning', EstadoPago::Expirado => 'danger', default => 'gray' }">
                                 {{ $pago?->estado_pago?->etiqueta() ?? '—' }}
@@ -137,6 +146,9 @@
         <aside class="contents md:block md:space-y-5 md:rounded-lg md:border md:border-primary-200 md:bg-primary-50/50 md:p-4 dark:md:border-primary-400/30 dark:md:bg-primary-400/10">
             <div class="order-1 rounded-lg border border-primary-200 bg-primary-50/50 p-4 md:border-0 md:bg-transparent md:p-0 dark:border-primary-400/30 dark:bg-primary-400/10 dark:md:bg-transparent">
                 <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total de la venta</p>
+                @if (isset($saldoPendiente))
+                    <p class="mt-2 text-sm font-medium">Saldo pendiente: {{ $moneda }} {{ $saldoPendiente }}</p>
+                @endif
                 <p class="mt-1 text-2xl font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $venta->total }}</p>
             </div>
         <div class="order-4 space-y-5 rounded-lg border border-gray-200 p-4 md:border-0 md:p-0 dark:border-white/10">
