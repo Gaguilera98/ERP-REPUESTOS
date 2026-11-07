@@ -25,6 +25,7 @@ use App\Models\Venta;
 use App\Ventas\BuscarProductosMostrador;
 use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
+use App\Ventas\GestionarReservas;
 use App\Ventas\PrecioDeLista;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Collection;
@@ -122,9 +123,18 @@ trait ManejaMostrador
 
     public bool $ventaFiada = false;
 
-    public string $codigoAbono = '';
+    public bool $ventaReserva = false;
 
-    public string $montoAbono = '';
+    public string $venceReserva = '';
+
+    public function seleccionarOperacion(string $operacion): void
+    {
+        $this->ventaFiada = $operacion === 'credito';
+        $this->ventaReserva = $operacion === 'reserva';
+        if ($this->ventaReserva && $this->venceReserva === '') {
+            $this->venceReserva = now()->addHours(NegocioConfiguracion::query()->first()?->horas_reserva ?? 48)->endOfDay()->format('Y-m-d\TH:i');
+        }
+    }
 
     public bool $mostrarDescuentoVenta = false;
 
@@ -157,6 +167,8 @@ trait ManejaMostrador
 
     public function inicializarMostrador(): void
     {
+        app(GestionarReservas::class)->procesarVencidas();
+
         $this->pagos = [[
             'metodo_pago' => MetodoPago::Efectivo->value,
             'monto' => '',
@@ -736,16 +748,21 @@ trait ManejaMostrador
                     'valor_descuento' => $linea['valor_descuento'] !== '' ? $linea['valor_descuento'] : null,
                 ])->all(),
                 'pagos' => $pagos,
+                'vence_en' => $this->venceReserva,
             ];
-            $resultado = $this->ventaFiada
-                ? $completar->venderFiado($datosVenta, $usuario)
-                : $completar->completar($datosVenta, $usuario);
+            $resultado = match (true) {
+                $this->ventaReserva => $completar->reservar($datosVenta, $usuario),
+                $this->ventaFiada => $completar->venderFiado($datosVenta, $usuario),
+                default => $completar->completar($datosVenta, $usuario),
+            };
 
             $this->ultimoCodigo = $resultado['venta']->codigo;
             $this->ultimoTotal = Montos::dos((string) $resultado['venta']->total);
             $this->alertasPerdida = $resultado['alertas_perdida'];
             $this->lineas = [];
             $this->ventaFiada = false;
+            $this->ventaReserva = false;
+            $this->venceReserva = '';
             $this->pagos = [[
                 'metodo_pago' => MetodoPago::Efectivo->value,
                 'monto' => '',
@@ -788,22 +805,6 @@ trait ManejaMostrador
                 ->danger()
                 ->send();
         }
-    }
-
-    public function registrarAbono(CompletarVentaContado $ventas): void
-    {
-        $this->validate([
-            'codigoAbono' => ['required', 'string', 'max:40'],
-            'montoAbono' => ['required', 'regex:/^\d{1,8}(\.\d{1,2})?$/', 'numeric', 'gt:0'],
-            'sucursalId' => ['required', 'integer', 'min:1'],
-        ]);
-
-        $saldo = $ventas->abonarEnEfectivo(strtoupper(trim($this->codigoAbono)), (int) $this->sucursalId, $this->montoAbono, $this->usuario());
-        $this->reset('codigoAbono', 'montoAbono');
-
-        Notification::make()->title('Abono registrado')
-            ->body('Saldo pendiente: '.NegocioConfiguracion::codigoMoneda().' '.$saldo)
-            ->success()->send();
     }
 
     private function aplicarListaPrecio(): void

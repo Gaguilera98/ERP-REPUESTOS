@@ -23,6 +23,11 @@
         <p>Anulada por {{ $venta->anuladaPor?->name ?? '—' }} el {{ $venta->anulada_en->format('d/m/Y H:i') }}.</p>
         <p>Motivo: {{ $venta->motivo_anulacion }}</p>
     @endif
+    @if ($venta->estado === \App\Enums\EstadoVenta::Reserva)
+        <p class="text-sm text-gray-600 dark:text-gray-300">Reserva vigente hasta {{ $venta->vence_en?->format('d/m/Y H:i') }}.</p>
+    @elseif ($venta->estado === \App\Enums\EstadoVenta::Vencida)
+        <p class="text-sm text-gray-600 dark:text-gray-300">Reserva vencida. Los productos se liberaron y la seña quedó a favor del cliente.</p>
+    @endif
     @if (bccomp($reembolsado, '0', 2) > 0)
         <div class="flex items-start gap-3 rounded-lg border border-warning-300 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-400/30 dark:bg-warning-400/10 dark:text-warning-300">
             <x-filament::icon icon="heroicon-o-arrow-uturn-left" class="mt-0.5 size-5 shrink-0" />

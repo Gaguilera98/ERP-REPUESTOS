@@ -144,7 +144,7 @@ class Venta extends Model
 
     public function saldoPendiente(): string
     {
-        if ($this->estado === EstadoVenta::Anulada) {
+        if (in_array($this->estado, [EstadoVenta::Anulada, EstadoVenta::Vencida], true)) {
             return '0.00';
         }
 

@@ -14,6 +14,7 @@ use App\Models\TenantUser;
 use App\Models\Venta;
 use App\Ventas\AnularVenta;
 use App\Ventas\CompletarVentaContado;
+use App\Ventas\GestionarReservas;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
@@ -70,6 +71,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
     public function table(Table $table): Table
     {
         $this->autorizarConsulta();
+        app(GestionarReservas::class)->procesarVencidas();
         $enMostrador = $this->sucursalMostradorId !== null;
 
         return $table
@@ -115,6 +117,12 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
 
                         return $query->whereDate('created_at', substr($fecha, 0, 10));
                     }),
+                SelectFilter::make('estado')->label('Estado')->options([
+                    EstadoVenta::Reserva->value => 'Reserva',
+                    EstadoVenta::Vencida->value => 'Vencida',
+                    EstadoVenta::Completada->value => 'Completada',
+                    EstadoVenta::Anulada->value => 'Anulada',
+                ]),
                 SelectFilter::make('condicion')
                     ->label('Operación')
                     ->placeholder('Todas')
@@ -137,7 +145,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Cerrar')
                     ->extraModalFooterActions(fn (Venta $record): array => [
-                        ...$this->accionesAbono($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
+                        ...$this->accionesAbono($record), $this->accionEntregarReserva($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
                     ])
                     ->modalContent(function (Venta $record): View {
                         abort_unless(auth('tenant')->user()?->can('view', $record), 403);
@@ -158,7 +166,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                         return view('filament.negocio.pages.caja.detalle-venta', [
                             'venta' => $record,
                             'moneda' => NegocioConfiguracion::codigoMoneda(),
-                            'saldoPendiente' => $record->condicion === CondicionVenta::Credito ? $record->saldoPendiente() : null,
+                            'saldoPendiente' => $record->condicion === CondicionVenta::Credito || $record->estado === EstadoVenta::Reserva ? $record->saldoPendiente() : null,
                             'colorEstado' => $this->colorEstado($record->estado),
                         ]);
                     }),
@@ -214,6 +222,29 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
 
                 $venta->refresh();
                 Notification::make()->title('Venta anulada')->success()->send();
+            });
+    }
+
+    private function accionEntregarReserva(Venta $venta): Action
+    {
+        return Action::make('entregarReserva')->label('Cobrar saldo y entregar')
+            ->visible(fn (): bool => $venta->estado === EstadoVenta::Reserva)
+            ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('create', Venta::class))
+            ->modalHeading('Entregar reserva · '.$venta->codigo)
+            ->modalDescription(fn (): string => 'Cobro del saldo en efectivo: '.NegocioConfiguracion::codigoMoneda().' '.$venta->saldoPendiente().'. Confirmá al entregar los productos.')
+            ->schema([Hidden::make('saldo')->default(fn (): string => $venta->saldoPendiente())])
+            ->requiresConfirmation()
+            ->action(function (array $data, Action $action) use ($venta): void {
+                try {
+                    app(GestionarReservas::class)->entregar($venta, $data['saldo'], auth('tenant')->user());
+                } catch (ValidationException $exception) {
+                    Notification::make()->title('No se pudo entregar la reserva')->body(collect($exception->errors())->flatten()->first())->danger()->send();
+                    $action->halt();
+
+                    return;
+                }
+                $venta->refresh();
+                Notification::make()->title('Reserva entregada')->success()->send();
             });
     }
 

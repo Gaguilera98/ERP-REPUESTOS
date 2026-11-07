@@ -1,6 +1,7 @@
 @props([
     'cajaAbierta',
     'ventaFiada' => false,
+    'ventaReserva' => false,
     'tieneCliente' => false,
     'moneda',
     'subtotalBruto',
@@ -20,9 +21,10 @@
 
 @php
     $puedeCobrar = $cajaAbierta
-        && ($ventaFiada
+        && (($ventaFiada || $ventaReserva)
             ? $tieneCliente && $diferenciaCobros['estado'] === 'falta'
             : $diferenciaCobros['estado'] === 'completo' && count($pagos) > 0)
+        && (! $ventaReserva || (float) $totalRecibido > 0)
         && (float) $totalTentativo > 0;
     $cantidadProductos = count($lineas);
     $vistaPrevia = 2;
@@ -49,19 +51,26 @@
     <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
         <div class="space-y-2">
             <x-negocio.label class="mb-0">Operación</x-negocio.label>
-            <div class="grid grid-cols-2 gap-2" role="group" aria-label="Condición de venta">
-                <x-filament::button type="button" size="sm" :color="$ventaFiada ? 'gray' : 'primary'" :aria-pressed="$ventaFiada ? 'false' : 'true'" wire:click="$set('ventaFiada', false)">
+            <div class="grid grid-cols-3 gap-2" role="group" aria-label="Condición de venta">
+                <x-filament::button type="button" size="sm" :color="$ventaFiada || $ventaReserva ? 'gray' : 'primary'" :aria-pressed="$ventaFiada || $ventaReserva ? 'false' : 'true'" wire:click="seleccionarOperacion('contado')">
                     Contado
                 </x-filament::button>
-                <x-filament::button type="button" size="sm" :color="$ventaFiada ? 'primary' : 'gray'" :aria-pressed="$ventaFiada ? 'true' : 'false'" wire:click="$set('ventaFiada', true)">
+                <x-filament::button type="button" size="sm" :color="$ventaFiada ? 'primary' : 'gray'" :aria-pressed="$ventaFiada ? 'true' : 'false'" wire:click="seleccionarOperacion('credito')">
                     Crédito
                 </x-filament::button>
+                <x-filament::button type="button" size="sm" :color="$ventaReserva ? 'primary' : 'gray'" :aria-pressed="$ventaReserva ? 'true' : 'false'" wire:click="seleccionarOperacion('reserva')">Reserva</x-filament::button>
             </div>
         </div>
-        @if ($ventaFiada)
+        @if ($ventaFiada || $ventaReserva)
             <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ $tieneCliente ? 'Podés dejar el cobro vacío o registrar un pago parcial.' : 'Seleccioná un cliente para vender a crédito.' }}
             </p>
+        @endif
+        @if ($ventaReserva)
+            <label for="vence-reserva" class="block text-sm font-medium">Retirar antes de</label>
+            <x-filament::input.wrapper><x-filament::input id="vence-reserva" type="datetime-local" wire:model="venceReserva" /></x-filament::input.wrapper>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Registrá una seña menor al total para apartar los productos.</p>
+            @error('vence_en') <p class="text-sm text-danger-600 dark:text-danger-400">{{ $message }}</p> @enderror
         @endif
         @error('cliente_id')
             <p class="text-sm text-danger-600 dark:text-danger-400">{{ $message }}</p>
@@ -80,7 +89,7 @@
                 />
             </div>
             <div class="mt-3 space-y-1.5 text-sm">
-                @if ($ventaFiada)
+                @if ($ventaFiada || $ventaReserva)
                     <div class="flex justify-between gap-3">
                         <span class="text-gray-500 dark:text-gray-400">Cobrado hoy</span>
                         <span class="tabular-nums">{{ $moneda }} {{ number_format((float) $totalRecibido, 2, '.', ',') }}</span>
@@ -350,7 +359,7 @@
             wire:loading.attr="disabled"
             :disabled="! $puedeCobrar"
         >
-            <span wire:loading.remove wire:target="completar">{{ $ventaFiada ? 'Registrar venta a crédito' : 'Cobrar y completar' }}</span>
+            <span wire:loading.remove wire:target="completar">{{ $ventaReserva ? 'Confirmar reserva' : ($ventaFiada ? 'Registrar venta a crédito' : 'Cobrar y completar') }}</span>
             <span wire:loading wire:target="completar">Procesando…</span>
         </x-filament::button>
     </div>

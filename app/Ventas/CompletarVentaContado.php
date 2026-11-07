@@ -81,9 +81,20 @@ class CompletarVentaContado
         return $this->registrar($data, $usuario, CondicionVenta::Credito);
     }
 
-    private function registrar(array $data, TenantUser $usuario, CondicionVenta $condicion): array
+    public function reservar(array $data, TenantUser $usuario): array
     {
-        return DB::transaction(function () use ($data, $usuario, $condicion): array {
+        abort_unless($usuario->can('create', Venta::class), 403);
+        validator($data, ['vence_en' => ['required', 'date', 'after:now']])->validate();
+
+        return $this->registrar($data, $usuario, CondicionVenta::Contado, true);
+    }
+
+    private function registrar(array $data, TenantUser $usuario, CondicionVenta $condicion, bool $reserva = false): array
+    {
+        abort_unless($usuario->can('create', Venta::class), 403);
+        app(GestionarReservas::class)->procesarVencidas();
+
+        return DB::transaction(function () use ($data, $usuario, $condicion, $reserva): array {
             $sucursalId = $this->id($data['sucursal_id'] ?? null, 'sucursal_id', 'Elegí la sucursal.');
             $almacenId = $this->id($data['almacen_id'] ?? null, 'almacen_id', 'Elegí el almacén.');
 
@@ -112,8 +123,8 @@ class CompletarVentaContado
             }
 
             $clienteId = $this->idOpcional($data['cliente_id'] ?? null, 'cliente_id');
-            if ($condicion === CondicionVenta::Credito && $clienteId === null) {
-                throw ValidationException::withMessages(['cliente_id' => 'Elegí un cliente para vender a crédito.']);
+            if (($condicion === CondicionVenta::Credito || $reserva) && $clienteId === null) {
+                throw ValidationException::withMessages(['cliente_id' => 'Elegí un cliente para esta operación.']);
             }
             $cliente = null;
 
@@ -288,11 +299,15 @@ class CompletarVentaContado
             }
 
             $comparacion = Montos::comparar($sumaPagos, $total, 2);
-            if ($condicion === CondicionVenta::Credito && $comparacion >= 0) {
+            if (($condicion === CondicionVenta::Credito || $reserva) && $comparacion >= 0) {
                 throw ValidationException::withMessages(['pagos' => 'Para vender a crédito tiene que quedar un saldo pendiente.']);
             }
 
-            if ($condicion === CondicionVenta::Contado && $comparacion !== 0) {
+            if ($reserva && Montos::comparar($sumaPagos, '0', 2) <= 0) {
+                throw ValidationException::withMessages(['pagos' => 'Registrá una seña para reservar.']);
+            }
+
+            if (! $reserva && $condicion === CondicionVenta::Contado && $comparacion !== 0) {
                 throw ValidationException::withMessages([
                     'pagos' => 'La suma de los cobros tiene que ser exactamente el total ('.$total.').',
                 ]);
@@ -312,8 +327,8 @@ class CompletarVentaContado
                 'user_id' => $usuario->id,
                 'caja_sesion_id' => $caja->id,
                 'condicion' => $condicion,
-                'estado' => EstadoVenta::Completada,
-                'vence_en' => null,
+                'estado' => $reserva ? EstadoVenta::Reserva : EstadoVenta::Completada,
+                'vence_en' => $reserva ? $data['vence_en'] : null,
                 'tipo_comprobante' => TipoComprobante::NotaVenta,
                 'numero_comprobante' => null,
                 'subtotal' => $subtotal,
@@ -334,22 +349,28 @@ class CompletarVentaContado
                 $previo = Montos::cuatro((string) $stock->cantidad_actual);
                 $posterior = Montos::sumar($previo, bcmul($linea['cantidad_base'], '-1', 4), 4);
 
-                $stock->cantidad_actual = $posterior;
+                if ($reserva) {
+                    $stock->cantidad_reservada = Montos::sumar($stock->cantidad_reservada, $linea['cantidad_base'], 4);
+                } else {
+                    $stock->cantidad_actual = $posterior;
+                }
                 $stock->save();
 
-                MovimientoInventario::query()->create([
-                    'producto_variante_id' => $variante->id,
-                    'almacen_id' => $almacenId,
-                    'user_id' => $usuario->id,
-                    'tipo_movimiento' => TipoMovimientoInventario::SalidaVenta,
-                    'cantidad' => $linea['cantidad_base'],
-                    'stock_previo' => $previo,
-                    'stock_posterior' => $posterior,
-                    'costo_unitario' => $linea['precio_costo_snapshot'],
-                    'costo_promedio_resultante' => $linea['precio_costo_snapshot'],
-                    'referencia_tipo' => MovimientoInventario::REFERENCIA_VENTA,
-                    'referencia_id' => $venta->id,
-                ]);
+                if (! $reserva) {
+                    MovimientoInventario::query()->create([
+                        'producto_variante_id' => $variante->id,
+                        'almacen_id' => $almacenId,
+                        'user_id' => $usuario->id,
+                        'tipo_movimiento' => TipoMovimientoInventario::SalidaVenta,
+                        'cantidad' => $linea['cantidad_base'],
+                        'stock_previo' => $previo,
+                        'stock_posterior' => $posterior,
+                        'costo_unitario' => $linea['precio_costo_snapshot'],
+                        'costo_promedio_resultante' => $linea['precio_costo_snapshot'],
+                        'referencia_tipo' => MovimientoInventario::REFERENCIA_VENTA,
+                        'referencia_id' => $venta->id,
+                    ]);
+                }
 
                 VentaDetalle::query()->create([
                     'venta_id' => $venta->id,

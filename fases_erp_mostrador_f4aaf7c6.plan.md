@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: fase-6-credito
     content: "Fase 6: seña, fiado, adelanto y aplicaciones de pago"
-    status: pending
+    status: in_progress
   - id: fase-7-devolucion
     content: "Fase 7: notas de crédito y devolución Livewire"
     status: pending
@@ -133,11 +133,19 @@ Tener en cuenta (hablarlo después): aviso al cobrar **sin cliente**. Hoy el con
 
 ## Fase 6. Seña, fiado y adelanto
 
+**Estado al 6 de noviembre de 2026:** en curso. El detalle de lo implementado, los límites actuales y los pendientes está en [fase_6_estado_actual.md](fase_6_estado_actual.md).
+
+Implementado: venta a crédito con cliente y cobro parcial opcional, abonos en efectivo desde Mis ventas, reserva con cliente/seña/vencimiento, entrega con cobro del saldo en efectivo y procesamiento de vencidas al operar que libera unidades y registra la seña a favor del cliente.
+
+Decisión comercial vigente para reservas: una seña al crear y el saldo completo al retirar. Los abonos sucesivos de una reserva quedan fuera del flujo actual.
+
+Pendiente para cerrar la fase: adelantos, aplicación del saldo a favor, pago que cubra varias ventas, cancelación de reservas y modificación autorizada de su vencimiento.
+
 Se completa `pago_aplicaciones` y los estados `reserva`, `credito` y `vencida`.
 
 Reglas: la seña aparta `cantidad_reservada` y no saca la pieza; el plazo parte de 48 horas y al crearla puede ser menor o mayor; solo el supervisor cambia `vence_en` después; al vencer, el stock se libera, no hay kardex y la seña queda a favor; el fiado saca stock hoy y el cobro entra en la caja del día en que pagan; un pago puede cubrir varias ventas; un adelanto sin pieza no vuelve a sumar en la caja; el saldo no se guarda en el cliente, se calcula.
 
-Pantalla: la misma venta Livewire gana estos modos. Un comando programado libera las señas vencidas.
+Pantalla: la misma venta Livewire gana estos modos. GestionarReservas::procesarVencidas() libera reservas vencidas al abrir Mostrador, consultar productos o ventas y antes de confirmar ventas, reservas o entregas. El comando de mantenimiento reutiliza el servicio y queda disponible manualmente.
 
 ## Fase 7. Devoluciones
 

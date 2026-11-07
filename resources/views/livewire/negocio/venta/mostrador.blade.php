@@ -40,7 +40,7 @@
 
         <x-negocio.mostrador.resumen-cobro
             :caja-abierta="$cajaAbierta"
-            :venta-fiada="$ventaFiada"
+            :venta-fiada="$ventaFiada" :venta-reserva="$ventaReserva"
             :tiene-cliente="$clienteSeleccionado !== null"
             :moneda="$moneda"
             :subtotal-bruto="$subtotalBruto"
@@ -58,29 +58,6 @@
             :panel="$panel"
         />
     </div>
-
-    <details class="{{ $panel }} space-y-3 p-4">
-        <summary class="cursor-pointer font-semibold">Abonar a una venta a crédito</summary>
-        <form wire:submit="registrarAbono" class="space-y-3">
-            <label class="block text-sm">
-                Código de la venta de esta sucursal
-                <x-negocio.input wire:model="codigoAbono" placeholder="VNT-000001" />
-            </label>
-            @error('codigoAbono')
-                <p class="text-sm text-danger-600 dark:text-danger-400">{{ $message }}</p>
-            @enderror
-            <label class="block text-sm">
-                Abono en efectivo
-                <x-negocio.input-monto :moneda="$moneda" wire:model="montoAbono" inputmode="decimal" />
-            </label>
-            @error('montoAbono')
-                <p class="text-sm text-danger-600 dark:text-danger-400">{{ $message }}</p>
-            @enderror
-            <x-filament::button type="submit" :disabled="! $cajaAbierta" wire:loading.attr="disabled" wire:target="registrarAbono">
-                Registrar abono
-            </x-filament::button>
-        </form>
-    </details>
 
     <x-negocio.mostrador.busqueda-avanzada
         :mostrar="$mostrarBusquedaAvanzada"

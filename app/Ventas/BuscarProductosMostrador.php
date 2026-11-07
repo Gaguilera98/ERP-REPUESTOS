@@ -135,6 +135,8 @@ class BuscarProductosMostrador
      */
     public function consulta(array $filtros): Builder
     {
+        app(GestionarReservas::class)->procesarVencidas();
+
         $texto = trim((string) ($filtros['texto'] ?? ''));
         $almacenId = $filtros['almacen_id'] ?? null;
         $categoriaId = $filtros['categoria_id'] ?? null;

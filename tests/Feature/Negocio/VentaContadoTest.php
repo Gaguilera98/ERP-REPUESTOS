@@ -41,6 +41,7 @@ use App\Ventas\AnularVenta;
 use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
 use App\Ventas\CorregirVenta;
+use App\Ventas\GestionarReservas;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -417,6 +418,64 @@ it('revisa y reemplaza un producto en el detalle sin registrar otro cobro', func
         ->and(InventarioStock::query()->where('producto_variante_id', $variante->id)->sole()->cantidad_actual)->toBe('5.0000')
         ->and(InventarioStock::query()->where('producto_variante_id', $reemplazo->id)->sole()->cantidad_actual)->toBe('4.0000');
 });
+
+it('aparta una reserva y la entrega o libera al vencer sin duplicar la seña', function (bool $entregar, string $accion) {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('reservas');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '3');
+    $cliente = Cliente::factory()->personaNatural()->create();
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)
+        ->call('seleccionarCliente', $cliente->id)
+        ->call('seleccionarOperacion', 'reserva')
+        ->set('pagos.0.monto', '30')
+        ->call('completar')->assertHasNoErrors();
+    $venta = Venta::query()->sole();
+    $stock = InventarioStock::query()->where('producto_variante_id', $variante->id)->sole();
+    expect($venta->estado)->toBe(EstadoVenta::Reserva)
+        ->and($venta->vence_en->isFuture())->toBeTrue()
+        ->and($venta->vence_en->format('H:i'))->toBe('23:59')
+        ->and($stock->cantidad_actual)->toBe('3.0000')
+        ->and($stock->cantidad_reservada)->toBe('1.0000')
+        ->and(MovimientoInventario::query()->where('tipo_movimiento', TipoMovimientoInventario::SalidaVenta)->count())->toBe(0);
+
+    $reservas = app(GestionarReservas::class);
+    if ($entregar) {
+        $reservas->entregar($venta, '70.00', $cajero);
+        expect(fn () => $reservas->entregar($venta, '70.00', $cajero))->toThrow(ValidationException::class);
+        expect($venta->refresh()->estado)->toBe(EstadoVenta::Completada)
+            ->and($stock->refresh()->cantidad_actual)->toBe('2.0000')
+            ->and($venta->saldoPendiente())->toBe('0.00')
+            ->and(Pago::query()->count())->toBe(2);
+    } else {
+        $this->travelTo($venta->vence_en->copy()->addMinute());
+        if ($accion === 'consulta') {
+            Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sucursalMostradorId' => $sucursal->id]);
+        } elseif ($accion === 'venta fallida') {
+            expect(fn () => app(CompletarVentaContado::class)->completar([
+                'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+                'lineas' => [], 'pagos' => [],
+            ], $cajero))->toThrow(ValidationException::class);
+        } elseif ($accion === 'entrega vencida') {
+            expect(fn () => $reservas->entregar($venta, '70.00', $cajero))->toThrow(ValidationException::class);
+        } else {
+            $reservas->procesarVencidas();
+        }
+        $reservas->procesarVencidas();
+        expect($venta->refresh()->estado)->toBe(EstadoVenta::Vencida)
+            ->and($stock->refresh()->cantidad_actual)->toBe('3.0000')
+            ->and(Pago::query()->count())->toBe(1)
+            ->and(PagoAplicacion::query()->whereNull('venta_id')->sole()->monto)->toBe('30.00');
+    }
+    expect($stock->refresh()->cantidad_reservada)->toBe('0.0000');
+})->with([
+    'entrega' => [true, 'entrega'],
+    'vencimiento' => [false, 'servicio'],
+    'consulta procesa el vencimiento' => [false, 'consulta'],
+    'venta fallida conserva el vencimiento' => [false, 'venta fallida'],
+    'entrega rechazada conserva el vencimiento' => [false, 'entrega vencida'],
+]);
 
 it('no vende sin caja abierta', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('sincaja');

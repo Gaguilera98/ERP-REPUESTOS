@@ -1,5 +1,7 @@
 # ERP Repuestos v1 - Documento Maestro Unificado
 
+Estado operativo actualizado el 6 de noviembre de 2026 en [fase_6_estado_actual.md](fase_6_estado_actual.md). Las funciones planificadas se distinguen del alcance implementado en ese archivo.
+
 Este documento unificado contiene la arquitectura completa, las reglas de negocio estrictas (con su respectivo "Por qué" y "Para qué") y el diseño relacional de la base de datos para el sistema multi-negocio **ERP Repuestos v1**, diseñado para operar con alta velocidad en mostrador, control estricto de inventario por Costo Promedio Ponderado (PPP), talonarios fiscales físicos, sesiones de caja con candados de auditoría, gestión de devoluciones inmediatas y el protocolo de **Entrada Express por Faltante / Producto Nuevo con Proveedor Ocasional y Creación Al Vuelo**.
 
 ---
@@ -248,6 +250,17 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 * *Por qué:* Sin un lugar donde poner el tipo de cambio, la tienda que importa no puede convertir. Si ese número se pisa, las compras viejas cambian de costo. Si cada cliente trajera su moneda, la caja dejaría de cuadrar.
 * *Para qué:* `negocio_configuracion.moneda` es `BOB`, `PEN` o `BRL`. `tipos_cambio.valor` dice cuántas unidades de esa moneda vale un dólar. Solo uno está vigente por negocio. La compra en dólares copia `tipo_cambio_valor` en la línea. `costo_unitario` queda en la moneda de la tienda y alimenta el PPP. Al confirmar el cambio nuevo, la pantalla no recorre los productos: encola un trabajo que actualiza `precio_venta` y `precio_mayor` por lotes, solo en los que tienen precio en dólares. Si un lote se reintenta con el mismo dólar, el precio queda igual. El costo promedio no se toca. La caja y el cliente siguen en la moneda de la tienda. No se cobra en dólares.
 * *Nota pendiente:* Evaluar migrar `negocio_configuracion.moneda` de `enum('BOB', 'PEN', 'BRL')` a `varchar(3)` (código ISO 4217: BOB, PEN, BRL, COP, ARS, etc.) para que el SaaS no quede restringido a tres países y admita clientes de cualquier región, delegando la lista/validación de monedas permitidas a la capa de aplicación/formulario Filament.
+
+### Estado de la implementación y decisiones vigentes
+
+Actualizado el 6 de noviembre de 2026. El estado operativo de la fase 6 se mantiene en [fase_6_estado_actual.md](fase_6_estado_actual.md). Las secciones de diseño posteriores describen también funciones planificadas; consultar ese estado antes de asumir que están implementadas.
+
+* Las reservas actuales reciben una seña al crearse y el saldo completo al entregar. Se requiere cliente, se aparta stock disponible y se guarda un vencimiento cuyo valor inicial viene de la configuración del negocio. La entrega cobra el saldo en efectivo en la caja de hoy y descuenta stock. El vencimiento libera las unidades y registra la seña a favor del cliente. La aplicación de ese saldo a una venta sigue pendiente.
+* El crédito permite pagos parciales en efectivo desde Mis ventas. Cada cobro se registra en la caja donde se realiza.
+* La anulación de una nota completada conserva la venta y sus cobros en el historial. Repone las unidades vigentes, cancela el saldo pendiente y registra el reembolso de lo efectivamente cobrado en la caja abierta. Usa View:Venta y Update:Venta mediante la policy.
+* Las correcciones de productos o cantidades se guardan en correcciones_venta, vinculadas a la venta original, con usuario, fecha y motivo. Requieren Corregir:Venta. El cierre original conserva sus movimientos y la caja actual registra únicamente las diferencias de dinero realizadas. Los productos que se conservan mantienen el precio guardado; los agregados usan la lista actual del cliente. El cobro adicional de contado está implementado en efectivo.
+* El detalle distingue productos actuales y originales, historial de correcciones, cobros y reembolsos. El bloque independiente para ingresar abonos por código fue retirado del Mostrador.
+* Las devoluciones físicas de productos siguen previstas para la fase 7. Las correcciones actuales atienden errores de registro.
 
 ### Cosas a tener en cuenta a futuro
 Ítems conscientes que **no** se implementan en v1, para no rediseñar a ciegas después:
