@@ -25,6 +25,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'qr_id_transaccion_banco',
     'estado_pago',
     'fecha_pago',
+    'registrado_por_id',
+    'motivo',
 ])]
 class Pago extends Model
 {
@@ -65,5 +67,10 @@ class Pago extends Model
     public function aplicaciones(): HasMany
     {
         return $this->hasMany(PagoAplicacion::class);
+    }
+
+    public function registradoPor(): BelongsTo
+    {
+        return $this->belongsTo(TenantUser::class, 'registrado_por_id');
     }
 }

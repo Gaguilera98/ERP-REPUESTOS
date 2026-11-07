@@ -14,7 +14,9 @@ use App\Models\TenantUser;
 use App\Models\Venta;
 use App\Ventas\AnularVenta;
 use App\Ventas\CompletarVentaContado;
+use App\Ventas\CorregirVenta;
 use App\Ventas\GestionarReservas;
+use App\Ventas\SaldoAFavorCliente;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
@@ -83,7 +85,8 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     $sesion = fn (Builder $query): Builder => $query->whereKey($this->sesionId)
                         ->when(! $this->supervision, fn (Builder $query): Builder => $query->where('user_id', auth('tenant')->id()));
 
-                    $ventas->whereHas('cajaSesion', $sesion)->orWhereHas('aplicacionesPago.pago.cajaSesion', $sesion);
+                    $ventas->whereHas('cajaSesion', $sesion)->orWhereHas('aplicacionesPago', fn (Builder $aplicaciones): Builder => $aplicaciones
+                        ->where('es_saldo_favor', false)->whereHas('pago.cajaSesion', $sesion));
                 }))
             ->defaultSort('created_at', 'desc')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('ultimaCorreccion'))
@@ -145,7 +148,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Cerrar')
                     ->extraModalFooterActions(fn (Venta $record): array => [
-                        ...$this->accionesAbono($record), $this->accionEntregarReserva($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
+                        ...$this->accionesAbono($record), $this->accionReembolsarSena($record), $this->accionEntregarReserva($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
                     ])
                     ->modalContent(function (Venta $record): View {
                         abort_unless(auth('tenant')->user()?->can('view', $record), 403);
@@ -160,12 +163,14 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                             'almacen',
                             'detalles.variante.productoMaestro.unidadBase',
                             'detalles.unidad',
-                            'aplicacionesPago.pago',
+                            'aplicacionesPago.pago.registradoPor',
+                            'aplicacionesPago.usos',
                         ]);
 
                         return view('filament.negocio.pages.caja.detalle-venta', [
                             'venta' => $record,
                             'moneda' => NegocioConfiguracion::codigoMoneda(),
+                            'saldoSenaDisponible' => $record->estado === EstadoVenta::Vencida ? app(SaldoAFavorCliente::class)->disponibleDeReserva($record) : null,
                             'saldoPendiente' => $record->condicion === CondicionVenta::Credito || $record->estado === EstadoVenta::Reserva ? $record->saldoPendiente() : null,
                             'colorEstado' => $this->colorEstado($record->estado),
                         ]);
@@ -197,8 +202,12 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                 $moneda = NegocioConfiguracion::codigoMoneda();
                 $saldo = $venta->saldoPendiente();
                 $cobrado = $venta->cobradoNeto();
+                $restituir = collect(app(CorregirVenta::class)->distribuirReembolso($venta, $cobrado))
+                    ->filter(fn (array $pago): bool => $pago['saldo_favor'])
+                    ->reduce(fn (string $total, array $pago): string => bcadd($total, $pago['monto'], 2), '0.00');
+                $reembolsar = bcsub($cobrado, $restituir, 2);
 
-                return "Se repondrá el stock en el almacén original. Reembolso a registrar: {$moneda} {$cobrado}. Saldo a cancelar: {$moneda} {$saldo}. Confirmá después de devolver los cobros por sus métodos originales.";
+                return "Se repondrá el stock en el almacén original. Reembolso de dinero: {$moneda} {$reembolsar}. Restituir saldo a favor: {$moneda} {$restituir}. Deuda a cancelar: {$moneda} {$saldo}. Confirmá después de devolver el dinero por sus métodos originales.";
             })
             ->modalSubmitActionLabel('Confirmar anulación')
             ->schema([
@@ -257,6 +266,36 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
         }
 
         abort_unless($this->supervision ? CajasDelDia::canAccess() : CajaDelNegocio::canAccess(), 403);
+    }
+
+    private function accionReembolsarSena(Venta $venta): Action
+    {
+        return Action::make('reembolsarSena')->label('Reembolsar seña')
+            ->color('warning')->icon(Heroicon::OutlinedArrowUturnLeft)
+            ->visible(fn (): bool => $venta->estado === EstadoVenta::Vencida && $venta->sena_reembolsable
+                && bccomp(app(SaldoAFavorCliente::class)->disponibleDeReserva($venta), '0', 2) > 0)
+            ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('Reembolsar:Sena'))
+            ->modalHeading('Reembolsar seña · '.$venta->codigo)
+            ->modalDescription(fn (): string => 'Disponible de esta seña: '.NegocioConfiguracion::codigoMoneda().' '.app(SaldoAFavorCliente::class)->disponibleDeReserva($venta).'. Registrá la devolución realizada por los métodos de pago originales. Se descuenta de tu caja de hoy.')
+            ->schema([
+                Hidden::make('disponible')->default(fn (): string => app(SaldoAFavorCliente::class)->disponibleDeReserva($venta)),
+                TextInput::make('monto')->label('Importe a devolver')->prefix(NegocioConfiguracion::codigoMoneda())
+                    ->inputMode('decimal')->required()->rules(['regex:/^\d{1,8}(\.\d{1,2})?$/', 'numeric', 'gt:0']),
+                Textarea::make('motivo')->label('Motivo del reembolso')->trim()->required()->maxLength(500),
+            ])
+            ->modalSubmitActionLabel('Registrar reembolso')
+            ->action(function (array $data, Action $action) use ($venta): void {
+                try {
+                    app(SaldoAFavorCliente::class)->reembolsar($venta, $data['monto'], $data['motivo'], auth('tenant')->user(), $data['disponible']);
+                } catch (ValidationException $exception) {
+                    Notification::make()->title('No se pudo reembolsar')->body(collect($exception->errors())->flatten()->first())->danger()->send();
+                    $action->halt();
+
+                    return;
+                }
+                $venta->refresh();
+                Notification::make()->title('Reembolso registrado')->success()->send();
+            });
     }
 
     /** @return list<Action> */

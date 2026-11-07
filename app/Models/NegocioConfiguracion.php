@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
 #[Fillable([
     'tenant_id',
     'horas_reserva',
+    'permite_reembolso_senas',
     'descuento_max_porcentaje',
     'descuento_max_importe',
     'moneda',
@@ -41,6 +42,7 @@ class NegocioConfiguracion extends Model
     {
         return [
             'horas_reserva' => 'integer',
+            'permite_reembolso_senas' => 'boolean',
             'descuento_max_porcentaje' => 'decimal:2',
             'descuento_max_importe' => 'decimal:2',
             'moneda' => Moneda::class,

@@ -139,7 +139,9 @@ Implementado: venta a crédito con cliente y cobro parcial opcional, abonos en e
 
 Decisión comercial vigente para reservas: una seña al crear y el saldo completo al retirar. Los abonos sucesivos de una reserva quedan fuera del flujo actual.
 
-Pendiente para cerrar la fase: adelantos, aplicación del saldo a favor, pago que cubra varias ventas, cancelación de reservas y modificación autorizada de su vencimiento.
+Implementado también al 7 de noviembre de 2026: aplicación del saldo a favor en Mostrador y reembolso parcial o total de señas vencidas con permiso, motivo y caja actual. La condición de reembolso se configura por negocio y se copia en cada reserva.
+
+Pendiente para cerrar la fase: adelantos, pago que cubra varias ventas, cancelación de reservas y modificación autorizada de su vencimiento.
 
 Se completa `pago_aplicaciones` y los estados `reserva`, `credito` y `vencida`.
 

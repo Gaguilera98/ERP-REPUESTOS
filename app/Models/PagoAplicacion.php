@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'tenant_id',
@@ -16,6 +17,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'nota_credito_id',
     'aplicacion_origen_id',
     'monto',
+    'es_saldo_favor',
+    'reserva_saldo_origen_id',
 ])]
 class PagoAplicacion extends Model
 {
@@ -31,6 +34,7 @@ class PagoAplicacion extends Model
     {
         return [
             'monto' => 'decimal:2',
+            'es_saldo_favor' => 'boolean',
         ];
     }
 
@@ -47,5 +51,10 @@ class PagoAplicacion extends Model
     public function aplicacionOrigen(): BelongsTo
     {
         return $this->belongsTo(self::class, 'aplicacion_origen_id');
+    }
+
+    public function usos(): HasMany
+    {
+        return $this->hasMany(self::class, 'aplicacion_origen_id');
     }
 }

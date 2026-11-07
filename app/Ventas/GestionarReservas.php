@@ -43,6 +43,7 @@ class GestionarReservas
                 if ($origen->pago->estado_pago === EstadoPago::Aprobado && $origen->pago->sentido === SentidoPago::Cobro) {
                     $origen->pago->aplicaciones()->create([
                         'venta_id' => null, 'aplicacion_origen_id' => $origen->id, 'monto' => $origen->monto,
+                        'reserva_saldo_origen_id' => $venta->id,
                     ]);
                 }
             }

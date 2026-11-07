@@ -27,6 +27,7 @@ use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
 use App\Ventas\GestionarReservas;
 use App\Ventas\PrecioDeLista;
+use App\Ventas\SaldoAFavorCliente;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
@@ -124,6 +125,8 @@ trait ManejaMostrador
     public bool $ventaFiada = false;
 
     public bool $ventaReserva = false;
+
+    public string $saldoFavor = '';
 
     public string $venceReserva = '';
 
@@ -715,7 +718,7 @@ trait ManejaMostrador
             $pagos = [];
 
             foreach ($this->pagos as $indice => $pago) {
-                if ($this->ventaFiada && trim((string) $pago['monto']) === '' && empty($pago['comprobante'])) {
+                if (($this->ventaFiada || $this->saldoFavorTentativo() !== '0.00') && trim((string) $pago['monto']) === '' && empty($pago['comprobante'])) {
                     continue;
                 }
                 $path = null;
@@ -749,6 +752,7 @@ trait ManejaMostrador
                 ])->all(),
                 'pagos' => $pagos,
                 'vence_en' => $this->venceReserva,
+                'saldo_favor' => $this->saldoFavor === '' ? '0' : $this->saldoFavor,
             ];
             $resultado = match (true) {
                 $this->ventaReserva => $completar->reservar($datosVenta, $usuario),
@@ -763,6 +767,7 @@ trait ManejaMostrador
             $this->ventaFiada = false;
             $this->ventaReserva = false;
             $this->venceReserva = '';
+            $this->saldoFavor = '';
             $this->pagos = [[
                 'metodo_pago' => MetodoPago::Efectivo->value,
                 'monto' => '',
@@ -851,6 +856,7 @@ trait ManejaMostrador
 
     private function tomarCliente(Cliente $cliente): void
     {
+        $this->saldoFavor = '';
         if ($cliente->tipo_precio !== TipoPrecioCliente::Mayor || $this->clienteId === $cliente->id) {
             $this->clienteId = $cliente->id;
             $this->cerrarEleccionPrecio();
@@ -954,6 +960,9 @@ trait ManejaMostrador
         $mensajes = [];
 
         foreach ($this->pagos as $indice => $pago) {
+            if ($this->saldoFavorTentativo() !== '0.00' && trim((string) ($pago['monto'] ?? '')) === '' && empty($pago['comprobante'])) {
+                continue;
+            }
             $metodo = MetodoPago::tryFrom((string) ($pago['metodo_pago'] ?? ''));
 
             if ($metodo === null || ! $metodo->aceptaComprobanteArchivo()) {
@@ -998,6 +1007,9 @@ trait ManejaMostrador
             'totalesLinea' => $this->totalesPorLinea(),
             'totalTentativo' => $this->totalTentativo(),
             'totalRecibido' => $this->totalRecibido(),
+            'saldoFavorDisponible' => $this->clienteId ? app(SaldoAFavorCliente::class)->disponible($this->clienteId) : '0.00',
+            'saldoFavorAplicado' => $this->saldoFavorTentativo(),
+            'permiteReembolsoSenas' => NegocioConfiguracion::query()->first()?->permite_reembolso_senas ?? true,
             'diferenciaCobros' => $this->diferenciaCobros(),
             'categorias' => Categoria::query()->where('is_active', true)->orderBy('nombre')->get(),
             'atributosCategoria' => $this->atributosDeCategoria(),
@@ -1120,6 +1132,7 @@ trait ManejaMostrador
 
     public function seleccionarCliente(int $clienteId): void
     {
+        $this->saldoFavor = '';
         $cliente = Cliente::query()->whereKey($clienteId)->first();
 
         if (! $cliente instanceof Cliente) {
@@ -1153,6 +1166,7 @@ trait ManejaMostrador
 
         $this->clienteId = $cliente->id;
         $this->listaPrecio = $tipo->value;
+        $this->saldoFavor = '';
         $this->cerrarEleccionPrecio();
         $this->aplicarListaPrecio();
     }
@@ -1176,6 +1190,7 @@ trait ManejaMostrador
 
     public function quitarCliente(): void
     {
+        $this->saldoFavor = '';
         $this->clienteId = null;
         $this->listaPrecio = TipoPrecioCliente::Menor->value;
         $this->cerrarEleccionPrecio();
@@ -1486,7 +1501,7 @@ trait ManejaMostrador
 
     protected function totalRecibido(): string
     {
-        $total = '0.00';
+        $total = $this->saldoFavorTentativo();
 
         foreach ($this->pagos as $pago) {
             $monto = trim((string) ($pago['monto'] ?? ''));
@@ -1499,6 +1514,12 @@ trait ManejaMostrador
         }
 
         return $total;
+    }
+
+    private function saldoFavorTentativo(): string
+    {
+        return preg_match('/^\d{1,8}(\.\d{1,2})?$/', $this->saldoFavor) === 1
+            ? Montos::dos($this->saldoFavor) : '0.00';
     }
 
     /**

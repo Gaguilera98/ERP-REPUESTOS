@@ -60,6 +60,7 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
 
         $this->form->fill([
             'horas_reserva' => $configuracion->horas_reserva,
+            'permite_reembolso_senas' => $configuracion->permite_reembolso_senas,
             'descuento_max_porcentaje' => $configuracion->descuento_max_porcentaje,
             'descuento_max_importe' => $configuracion->descuento_max_importe,
             'moneda' => $configuracion->moneda->value,
@@ -86,6 +87,10 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
                     ->minValue(0)
                     ->maxValue(100)
                     ->required(),
+                Toggle::make('permite_reembolso_senas')
+                    ->label('Permitir reembolso de señas vencidas')
+                    ->helperText('Se guarda esta condición en cada reserva nueva. Reembolsar exige permiso y motivo; el saldo también puede usarse en otra compra.')
+                    ->inline(false),
                 TextInput::make('descuento_max_importe')
                     ->label('Descuento máximo en importe')
                     ->prefix(fn (Get $get): string => (string) ($get('moneda') ?: NegocioConfiguracion::codigoMoneda()))

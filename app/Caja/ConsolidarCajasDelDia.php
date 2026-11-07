@@ -247,7 +247,7 @@ class ConsolidarCajasDelDia
             foreach ($pago->aplicaciones as $aplicacion) {
                 $venta = $aplicacion->venta;
 
-                if (! $venta instanceof Venta || isset($vistas[$venta->id])) {
+                if ($aplicacion->es_saldo_favor || ! $venta instanceof Venta || isset($vistas[$venta->id])) {
                     continue;
                 }
 

@@ -221,18 +221,16 @@ class CorregirVenta
             ->whereDate('fecha_apertura', now()->toDateString());
     }
 
-    /** @return list<array{origen: int, metodo: string, monto: string}> */
+    /** @return list<array{origen: int, metodo: string, saldo_favor: bool, monto: string}> */
     public function distribuirReembolso(Venta $venta, string $monto): array
     {
         if ($monto === '0.00') {
             return [];
         }
 
-        $aplicaciones = $venta->aplicacionesPago()->with('pago')
+        $aplicaciones = $venta->aplicacionesPago()->with(['pago', 'usos'])
             ->whereHas('pago', fn ($query) => $query->where('estado_pago', EstadoPago::Aprobado))
             ->orderByDesc('id')->get();
-        $devueltos = $aplicaciones->filter(fn (PagoAplicacion $aplicacion): bool => $aplicacion->pago->sentido === SentidoPago::Reembolso)
-            ->groupBy('aplicacion_origen_id');
         $reembolsos = [];
 
         foreach ($aplicaciones as $aplicacion) {
@@ -240,14 +238,14 @@ class CorregirVenta
                 continue;
             }
 
-            $disponible = $devueltos->get($aplicacion->id, collect())
+            $disponible = $aplicacion->usos
                 ->reduce(fn (string $saldo, PagoAplicacion $reembolso): string => bcsub($saldo, $reembolso->monto, 2), $aplicacion->monto);
             if (bccomp($disponible, '0', 2) <= 0) {
                 continue;
             }
 
             $parcial = bccomp($monto, $disponible, 2) > 0 ? $disponible : $monto;
-            $reembolsos[] = ['origen' => $aplicacion->id, 'metodo' => $aplicacion->pago->metodo_pago->value, 'monto' => $parcial];
+            $reembolsos[] = ['origen' => $aplicacion->id, 'metodo' => $aplicacion->pago->metodo_pago->value, 'saldo_favor' => $aplicacion->es_saldo_favor, 'monto' => $parcial];
             $monto = bcsub($monto, $parcial, 2);
         }
 
@@ -305,6 +303,15 @@ class CorregirVenta
 
     public function registrarDiferencia(Venta $venta, CajaSesion $caja, SentidoPago $sentido, MetodoPago $metodo, string $monto, ?int $origen = null): void
     {
+        $aplicacion = $origen ? $venta->aplicacionesPago()->findOrFail($origen) : null;
+        if ($sentido === SentidoPago::Reembolso && $aplicacion?->es_saldo_favor) {
+            $aplicacion->usos()->create([
+                'pago_id' => $aplicacion->pago_id, 'venta_id' => null, 'es_saldo_favor' => true,
+                'reserva_saldo_origen_id' => $aplicacion->reserva_saldo_origen_id, 'monto' => $monto,
+            ]);
+
+            return;
+        }
         $pago = Pago::query()->create([
             'cliente_id' => $venta->cliente_id, 'caja_sesion_id' => $caja->id, 'sentido' => $sentido,
             'metodo_pago' => $metodo, 'monto' => $monto, 'estado_pago' => EstadoPago::Aprobado, 'fecha_pago' => now(),

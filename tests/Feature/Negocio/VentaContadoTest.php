@@ -42,6 +42,7 @@ use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
 use App\Ventas\CorregirVenta;
 use App\Ventas\GestionarReservas;
+use App\Ventas\SaldoAFavorCliente;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -475,6 +476,100 @@ it('aparta una reserva y la entrega o libera al vencer sin duplicar la seña', f
     'consulta procesa el vencimiento' => [false, 'consulta'],
     'venta fallida conserva el vencimiento' => [false, 'venta fallida'],
     'entrega rechazada conserva el vencimiento' => [false, 'entrega vencida'],
+]);
+
+it('aplica saldo de una seña y controla el reembolso restante con su política original', function (bool $reembolsable, bool $soloSaldo) {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('saldo-favor');
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    $cliente = Cliente::factory()->personaNatural()->create();
+    NegocioConfiguracion::query()->first()->update(['permite_reembolso_senas' => $reembolsable]);
+    $abrir = app(AbrirCajaSesion::class);
+    $primera = $abrir->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $reserva = app(CompletarVentaContado::class)->reservar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'cliente_id' => $cliente->id,
+        'vence_en' => now()->addDay()->toDateTimeString(),
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '30']],
+    ], $cajero)['venta'];
+    NegocioConfiguracion::query()->first()->update(['permite_reembolso_senas' => ! $reembolsable]);
+    $this->travel(2)->days();
+    $segunda = $abrir->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    app(GestionarReservas::class)->procesarVencidas();
+    $saldo = app(SaldoAFavorCliente::class);
+    expect($saldo->disponible($cliente->id))->toBe('30.00');
+    $otroCliente = Cliente::factory()->personaNatural()->create();
+    foreach ([[$cliente->id, '31', '69'], [$otroCliente->id, '20', '80']] as [$clienteId, $aplicar, $efectivo]) {
+        expect(fn () => app(CompletarVentaContado::class)->completar([
+            'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'cliente_id' => $clienteId,
+            'saldo_favor' => $aplicar,
+            'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+            'pagos' => [['metodo_pago' => 'efectivo', 'monto' => $efectivo]],
+        ], $cajero))->toThrow(ValidationException::class);
+    }
+    expect(Venta::query()->count())->toBe(1)
+        ->and(Pago::query()->count())->toBe(1)
+        ->and($saldo->disponible($cliente->id))->toBe('30.00');
+    if ($soloSaldo) {
+        $variante->update(['precio_venta' => '20.00']);
+    }
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)->call('seleccionarCliente', $cliente->id)
+        ->set('saldoFavor', '20')->set('pagos.0.monto', $soloSaldo ? '' : '80')->call('completar')->assertHasNoErrors();
+
+    $venta = Venta::query()->whereKeyNot($reserva->id)->sole();
+    expect($venta->saldoPendiente())->toBe('0.00')
+        ->and($venta->aplicacionesPago()->where('es_saldo_favor', true)->sole()->monto)->toBe('20.00')
+        ->and($saldo->disponible($cliente->id))->toBe('10.00')
+        ->and(app(ArqueoCajaSesion::class)->de($primera)['total_cobros'])->toBe('30.00')
+        ->and(app(ArqueoCajaSesion::class)->de($segunda)['total_cobros'])->toBe($soloSaldo ? '0.00' : '80.00');
+    Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $primera->id])
+        ->assertCanNotSeeTableRecords([$venta]);
+
+    expect(fn () => $saldo->reembolsar($reserva, '5', 'Solicitud del cliente', $cajero, '10.00'))->toThrow(HttpException::class);
+    $cajaSupervisor = $abrir->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '20'], $supervisor);
+    if ($reembolsable) {
+        Livewire::actingAs($supervisor, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $primera->id, 'supervision' => true])
+            ->callAction([TestAction::make('verDetalle')->table($reserva), TestAction::make('reembolsarSena')], data: [
+                'monto' => '5', 'motivo' => 'Solicitud del cliente',
+            ])->assertNotified('Reembolso registrado');
+        expect(fn () => $saldo->reembolsar($reserva, '5', 'Reintento', $supervisor, '10.00'))->toThrow(ValidationException::class);
+        expect($saldo->disponible($cliente->id))->toBe('5.00')
+            ->and(app(ArqueoCajaSesion::class)->de($cajaSupervisor)['total_reembolsos'])->toBe('5.00');
+        $reembolso = Pago::query()->where('sentido', SentidoPago::Reembolso)->sole();
+        expect($reembolso->registrado_por_id)->toBe($supervisor->id)->and($reembolso->motivo)->toBe('Solicitud del cliente');
+    } else {
+        expect(fn () => $saldo->reembolsar($reserva, '5', 'Solicitud del cliente', $supervisor, '10.00'))->toThrow(ValidationException::class);
+        expect($saldo->disponible($cliente->id))->toBe('10.00')
+            ->and(Pago::query()->where('sentido', SentidoPago::Reembolso)->count())->toBe(0);
+    }
+    expect(fn () => $saldo->aplicar($venta, '20'))->toThrow(ValidationException::class);
+    if ($soloSaldo) {
+        $reemplazo = ProductoVariante::factory()->create(['precio_venta' => '10.00']);
+        cargarStock($reemplazo, $almacen, $cajero, $ocasional, '3');
+        $lineas = [['origen' => 0, 'producto_variante_id' => $reemplazo->id, 'cantidad' => '1']];
+        $corregir = app(CorregirVenta::class);
+        $revision = $corregir->revision($venta, $corregir->revisar($venta, $lineas));
+        $corregir->confirmar($venta, $lineas, 'Corrección cubierta con saldo', $revision, $supervisor);
+        $venta->refresh();
+        expect($venta->cobradoNeto())->toBe('10.00')
+            ->and($saldo->disponible($cliente->id))->toBe('15.00')
+            ->and(app(ArqueoCajaSesion::class)->de($cajaSupervisor)['total_reembolsos'])->toBe('5.00');
+    }
+    app(AnularVenta::class)->anular($venta, 'Cancelación de compra con saldo', $venta->cobradoNeto(), $supervisor);
+    expect($saldo->disponible($cliente->id))->toBe($reembolsable ? '25.00' : '30.00')
+        ->and($saldo->disponibleDeReserva($reserva))->toBe($reembolsable ? '25.00' : '30.00')
+        ->and(app(ArqueoCajaSesion::class)->de($cajaSupervisor)['total_reembolsos'])
+        ->toBe($soloSaldo ? '5.00' : ($reembolsable ? '85.00' : '80.00'));
+    $tenantOriginal = tenant();
+    tenancy()->initialize(Tenant::factory()->create());
+    expect($saldo->disponible($cliente->id))->toBe('0.00');
+    tenancy()->initialize($tenantOriginal);
+})->with([
+    'permite reembolso' => [true, false],
+    'solo permite otra compra' => [false, false],
+    'compra cubierta con saldo' => [true, true],
 ]);
 
 it('no vende sin caja abierta', function () {

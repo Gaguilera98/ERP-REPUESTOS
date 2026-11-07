@@ -8,6 +8,9 @@
     'descuentoTotal',
     'totalTentativo',
     'totalRecibido',
+    'saldoFavorDisponible' => '0.00',
+    'saldoFavorAplicado' => '0.00',
+    'permiteReembolsoSenas' => true,
     'diferenciaCobros',
     'lineas' => [],
     'pagos',
@@ -23,7 +26,7 @@
     $puedeCobrar = $cajaAbierta
         && (($ventaFiada || $ventaReserva)
             ? $tieneCliente && $diferenciaCobros['estado'] === 'falta'
-            : $diferenciaCobros['estado'] === 'completo' && count($pagos) > 0)
+            : $diferenciaCobros['estado'] === 'completo' && (count($pagos) > 0 || (float) $saldoFavorAplicado > 0))
         && (! $ventaReserva || (float) $totalRecibido > 0)
         && (float) $totalTentativo > 0;
     $cantidadProductos = count($lineas);
@@ -61,12 +64,13 @@
                 <x-filament::button type="button" size="sm" :color="$ventaReserva ? 'primary' : 'gray'" :aria-pressed="$ventaReserva ? 'true' : 'false'" wire:click="seleccionarOperacion('reserva')">Reserva</x-filament::button>
             </div>
         </div>
-        @if ($ventaFiada || $ventaReserva)
+        @if ($ventaFiada)
             <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ $tieneCliente ? 'Podés dejar el cobro vacío o registrar un pago parcial.' : 'Seleccioná un cliente para vender a crédito.' }}
             </p>
         @endif
         @if ($ventaReserva)
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ $permiteReembolsoSenas ? 'Si la reserva vence, la seña queda a favor y puede reembolsarse con autorización.' : 'Si la reserva vence, la seña queda disponible para otra compra. Este negocio no ofrece reembolso de señas.' }}</p>
             <label for="vence-reserva" class="block text-sm font-medium">Retirar antes de</label>
             <x-filament::input.wrapper><x-filament::input id="vence-reserva" type="datetime-local" wire:model="venceReserva" /></x-filament::input.wrapper>
             <p class="text-xs text-gray-500 dark:text-gray-400">Registrá una seña menor al total para apartar los productos.</p>
@@ -75,6 +79,15 @@
         @error('cliente_id')
             <p class="text-sm text-danger-600 dark:text-danger-400">{{ $message }}</p>
         @enderror
+        @if ($tieneCliente && (float) $saldoFavorDisponible > 0)
+            <div class="space-y-2 rounded-lg border border-primary-200 p-3 dark:border-primary-400/30">
+                <p class="text-sm font-semibold">Saldo a favor disponible · {{ $moneda }} {{ $saldoFavorDisponible }}</p>
+                <label for="saldo-favor" class="block text-sm">Usar en esta compra</label>
+                <x-negocio.input-monto id="saldo-favor" :moneda="$moneda" wire:model.live.debounce.300ms="saldoFavor" inputmode="decimal" />
+                <p class="text-xs text-gray-500 dark:text-gray-400">Este importe se descuenta del saldo del cliente al confirmar.</p>
+            </div>
+        @endif
+        @error('saldo_favor') <p class="text-sm text-danger-600 dark:text-danger-400">{{ $message }}</p> @enderror
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-white/5">
             <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
@@ -92,7 +105,7 @@
                 @if ($ventaFiada || $ventaReserva)
                     <div class="flex justify-between gap-3">
                         <span class="text-gray-500 dark:text-gray-400">Cobrado hoy</span>
-                        <span class="tabular-nums">{{ $moneda }} {{ number_format((float) $totalRecibido, 2, '.', ',') }}</span>
+                        <span class="tabular-nums">{{ $moneda }} {{ number_format((float) bcsub($totalRecibido, $saldoFavorAplicado, 2), 2, '.', ',') }}</span>
                     </div>
                     <div class="flex justify-between gap-3 font-semibold text-amber-800 dark:text-amber-300">
                         <span>Saldo pendiente</span>
@@ -318,7 +331,7 @@
 
         <div class="negocio-inset p-3">
             <div class="flex items-center justify-between gap-3 text-sm">
-                <span class="text-gray-500 dark:text-gray-400">Total recibido</span>
+                <span class="text-gray-500 dark:text-gray-400">{{ (float) $saldoFavorAplicado > 0 ? 'Total aplicado a la compra' : 'Total recibido' }}</span>
                 <span class="font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ number_format((float) $totalRecibido, 2, '.', ',') }}</span>
             </div>
             <div class="mt-2">

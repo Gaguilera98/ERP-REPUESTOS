@@ -1,6 +1,6 @@
 # Fase 6 en curso
 
-Actualizado el 6 de noviembre de 2026.
+Actualizado el 7 de noviembre de 2026.
 
 Este archivo registra el estado real de la fase. El alcance general se mantiene en fases_erp_mostrador_f4aaf7c6.plan.md y las condiciones del proyecto en esstructuraybasecondiciones.md.
 
@@ -15,11 +15,31 @@ Este archivo registra el estado real de la fase. El alcance general se mantiene 
 
 ## Decisión comercial de reservas
 
+En Configuración, permite_reembolso_senas controla las reservas nuevas. Su valor inicial es habilitado, también para las reservas anteriores a esta ampliación. Cada reserva copia la condición en sena_reembolsable. Cambiar luego la configuración mantiene las condiciones de las reservas existentes.
+
+Al seleccionar un cliente en Mostrador se muestra su saldo a favor disponible. Se puede aplicar un importe a la compra y completar con un cobro nuevo. La aplicación reutiliza el pago original mediante pago_aplicaciones, marcado como es_saldo_favor. Caja contabiliza únicamente el cobro nuevo y el detalle identifica el saldo aplicado.
+
+Las señas vencidas reembolsables ofrecen Reembolsar seña desde su detalle. Exige Reembolsar:Sena, permiso de consulta, una caja abierta de hoy en la sucursal, importe disponible y motivo. Puede devolverse una parte o todo lo disponible por los métodos originales. El movimiento guarda registrado_por_id y motivo en pagos. Un reintento con un saldo desactualizado se rechaza.
+
+Una seña sin permiso comercial de reembolso conserva el saldo para compras futuras. La retención definitiva por incumplimiento sigue pendiente de definición y desarrollo.
+
+Si se corrige o anula una compra pagada con saldo a favor, esa parte se restituye al saldo del cliente mediante otra aplicación. El reembolso monetario corresponde a los cobros nuevos. reserva_saldo_origen_id conserva el vínculo con la reserva inicial incluso después de esa restitución.
+
 Seña al crear y saldo completo al retirar. El flujo actual no ofrece abonos sucesivos a una reserva. El pago a crédito tiene su propio flujo de abonos.
 
 La fecha de retiro debe ser futura. La entrega exige una reserva vigente, los permisos de crear y consultar ventas y una caja abierta de hoy en la sucursal. El saldo se vuelve a comprobar al confirmar.
 
 La fecha inicial se calcula con horas_reserva y se propone a las 23:59 de ese día. El usuario puede cambiar tanto el día como la hora antes de confirmar la reserva.
+
+## Arquitectura de reservas y evolución futura
+
+Actualmente la reserva comercial se guarda en ventas con estado Reserva, reutilizando sus detalles y pagos. Al entregar, el mismo registro pasa a Completada. Las unidades apartadas se controlan mediante cantidad_reservada, sin descontar la existencia física hasta la entrega.
+
+Se mantiene este diseño para el flujo actual de seña y pago completo del saldo al retirar. No se requiere una tabla comercial independiente de reservas para este alcance.
+
+Si se incorporan entregas parciales, asignación por lotes o varios almacenes para un mismo pedido, evaluar registros específicos de inventario reservado vinculados a los detalles del documento. Separar esos registros de inventario no implica necesariamente separar la reserva comercial de ventas. Esta evaluación queda para una ampliación futura, sin cambios de esquema por ahora.
+
+Como referencia, ERPNext crea registros de Stock Reservation Entry asociados a las líneas del pedido comercial. Documentación oficial: https://docs.frappe.io/erpnext/stock-reservation.
 
 ## Operación local
 
@@ -39,8 +59,7 @@ Estos cambios están relacionados con la operación de ventas. La fase 7 de devo
 
 ## Pendientes para cerrar la fase
 
-* Registrar adelantos de clientes y consultar su saldo a favor.
-* Aplicar a una venta el saldo a favor ya registrado, incluida una seña vencida, sin duplicar cobros.
+* Registrar adelantos de clientes sin productos.
 * Distribuir un pago entre varias ventas.
 * Cancelar reservas con un flujo explícito para stock y seña.
 * Cambiar el vencimiento de una reserva existente mediante permiso y registro del cambio.

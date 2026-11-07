@@ -29,6 +29,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'condicion',
     'estado',
     'vence_en',
+    'sena_reembolsable',
     'tipo_comprobante',
     'numero_comprobante',
     'subtotal',
@@ -62,6 +63,7 @@ class Venta extends Model
             'condicion' => CondicionVenta::class,
             'estado' => EstadoVenta::class,
             'vence_en' => 'datetime',
+            'sena_reembolsable' => 'boolean',
             'anulada_en' => 'datetime',
             'tipo_comprobante' => TipoComprobante::class,
             'subtotal' => 'decimal:2',
@@ -134,12 +136,16 @@ class Venta extends Model
 
     public function cobradoNeto(): string
     {
-        $pagos = $this->aplicacionesPago()->with('pago')
+        $pagos = $this->aplicacionesPago()->with(['pago', 'usos'])
             ->whereHas('pago', fn ($query) => $query->where('estado_pago', EstadoPago::Aprobado))->get();
 
-        return $pagos->reduce(fn (string $total, PagoAplicacion $aplicacion): string => $aplicacion->pago->sentido === SentidoPago::Cobro
-            ? bcadd($total, $aplicacion->monto, 2)
-            : bcsub($total, $aplicacion->monto, 2), '0.00');
+        return $pagos->reduce(function (string $total, PagoAplicacion $aplicacion): string {
+            $restituido = $aplicacion->usos->filter(fn (PagoAplicacion $uso): bool => $uso->es_saldo_favor && $uso->venta_id === null)
+                ->reduce(fn (string $suma, PagoAplicacion $uso): string => bcadd($suma, $uso->monto, 2), '0.00');
+            $monto = bcsub($aplicacion->monto, $restituido, 2);
+
+            return $aplicacion->pago->sentido === SentidoPago::Cobro ? bcadd($total, $monto, 2) : bcsub($total, $monto, 2);
+        }, '0.00');
     }
 
     public function saldoPendiente(): string

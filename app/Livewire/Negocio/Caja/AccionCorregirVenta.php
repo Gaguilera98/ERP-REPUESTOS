@@ -126,13 +126,13 @@ class AccionCorregirVenta
             return "{$montos} {$kardex} Cobrá en efectivo {$moneda} {$resumen['cobrar']} y registralo en tu caja de hoy.";
         }
         if ($resumen['devolver'] !== '0.00') {
-            $medios = collect($resumen['reembolsos'])->groupBy('metodo')->map(function ($pagos, string $metodo) use ($moneda): string {
+            $medios = collect($resumen['reembolsos'])->groupBy(fn (array $pago): string => $pago['saldo_favor'] ? 'saldo_favor' : $pago['metodo'])->map(function ($pagos, string $metodo) use ($moneda): string {
                 $monto = $pagos->reduce(fn (string $total, array $pago): string => bcadd($total, $pago['monto'], 2), '0.00');
 
-                return MetodoPago::from($metodo)->etiqueta()." {$moneda} {$monto}";
+                return ($metodo === 'saldo_favor' ? 'Restituir saldo a favor' : MetodoPago::from($metodo)->etiqueta())." {$moneda} {$monto}";
             })->implode(', ');
 
-            return "{$montos} {$kardex} Registrá en tu caja de hoy el reembolso realizado: {$medios}.";
+            return "{$montos} {$kardex} Reintegro a registrar: {$medios}.";
         }
 
         return "{$montos} {$kardex} Sin movimiento de dinero.";

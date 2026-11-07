@@ -127,6 +127,10 @@ class CompletarVentaContado
                 throw ValidationException::withMessages(['cliente_id' => 'Elegí un cliente para esta operación.']);
             }
             $cliente = null;
+            $saldoFavor = $this->montoDos($data['saldo_favor'] ?? '0', 'saldo_favor');
+            if (bccomp($saldoFavor, '0', 2) < 0 || ($clienteId === null && $saldoFavor !== '0.00')) {
+                throw ValidationException::withMessages(['saldo_favor' => 'Elegí un cliente y un importe válido de saldo a favor.']);
+            }
 
             if ($clienteId !== null) {
                 $cliente = Cliente::query()->find($clienteId);
@@ -136,6 +140,7 @@ class CompletarVentaContado
                         'cliente_id' => 'Ese cliente no es de este negocio.',
                     ]);
                 }
+                $cliente = Cliente::query()->whereKey($clienteId)->lockForUpdate()->firstOrFail();
             }
 
             $config = NegocioConfiguracion::query()->first();
@@ -267,14 +272,14 @@ class CompletarVentaContado
 
             $pagosRaw = $data['pagos'] ?? null;
 
-            if (! is_array($pagosRaw) || ($pagosRaw === [] && $condicion === CondicionVenta::Contado)) {
+            if (! is_array($pagosRaw) || ($pagosRaw === [] && $condicion === CondicionVenta::Contado && $saldoFavor === '0.00')) {
                 throw ValidationException::withMessages([
                     'pagos' => 'Registrá al menos un cobro.',
                 ]);
             }
 
             $pagosPreparados = [];
-            $sumaPagos = '0.00';
+            $sumaPagos = $saldoFavor;
 
             foreach (array_values($pagosRaw) as $indice => $pago) {
                 if (! is_array($pago)) {
@@ -329,6 +334,7 @@ class CompletarVentaContado
                 'condicion' => $condicion,
                 'estado' => $reserva ? EstadoVenta::Reserva : EstadoVenta::Completada,
                 'vence_en' => $reserva ? $data['vence_en'] : null,
+                'sena_reembolsable' => $config?->permite_reembolso_senas ?? true,
                 'tipo_comprobante' => TipoComprobante::NotaVenta,
                 'numero_comprobante' => null,
                 'subtotal' => $subtotal,
@@ -391,6 +397,9 @@ class CompletarVentaContado
 
             foreach ($pagosPreparados as $pagoData) {
                 $this->guardarCobro($venta, $pagoData);
+            }
+            if ($saldoFavor !== '0.00') {
+                app(SaldoAFavorCliente::class)->aplicar($venta, $saldoFavor);
             }
 
             return [

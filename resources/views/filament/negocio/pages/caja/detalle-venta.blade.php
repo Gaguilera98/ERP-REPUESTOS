@@ -9,6 +9,11 @@
     $cobrado = $venta->aplicacionesPago
         ->filter(fn ($aplicacion) => $aplicacion->pago?->estado_pago === EstadoPago::Aprobado && $aplicacion->pago?->sentido === SentidoPago::Cobro)
         ->reduce(fn (string $total, $aplicacion) => bcadd($total, $aplicacion->monto, 2), '0.00');
+    $saldoRestituido = $venta->aplicacionesPago->where('es_saldo_favor', true)
+        ->reduce(fn (string $total, $aplicacion) => $aplicacion->usos
+            ->filter(fn ($uso) => $uso->venta_id === null && $uso->es_saldo_favor)
+            ->reduce(fn (string $suma, $uso) => bcadd($suma, $uso->monto, 2), $total), '0.00');
+    $cobrado = bcsub($cobrado, $saldoRestituido, 2);
     $pagado = bcsub($cobrado, $reembolsado, 2);
     $mostrarMovimientos = $venta->ultimaCorreccion || bccomp($reembolsado, '0', 2) > 0;
     $lineasActuales = collect($venta->ultimaCorreccion?->lineas ?? []);
@@ -27,6 +32,12 @@
         <p class="text-sm text-gray-600 dark:text-gray-300">Reserva vigente hasta {{ $venta->vence_en?->format('d/m/Y H:i') }}.</p>
     @elseif ($venta->estado === \App\Enums\EstadoVenta::Vencida)
         <p class="text-sm text-gray-600 dark:text-gray-300">Reserva vencida. Los productos se liberaron y la seña quedó a favor del cliente.</p>
+    @endif
+    @if (in_array($venta->estado, [\App\Enums\EstadoVenta::Reserva, \App\Enums\EstadoVenta::Vencida], true))
+        <p class="text-sm text-gray-600 dark:text-gray-300">{{ $venta->sena_reembolsable ? 'Seña reembolsable con autorización.' : 'Seña utilizable en otra compra. Sin reembolso según las condiciones de esta reserva.' }}</p>
+    @endif
+    @if (isset($saldoSenaDisponible))
+        <p class="text-sm font-semibold">Saldo disponible de esta seña · {{ $moneda }} {{ $saldoSenaDisponible }}</p>
     @endif
     @if (bccomp($reembolsado, '0', 2) > 0)
         <div class="flex items-start gap-3 rounded-lg border border-warning-300 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-400/30 dark:bg-warning-400/10 dark:text-warning-300">
@@ -204,20 +215,26 @@
                     @php($pago = $aplicacion->pago)
                     <tr @class(['border-b border-gray-100 text-gray-950 dark:border-white/10 dark:text-white', 'bg-warning-50 dark:bg-warning-400/10' => $pago?->sentido === SentidoPago::Reembolso])>
                         <td class="px-2 py-3">
-                            {{ $pago?->metodo_pago?->etiqueta() ?? '—' }}
+                            {{ $aplicacion->es_saldo_favor ? 'Saldo a favor' : ($pago?->metodo_pago?->etiqueta() ?? '—') }}
                             @if (filled($pago?->numero_referencia_banco) || filled($pago?->qr_id_transaccion_banco))
                                 <p class="text-xs text-gray-500 dark:text-gray-400">Ref. {{ $pago->numero_referencia_banco ?? $pago->qr_id_transaccion_banco }}</p>
                             @endif
                         </td>
-                        <td data-label="Fecha y hora" class="px-2 py-3">{{ $pago?->fecha_pago?->format('d/m/Y H:i') ?? '—' }}</td>
+                        <td data-label="Fecha y hora" class="px-2 py-3">{{ ($aplicacion->es_saldo_favor ? $aplicacion->created_at : $pago?->fecha_pago)?->format('d/m/Y H:i') ?? '—' }}</td>
                         <td data-label="Movimiento" class="px-2 py-3">
-                            @if ($pago?->sentido === SentidoPago::Reembolso)
+                            @if ($aplicacion->es_saldo_favor)
+                                Saldo aplicado
+                            @elseif ($pago?->sentido === SentidoPago::Reembolso)
                                 <x-filament::badge color="warning">Reembolso</x-filament::badge>
                             @else
                                 {{ $pago?->sentido?->etiqueta() ?? '—' }}
                             @endif
-                            @if ($pago?->caja_sesion_id)
+                            @if (! $aplicacion->es_saldo_favor && $pago?->caja_sesion_id)
                                 <p>Sesión #{{ $pago->caja_sesion_id }}</p>
+                            @endif
+                            @if (filled($pago?->motivo))
+                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ $pago->motivo }}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ $pago->registradoPor?->name ?? '—' }}</p>
                             @endif
                         </td>
                         <td data-label="Estado" class="px-2 py-3">
@@ -227,6 +244,13 @@
                         </td>
                         <td data-label="Monto aplicado" class="px-2 py-3 text-end font-semibold tabular-nums">
                             {{ $pago?->sentido === SentidoPago::Reembolso ? '−' : '+' }} {{ $moneda }} {{ $aplicacion->monto }}
+                            @if ($aplicacion->es_saldo_favor)
+                                @foreach ($aplicacion->usos as $uso)
+                                    @if ($uso->venta_id === null && $uso->es_saldo_favor)
+                                        <p class="text-xs font-normal text-gray-500 dark:text-gray-400">Restituido al cliente · {{ $moneda }} {{ $uso->monto }}</p>
+                                    @endif
+                                @endforeach
+                            @endif
                         </td>
                     </tr>
                 @empty
