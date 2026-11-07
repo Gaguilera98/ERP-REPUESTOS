@@ -30,6 +30,7 @@ return [
         'pago_aplicaciones',
         'pagos',
         'venta_detalles',
+        'correcciones_venta',
         'ventas',
         'caja_sesion_medios',
         'cajas_sesiones',

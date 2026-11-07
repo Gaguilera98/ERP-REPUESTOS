@@ -1,7 +1,17 @@
 @php
     use App\Compras\Montos;
     use App\Enums\EstadoPago;
+    use App\Enums\SentidoPago;
     use App\Ventas\NombreEnPantalla;
+    $reembolsado = $venta->aplicacionesPago
+        ->filter(fn ($aplicacion) => $aplicacion->pago?->estado_pago === EstadoPago::Aprobado && $aplicacion->pago?->sentido === SentidoPago::Reembolso)
+        ->reduce(fn (string $total, $aplicacion) => bcadd($total, $aplicacion->monto, 2), '0.00');
+    $cobrado = $venta->aplicacionesPago
+        ->filter(fn ($aplicacion) => $aplicacion->pago?->estado_pago === EstadoPago::Aprobado && $aplicacion->pago?->sentido === SentidoPago::Cobro)
+        ->reduce(fn (string $total, $aplicacion) => bcadd($total, $aplicacion->monto, 2), '0.00');
+    $pagado = bcsub($cobrado, $reembolsado, 2);
+    $mostrarMovimientos = $venta->ultimaCorreccion || bccomp($reembolsado, '0', 2) > 0;
+    $lineasActuales = collect($venta->ultimaCorreccion?->lineas ?? []);
 @endphp
 
 <div class="space-y-5">
@@ -13,7 +23,12 @@
         <p>Anulada por {{ $venta->anuladaPor?->name ?? '—' }} el {{ $venta->anulada_en->format('d/m/Y H:i') }}.</p>
         <p>Motivo: {{ $venta->motivo_anulacion }}</p>
     @endif
-
+    @if (bccomp($reembolsado, '0', 2) > 0)
+        <div class="flex items-start gap-3 rounded-lg border border-warning-300 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-400/30 dark:bg-warning-400/10 dark:text-warning-300">
+            <x-filament::icon icon="heroicon-o-arrow-uturn-left" class="mt-0.5 size-5 shrink-0" />
+            <p><span class="font-semibold">Reembolso registrado · {{ $moneda }} {{ $reembolsado }}</span><br>Consultá los movimientos y sus fechas en los pagos de la venta.</p>
+        </div>
+    @endif
     <div class="grid gap-5 md:grid-cols-[minmax(0,2fr)_minmax(15rem,1fr)] md:items-start">
         <div class="contents md:block md:min-w-0 md:space-y-5">
     <dl class="order-2 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 p-4 text-sm md:grid-cols-3 dark:border-white/10">
@@ -45,9 +60,60 @@
         @endif
     </dl>
 
-    <details open class="order-3 rounded-lg border border-gray-200 dark:border-white/10">
+    @if ($venta->ultimaCorreccion)
+        <section class="order-3 rounded-lg border border-primary-200 dark:border-primary-400/30">
+            <div class="px-4 py-3">
+                <h3 class="font-semibold text-gray-950 dark:text-white">Productos después de la corrección</h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Cantidades de la venta original y después de las correcciones.</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="caja-resumen-table w-full text-start text-sm">
+                    <thead class="bg-primary-50 text-gray-500 dark:bg-primary-400/10 dark:text-gray-400">
+                        <tr>
+                            <th scope="col" class="px-2 py-2 text-start">Producto</th>
+                            <th scope="col" class="px-2 py-2 text-end">Original</th>
+                            <th scope="col" class="px-2 py-2 text-end">Actual</th>
+                            <th scope="col" class="px-2 py-2 text-end">Descuento</th>
+                            <th scope="col" class="px-2 py-2 text-end">Importe</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($venta->ultimaCorreccion->lineas as $linea)
+                            @php
+                                $originales = $venta->detalles->filter(fn ($detalle) => (int) $detalle->producto_variante_id === (int) $linea['producto_variante_id']
+                                    && (int) $detalle->unidad_medida_id === (int) $linea['unidad_medida_id']
+                                    && bccomp($detalle->factor_a_base, $linea['factor_a_base'], 6) === 0);
+                                $actuales = $lineasActuales->filter(fn ($actual) => (int) $actual['producto_variante_id'] === (int) $linea['producto_variante_id']
+                                    && (int) $actual['unidad_medida_id'] === (int) $linea['unidad_medida_id']
+                                    && bccomp($actual['factor_a_base'], $linea['factor_a_base'], 6) === 0);
+                                $cantidadOriginal = $originales->reduce(fn (string $total, $detalle) => bcadd($total, $detalle->cantidad, 4), '0.0000');
+                            @endphp
+                            <tr class="border-b border-gray-100 text-gray-950 dark:border-white/10 dark:text-white">
+                                <td class="px-2 py-3">
+                                    <p class="font-medium">{{ NombreEnPantalla::titulo($linea['producto']) }}</p>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ $linea['sku'] }}</p>
+                                </td>
+                                <td data-label="Original" class="px-2 py-3 text-end tabular-nums">
+                                    @if ($actuales->count() === 1)
+                                        {{ Montos::sinCeros($cantidadOriginal) }} {{ $linea['unidad'] }}
+                                    @else
+                                        —
+                                    @endif
+                                </td>
+                                <td data-label="Actual" class="px-2 py-3 text-end tabular-nums">{{ Montos::sinCeros($linea['cantidad']) }} {{ $linea['unidad'] }}</td>
+                                <td data-label="Descuento" class="px-2 py-3 text-end tabular-nums">{{ $moneda }} {{ $linea['descuento_aplicado'] }}</td>
+                                <td data-label="Importe" class="px-2 py-3 text-end font-semibold tabular-nums">{{ $moneda }} {{ $linea['total_linea'] }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    @endif
+
+    <details @if (! $venta->ultimaCorreccion) open @endif class="order-3 rounded-lg border border-gray-200 dark:border-white/10">
         <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-semibold text-gray-950 dark:text-white">
-            Productos
+            {{ $venta->ultimaCorreccion ? 'Productos de la venta original' : 'Productos' }}
             <x-filament::badge color="success">{{ $venta->detalles->count() }}</x-filament::badge>
             <x-filament::icon icon="heroicon-o-chevron-down" class="ms-auto size-4 text-gray-500 dark:text-gray-400" />
         </summary>
@@ -90,11 +156,35 @@
             </tbody>
         </table>
     </div>
+    @if ($venta->ultimaCorreccion)
+        <div class="space-y-1 px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+            <p>Subtotal original · {{ $moneda }} {{ $venta->subtotal }}</p>
+            <p>Descuentos originales · {{ $moneda }} {{ $venta->descuento }}</p>
+            <p class="font-semibold text-gray-950 dark:text-white">Total original · {{ $moneda }} {{ $venta->total }}</p>
+        </div>
+    @endif
     </details>
+
+    @if ($venta->ultimaCorreccion)
+        <details class="order-3 rounded-lg border border-gray-200 dark:border-white/10">
+            <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-semibold text-gray-950 dark:text-white">
+                Historial de correcciones
+                <x-filament::icon icon="heroicon-o-chevron-down" class="ms-auto size-4 text-gray-500 dark:text-gray-400" />
+            </summary>
+            <ul class="space-y-3 px-4 pb-4 text-sm text-gray-600 dark:text-gray-300">
+                @foreach ($venta->correcciones as $correccion)
+                    <li>
+                        <p class="font-medium text-gray-950 dark:text-white">{{ $correccion->created_at->format('d/m/Y H:i') }} · {{ $correccion->usuario?->name ?? '—' }}</p>
+                        <p>{{ $correccion->motivo }} · Total {{ $moneda }} {{ $correccion->total }}</p>
+                    </li>
+                @endforeach
+            </ul>
+        </details>
+    @endif
 
     <div class="order-5 overflow-x-auto">
         <table class="caja-resumen-table w-full text-start text-sm">
-            <caption class="py-3 text-start font-semibold text-gray-950 dark:text-white">Pagos de la venta</caption>
+            <caption class="py-3 text-start font-semibold text-gray-950 dark:text-white">Cobros y reembolsos</caption>
             <thead class="bg-primary-50 text-gray-500 dark:bg-primary-400/10 dark:text-gray-400">
                 <tr>
                     <th scope="col" class="px-2 py-2 text-start">Medio</th>
@@ -107,7 +197,7 @@
             <tbody>
                 @forelse ($venta->aplicacionesPago as $aplicacion)
                     @php($pago = $aplicacion->pago)
-                    <tr class="border-b border-gray-100 text-gray-950 dark:border-white/10 dark:text-white">
+                    <tr @class(['border-b border-gray-100 text-gray-950 dark:border-white/10 dark:text-white', 'bg-warning-50 dark:bg-warning-400/10' => $pago?->sentido === SentidoPago::Reembolso])>
                         <td class="px-2 py-3">
                             {{ $pago?->metodo_pago?->etiqueta() ?? '—' }}
                             @if (filled($pago?->numero_referencia_banco) || filled($pago?->qr_id_transaccion_banco))
@@ -116,7 +206,11 @@
                         </td>
                         <td data-label="Fecha y hora" class="px-2 py-3">{{ $pago?->fecha_pago?->format('d/m/Y H:i') ?? '—' }}</td>
                         <td data-label="Movimiento" class="px-2 py-3">
-                            {{ $pago?->sentido?->etiqueta() ?? '—' }}
+                            @if ($pago?->sentido === SentidoPago::Reembolso)
+                                <x-filament::badge color="warning">Reembolso</x-filament::badge>
+                            @else
+                                {{ $pago?->sentido?->etiqueta() ?? '—' }}
+                            @endif
                             @if ($pago?->caja_sesion_id)
                                 <p>Sesión #{{ $pago->caja_sesion_id }}</p>
                             @endif
@@ -126,7 +220,9 @@
                                 {{ $pago?->estado_pago?->etiqueta() ?? '—' }}
                             </x-filament::badge>
                         </td>
-                        <td data-label="Monto aplicado" class="px-2 py-3 text-end font-semibold tabular-nums">{{ $moneda }} {{ $aplicacion->monto }}</td>
+                        <td data-label="Monto aplicado" class="px-2 py-3 text-end font-semibold tabular-nums">
+                            {{ $pago?->sentido === SentidoPago::Reembolso ? '−' : '+' }} {{ $moneda }} {{ $aplicacion->monto }}
+                        </td>
                     </tr>
                 @empty
                     <tr><td colspan="5" class="px-4 py-6 text-center text-gray-500 dark:text-gray-400">No hay pagos registrados para esta venta.</td></tr>
@@ -145,15 +241,39 @@
         </div>
         <aside class="contents md:block md:space-y-5 md:rounded-lg md:border md:border-primary-200 md:bg-primary-50/50 md:p-4 dark:md:border-primary-400/30 dark:md:bg-primary-400/10">
             <div class="order-1 rounded-lg border border-primary-200 bg-primary-50/50 p-4 md:border-0 md:bg-transparent md:p-0 dark:border-primary-400/30 dark:bg-primary-400/10 dark:md:bg-transparent">
-                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Total de la venta</p>
-                @if (isset($saldoPendiente))
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ $venta->ultimaCorreccion ? 'Total actual de la venta' : 'Total de la venta' }}</p>
+                @if (isset($saldoPendiente) && ! $mostrarMovimientos)
                     <p class="mt-2 text-sm font-medium">Saldo pendiente: {{ $moneda }} {{ $saldoPendiente }}</p>
                 @endif
-                <p class="mt-1 text-2xl font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $venta->total }}</p>
+                <p class="mt-1 text-2xl font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $venta->totalVigente() }}</p>
             </div>
         <div class="order-4 space-y-5 rounded-lg border border-gray-200 p-4 md:border-0 md:p-0 dark:border-white/10">
             <h3 class="font-semibold text-gray-950 md:sr-only dark:text-white">Resumen</h3>
     <dl class="w-full space-y-2 text-sm">
+        @if ($mostrarMovimientos)
+            @if (bccomp($reembolsado, '0', 2) > 0)
+            <div class="flex items-center justify-between gap-4">
+                <dt class="text-gray-500 dark:text-gray-400">Cobrado</dt>
+                <dd class="whitespace-nowrap tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $cobrado }}</dd>
+            </div>
+            <div class="flex items-center justify-between gap-4 font-semibold text-warning-600 dark:text-warning-400">
+                <dt>Reembolsado</dt>
+                <dd class="whitespace-nowrap tabular-nums">− {{ $moneda }} {{ $reembolsado }}</dd>
+            </div>
+            @endif
+            @if (isset($saldoPendiente) || bccomp($pagado, $venta->totalVigente(), 2) !== 0)
+            <div class="flex items-center justify-between gap-4 font-semibold text-gray-950 dark:text-white">
+                <dt>Pagado</dt>
+                <dd class="whitespace-nowrap tabular-nums">{{ $moneda }} {{ $pagado }}</dd>
+            </div>
+            @endif
+            @if (isset($saldoPendiente))
+            <div class="flex items-center justify-between gap-4">
+                <dt class="text-gray-500 dark:text-gray-400">Saldo pendiente</dt>
+                <dd class="whitespace-nowrap tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $saldoPendiente }}</dd>
+            </div>
+            @endif
+        @else
         <div class="flex items-center justify-between gap-4">
             <dt class="text-gray-500 dark:text-gray-400">Subtotal</dt>
             <dd class="whitespace-nowrap tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $venta->subtotal }}</dd>
@@ -162,6 +282,7 @@
             <dt class="text-gray-500 dark:text-gray-400">Descuentos de líneas y venta</dt>
             <dd class="whitespace-nowrap tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $venta->descuento }}</dd>
         </div>
+        @endif
 </dl>
 
         </div>

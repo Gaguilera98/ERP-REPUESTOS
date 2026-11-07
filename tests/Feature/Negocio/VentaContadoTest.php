@@ -37,8 +37,10 @@ use App\Models\TenantUser;
 use App\Models\TipoDocumentoIdentidad;
 use App\Models\UnidadMedida;
 use App\Models\Venta;
+use App\Ventas\AnularVenta;
 use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
+use App\Ventas\CorregirVenta;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -307,6 +309,114 @@ it('anula una venta a crédito y conserva los movimientos de sus sesiones', func
         expect(Pago::query()->count())->toBe(0);
     }
 })->with(['con abono posterior' => true, 'sin cobros' => false]);
+
+it('corrige cantidades después del cierre y conserva el importe y cobro originales', function (string $cantidad, bool $credito, string $vigente, string $saldo, string $diferencia) {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('correccion');
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    $cliente = Cliente::factory()->personaNatural()->create();
+    $abrir = app(AbrirCajaSesion::class);
+    $cajaOriginal = $abrir->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $venta = app(CompletarVentaContado::class)->{$credito ? 'venderFiado' : 'completar'}([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'cliente_id' => $cliente->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '2']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => $credito ? '30' : '200']],
+    ], $cajero)['venta'];
+    $cajaOriginal->forceFill(['estado_sesion' => 'cerrada', 'fecha_cierre' => now()])->save();
+    $this->travel(1)->day();
+    $cajaActual = $abrir->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '200'], $supervisor);
+    $variante->update(['precio_venta' => '130']);
+    $lineas = [['origen' => 0, 'producto_variante_id' => $variante->id, 'cantidad' => $cantidad]];
+    $corregir = app(CorregirVenta::class);
+    $resumen = $corregir->revisar($venta, $lineas);
+    $revision = $corregir->revision($venta, $resumen);
+    expect(fn () => $corregir->confirmar($venta, $lineas, 'Cantidad incorrecta', $revision, $cajero))
+        ->toThrow(HttpException::class);
+
+    $corregir->confirmar($venta, $lineas, 'Cantidad incorrecta', $revision, $supervisor);
+    expect(fn () => $corregir->confirmar($venta, $lineas, 'Reintento', $revision, $supervisor))
+        ->toThrow(ValidationException::class);
+
+    $venta->refresh();
+    $arqueo = app(ArqueoCajaSesion::class);
+    expect($venta->total)->toBe('200.00')
+        ->and($venta->detalles()->sole()->cantidad)->toBe('2.0000')
+        ->and($venta->totalVigente())->toBe($vigente)
+        ->and($venta->saldoPendiente())->toBe($saldo)
+        ->and($venta->correcciones()->sole()->motivo)->toBe('Cantidad incorrecta')
+        ->and(InventarioStock::query()->where('producto_variante_id', $variante->id)->sole()->cantidad_actual)->toBe(bcsub('5', $cantidad, 4))
+        ->and($arqueo->de($cajaOriginal)['total_cobros'])->toBe($credito ? '30.00' : '200.00')
+        ->and($arqueo->de($cajaOriginal)['total_reembolsos'])->toBe('0.00')
+        ->and($arqueo->de($cajaActual)['total_reembolsos'])->toBe($cantidad === '1' ? $diferencia : '0.00')
+        ->and($arqueo->de($cajaActual)['total_cobros'])->toBe($cantidad === '3' ? $diferencia : '0.00');
+
+    if ($cantidad === '1' && ! $credito) {
+        $venta->load(['cliente', 'usuario', 'sucursal', 'almacen', 'detalles.variante.productoMaestro.unidadBase', 'detalles.unidad', 'correcciones.usuario', 'ultimaCorreccion', 'aplicacionesPago.pago']);
+
+        $this->view('filament.negocio.pages.caja.detalle-venta', [
+            'venta' => $venta, 'moneda' => 'BOB', 'colorEstado' => 'success',
+        ])->assertSeeInOrder([
+            'Reembolso registrado', 'BOB 100.00', 'Productos después de la corrección',
+            'Original', 'Actual', '2 pza', '1 pza', 'Productos de la venta original',
+            'Cobros y reembolsos', 'Cobro', 'Reembolso', 'Total actual de la venta',
+            'BOB 100.00', 'Cobrado', 'BOB 200.00', 'Reembolsado', 'BOB 100.00',
+        ])->assertDontSee('Cobro neto');
+    }
+
+    if ($credito) {
+        $venta->load(['cliente', 'usuario', 'sucursal', 'almacen', 'detalles.variante.productoMaestro.unidadBase', 'detalles.unidad', 'correcciones.usuario', 'ultimaCorreccion', 'aplicacionesPago.pago']);
+
+        $this->view('filament.negocio.pages.caja.detalle-venta', [
+            'venta' => $venta, 'moneda' => 'BOB', 'colorEstado' => 'success', 'saldoPendiente' => $saldo,
+        ])->assertSeeInOrder(['Total actual de la venta', 'BOB 100.00', 'Pagado', 'BOB 30.00', 'Saldo pendiente', 'BOB 70.00']);
+    }
+
+    app(AnularVenta::class)->anular($venta, 'Cancelación posterior', $venta->cobradoNeto(), $supervisor);
+    expect($venta->refresh()->estado)->toBe(EstadoVenta::Anulada)
+        ->and(InventarioStock::query()->where('producto_variante_id', $variante->id)->sole()->cantidad_actual)->toBe('5.0000')
+        ->and($arqueo->de($cajaActual)['total_reembolsos'])->toBe($credito ? '30.00' : ($cantidad === '3' ? '300.00' : '200.00'));
+})->with([
+    'devuelve solo el exceso' => ['1', false, '100.00', '0.00', '100.00'],
+    'cobra solo la diferencia' => ['3', false, '300.00', '0.00', '100.00'],
+    'conserva el abono y ajusta el saldo' => ['1', true, '100.00', '70.00', '0.00'],
+]);
+
+it('revisa y reemplaza un producto en el detalle sin registrar otro cobro', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('correccion-detalle');
+    $reemplazo = ProductoVariante::factory()->create(['sku' => 'REEMPLAZO', 'precio_venta' => '100.00']);
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    cargarStock($reemplazo, $almacen, $cajero, $ocasional);
+    $caja = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '100']],
+    ], $cajero)['venta'];
+    $cajero->givePermissionTo('Corregir:Venta');
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $tabla = Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $caja->id])
+        ->mountAction([TestAction::make('verDetalle')->table($venta), TestAction::make('corregirVenta')])
+        ->fillForm([
+            'lineas' => [['origen' => 0, 'producto_variante_id' => $reemplazo->id, 'cantidad' => '1']],
+            'motivo' => '   ',
+        ]);
+
+    $componente = $tabla->instance();
+    $wizard = $componente->getSchema($componente->getMountedActionSchemaName())->getComponents()[0];
+    $tabla->call('callSchemaComponentMethod', $wizard->getKey(), 'nextStep', ['currentStepIndex' => 0])
+        ->assertHasFormErrors(['motivo' => 'required'])
+        ->assertSet('mountedActions.1.data.revision', null);
+
+    $tabla->fillForm(['motivo' => 'Se registró la pieza equivocada'])
+        ->call('callSchemaComponentMethod', $wizard->getKey(), 'nextStep', ['currentStepIndex' => 0])
+        ->assertSet('mountedActions.1.data.resumen', fn (?string $resumen): bool => str_contains($resumen ?? '', 'Sin movimiento de dinero.'));
+    expect($venta->correcciones()->exists())->toBeFalse();
+
+    $tabla->fillForm(['confirmado' => true])->callMountedAction()->assertNotified('Corrección registrada');
+    expect($venta->correcciones()->sole()->lineas[0]['producto_variante_id'])->toBe($reemplazo->id)
+        ->and(Pago::query()->count())->toBe(1)
+        ->and(InventarioStock::query()->where('producto_variante_id', $variante->id)->sole()->cantidad_actual)->toBe('5.0000')
+        ->and(InventarioStock::query()->where('producto_variante_id', $reemplazo->id)->sole()->cantidad_actual)->toBe('4.0000');
+});
 
 it('no vende sin caja abierta', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('sincaja');

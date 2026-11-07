@@ -124,6 +124,7 @@ class SeedNegocioRoles
     private function permissionNames(): array
     {
         $names = [
+            'Corregir:Venta',
             'View:ConfiguracionDelNegocio',
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',

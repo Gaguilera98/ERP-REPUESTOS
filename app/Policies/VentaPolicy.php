@@ -35,6 +35,11 @@ class VentaPolicy
         return $this->view($user, $venta) && $this->allows($user, 'Update:Venta');
     }
 
+    public function corregir(TenantUser $user, Venta $venta): bool
+    {
+        return $this->view($user, $venta) && $this->allows($user, 'Corregir:Venta');
+    }
+
     public function delete(TenantUser $user, Venta $venta): bool
     {
         return false;

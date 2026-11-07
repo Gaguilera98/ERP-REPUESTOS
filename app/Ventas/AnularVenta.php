@@ -7,13 +7,13 @@ use App\Compras\Montos;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\EstadoPago;
 use App\Enums\EstadoVenta;
+use App\Enums\MetodoPago;
 use App\Enums\SentidoPago;
 use App\Enums\TipoComprobante;
 use App\Enums\TipoMovimientoInventario;
 use App\Models\CajaSesion;
 use App\Models\InventarioStock;
 use App\Models\MovimientoInventario;
-use App\Models\Pago;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Venta;
@@ -22,7 +22,7 @@ use Illuminate\Validation\ValidationException;
 
 class AnularVenta
 {
-    public function __construct(private CostoPromedio $costoPromedio) {}
+    public function __construct(private CostoPromedio $costoPromedio, private CorregirVenta $correcciones) {}
 
     public function anular(Venta $venta, string $motivo, string $cobradoConfirmado, TenantUser $usuario): void
     {
@@ -45,41 +45,25 @@ class AnularVenta
                 throw ValidationException::withMessages(['venta' => 'Solo se pueden anular notas de venta completadas.']);
             }
 
-            $aplicaciones = $venta->aplicacionesPago()->with('pago')->get();
-            if ($aplicaciones->contains(fn ($aplicacion): bool => $aplicacion->pago->estado_pago === EstadoPago::Pendiente
-                || $aplicacion->pago->sentido === SentidoPago::Reembolso)) {
-                throw ValidationException::withMessages(['venta' => 'La venta tiene pagos pendientes o reembolsos previos. Revisalos antes de anular.']);
+            if ($venta->aplicacionesPago()->whereHas('pago', fn ($query) => $query->where('estado_pago', EstadoPago::Pendiente))->exists()) {
+                throw ValidationException::withMessages(['venta' => 'La venta tiene pagos pendientes. Revisalos antes de anular.']);
             }
 
-            $cobros = $aplicaciones->filter(fn ($aplicacion): bool => $aplicacion->pago->estado_pago === EstadoPago::Aprobado);
-            $cobrado = bcsub((string) $venta->total, $venta->saldoPendiente(), 2);
+            $cobrado = $venta->cobradoNeto();
 
             if ($cobrado !== $cobradoConfirmado) {
                 throw ValidationException::withMessages(['venta' => 'Los cobros cambiaron. Volvé a abrir la anulación para revisar el monto.']);
             }
 
-            if ($cobros->isNotEmpty() && (! $caja instanceof CajaSesion || ! $caja->esDeHoy())) {
+            $reembolsos = $this->correcciones->distribuirReembolso($venta, $cobrado);
+            if ($reembolsos !== [] && (! $caja instanceof CajaSesion || ! $caja->esDeHoy())) {
                 throw ValidationException::withMessages(['venta' => 'Abrí tu caja de hoy en esta sucursal para registrar el reembolso.']);
             }
 
             $this->reponerInventario($venta, $usuario);
 
-            foreach ($cobros as $cobro) {
-                $reembolso = Pago::query()->create([
-                    'cliente_id' => $venta->cliente_id,
-                    'caja_sesion_id' => $caja->id,
-                    'sentido' => SentidoPago::Reembolso,
-                    'metodo_pago' => $cobro->pago->metodo_pago,
-                    'monto' => $cobro->monto,
-                    'estado_pago' => EstadoPago::Aprobado,
-                    'fecha_pago' => now(),
-                ]);
-
-                $reembolso->aplicaciones()->create([
-                    'venta_id' => $venta->id,
-                    'aplicacion_origen_id' => $cobro->id,
-                    'monto' => $cobro->monto,
-                ]);
+            foreach ($reembolsos as $reembolso) {
+                $this->correcciones->registrarDiferencia($venta, $caja, SentidoPago::Reembolso, MetodoPago::from($reembolso['metodo']), $reembolso['monto'], $reembolso['origen']);
             }
 
             $venta->estado = EstadoVenta::Anulada;
@@ -92,7 +76,7 @@ class AnularVenta
 
     private function reponerInventario(Venta $venta, TenantUser $usuario): void
     {
-        $detalles = $venta->detalles()->orderBy('id')->get();
+        $detalles = collect($this->correcciones->lineasVigentes($venta))->map(fn (array $linea): object => (object) $linea);
         $variantes = ProductoVariante::query()
             ->whereKey($detalles->pluck('producto_variante_id')->unique()->all())
             ->orderBy('id')->lockForUpdate()->get()->keyBy('id');

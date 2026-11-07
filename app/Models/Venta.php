@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
     'tenant_id',
@@ -116,17 +117,38 @@ class Venta extends Model
         return $this->hasMany(PagoAplicacion::class);
     }
 
+    public function correcciones(): HasMany
+    {
+        return $this->hasMany(CorreccionVenta::class);
+    }
+
+    public function ultimaCorreccion(): HasOne
+    {
+        return $this->hasOne(CorreccionVenta::class)->latestOfMany();
+    }
+
+    public function totalVigente(): string
+    {
+        return $this->ultimaCorreccion?->total ?? $this->total;
+    }
+
+    public function cobradoNeto(): string
+    {
+        $pagos = $this->aplicacionesPago()->with('pago')
+            ->whereHas('pago', fn ($query) => $query->where('estado_pago', EstadoPago::Aprobado))->get();
+
+        return $pagos->reduce(fn (string $total, PagoAplicacion $aplicacion): string => $aplicacion->pago->sentido === SentidoPago::Cobro
+            ? bcadd($total, $aplicacion->monto, 2)
+            : bcsub($total, $aplicacion->monto, 2), '0.00');
+    }
+
     public function saldoPendiente(): string
     {
         if ($this->estado === EstadoVenta::Anulada) {
             return '0.00';
         }
 
-        $cobrado = $this->aplicacionesPago()
-            ->whereHas('pago', fn ($query) => $query->where('sentido', SentidoPago::Cobro)->where('estado_pago', EstadoPago::Aprobado))
-            ->sum('monto');
-
-        return bcsub((string) $this->total, (string) $cobrado, 2);
+        return bcsub($this->totalVigente(), $this->cobradoNeto(), 2);
     }
 
     public function estaCompletada(): bool

@@ -84,6 +84,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     $ventas->whereHas('cajaSesion', $sesion)->orWhereHas('aplicacionesPago.pago.cajaSesion', $sesion);
                 }))
             ->defaultSort('created_at', 'desc')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('ultimaCorreccion'))
             ->queryStringIdentifier($enMostrador ? 'misVentasMostrador' : 'ventasDeSesion')
             ->defaultPaginationPageOption(10)
             ->paginationPageOptions([10, 25, 50])
@@ -97,7 +98,10 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     ->formatStateUsing(fn (EstadoVenta $state): string => $state->etiqueta())
                     ->color(fn (EstadoVenta $state): array => $this->colorEstado($state))
                     ->extraCellAttributes(['data-label' => 'Estado']),
-                TextColumn::make('total')->label('Total')->extraCellAttributes(['data-label' => 'Total'])->money(NegocioConfiguracion::codigoMoneda()),
+                TextColumn::make('total')->label('Total')->extraCellAttributes(['data-label' => 'Total'])
+                    ->state(fn (Venta $record): string => $enMostrador ? $record->totalVigente() : $record->total)
+                    ->description(fn (Venta $record): ?string => $record->ultimaCorreccion ? 'Con corrección' : null)
+                    ->money(NegocioConfiguracion::codigoMoneda()),
             ])
             ->filters($enMostrador ? [
                 Filter::make('dia')
@@ -132,7 +136,9 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     ->stickyModalFooter()
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Cerrar')
-                    ->extraModalFooterActions(fn (Venta $record): array => [...$this->accionesAbono($record), $this->accionAnular($record)])
+                    ->extraModalFooterActions(fn (Venta $record): array => [
+                        ...$this->accionesAbono($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
+                    ])
                     ->modalContent(function (Venta $record): View {
                         abort_unless(auth('tenant')->user()?->can('view', $record), 403);
 
@@ -140,6 +146,8 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                             'cliente',
                             'usuario',
                             'anuladaPor',
+                            'correcciones.usuario',
+                            'ultimaCorreccion',
                             'sucursal',
                             'almacen',
                             'detalles.variante.productoMaestro.unidadBase',
@@ -180,13 +188,13 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
             ->modalDescription(function () use ($venta): string {
                 $moneda = NegocioConfiguracion::codigoMoneda();
                 $saldo = $venta->saldoPendiente();
-                $cobrado = bcsub((string) $venta->total, $saldo, 2);
+                $cobrado = $venta->cobradoNeto();
 
                 return "Se repondrá el stock en el almacén original. Reembolso a registrar: {$moneda} {$cobrado}. Saldo a cancelar: {$moneda} {$saldo}. Confirmá después de devolver los cobros por sus métodos originales.";
             })
             ->modalSubmitActionLabel('Confirmar anulación')
             ->schema([
-                Hidden::make('cobrado')->default(fn (): string => bcsub((string) $venta->total, $venta->saldoPendiente(), 2)),
+                Hidden::make('cobrado')->default(fn (): string => $venta->cobradoNeto()),
                 Textarea::make('motivo')->label('Motivo de la anulación')->required()->maxLength(500),
             ])
             ->action(function (array $data, Action $action, AnularVenta $anular) use ($venta): void {
