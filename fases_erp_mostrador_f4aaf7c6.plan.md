@@ -141,11 +141,13 @@ Decisión comercial vigente para reservas: una seña al crear y el saldo complet
 
 Implementado también al 7 de noviembre de 2026: aplicación del saldo a favor en Mostrador y reembolso parcial o total de señas vencidas con permiso, motivo y caja actual. La condición de reembolso se configura por negocio y se copia en cada reserva.
 
-Pendiente para cerrar la fase: adelantos, pago que cubra varias ventas, cancelación de reservas y modificación autorizada de su vencimiento.
+Pendiente para cerrar la fase: cancelación de reservas, modificación autorizada de su vencimiento y pruebas del alcance actual con ejecución de la suite completa.
+
+Pospuesto por decisión del 7 de noviembre de 2026: adelantos de clientes sin productos y aplicación de un mismo pago a varias ventas pendientes. No bloquean el cierre de la fase 6 y todavía no tienen fase futura asignada. Mientras tanto, las señas se reciben al crear reservas con productos y los abonos se registran por separado en cada venta.
 
 Se completa `pago_aplicaciones` y los estados `reserva`, `credito` y `vencida`.
 
-Reglas: la seña aparta `cantidad_reservada` y no saca la pieza; el plazo parte de 48 horas y al crearla puede ser menor o mayor; solo el supervisor cambia `vence_en` después; al vencer, el stock se libera, no hay kardex y la seña queda a favor; el fiado saca stock hoy y el cobro entra en la caja del día en que pagan; un pago puede cubrir varias ventas; un adelanto sin pieza no vuelve a sumar en la caja; el saldo no se guarda en el cliente, se calcula.
+Reglas: la seña aparta `cantidad_reservada` y no saca la pieza; el plazo parte de 48 horas y al crearla puede ser menor o mayor; solo el supervisor cambia `vence_en` después; al vencer, el stock se libera, no hay kardex y la seña queda a favor; el fiado saca stock hoy y el cobro entra en la caja del día en que pagan; el saldo no se guarda en el cliente, se calcula. Para la ampliación futura, un pago podrá cubrir varias ventas y aplicar un adelanto sin productos no deberá registrar un segundo cobro.
 
 Pantalla: la misma venta Livewire gana estos modos. GestionarReservas::procesarVencidas() libera reservas vencidas al abrir Mostrador, consultar productos o ventas y antes de confirmar ventas, reservas o entregas. El comando de mantenimiento reutiliza el servicio y queda disponible manualmente.
 

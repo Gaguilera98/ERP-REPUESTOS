@@ -59,12 +59,17 @@ Estos cambios están relacionados con la operación de ventas. La fase 7 de devo
 
 ## Pendientes para cerrar la fase
 
-* Registrar adelantos de clientes sin productos.
-* Distribuir un pago entre varias ventas.
 * Cancelar reservas con un flujo explícito para stock y seña.
 * Cambiar el vencimiento de una reserva existente mediante permiso y registro del cambio.
 * Ampliar los métodos del cobro del saldo y de los abonos cuando se defina ese alcance.
-* Completar las pruebas de integración entre reservas, saldo a favor y pagos distribuidos.
+* Completar las pruebas de integración entre reservas, saldo a favor y pagos del alcance actual, y ejecutar la suite completa.
+
+## Mejoras pospuestas para el futuro
+
+Por decisión del 7 de noviembre de 2026, estos puntos quedan fuera de los requisitos para cerrar la fase 6, sin asignarles todavía una fase futura:
+
+* Registrar adelantos de clientes sin elegir productos. Por ahora, las señas se reciben al crear una reserva con productos; se mantiene el uso del saldo a favor ya implementado.
+* Aplicar un mismo pago a varias ventas pendientes. Por ahora, los abonos se registran por separado en cada venta. Las pruebas de distribución de un pago entre varias ventas se realizarán cuando se implemente esa función.
 
 ## Verificación realizada
 
