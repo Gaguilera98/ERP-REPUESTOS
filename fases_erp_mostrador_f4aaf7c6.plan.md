@@ -141,7 +141,9 @@ Decisión comercial vigente para reservas: una seña al crear y el saldo complet
 
 Implementado también al 7 de noviembre de 2026: aplicación del saldo a favor en Mostrador y reembolso parcial o total de señas vencidas con permiso, motivo y caja actual. La condición de reembolso se configura por negocio y se copia en cada reserva.
 
-Pendiente para cerrar la fase: cancelación de reservas, modificación autorizada de su vencimiento y pruebas del alcance actual con ejecución de la suite completa.
+Implementado también: cancelación de reservas vigentes con View:Venta y Update:Venta, motivo, usuario y fecha. Conserva el documento como Anulada, libera las unidades apartadas y deja la seña a favor sin mover caja. El reembolso posterior respeta la condición guardada y exige Reembolsar:Sena y caja actual.
+
+Pendiente para cerrar la fase: modificación autorizada del vencimiento y pruebas del alcance actual con ejecución de la suite completa.
 
 Pospuesto por decisión del 7 de noviembre de 2026: adelantos de clientes sin productos y aplicación de un mismo pago a varias ventas pendientes. No bloquean el cierre de la fase 6 y todavía no tienen fase futura asignada. Mientras tanto, las señas se reciben al crear reservas con productos y los abonos se registran por separado en cada venta.
 

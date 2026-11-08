@@ -12,6 +12,8 @@ Este archivo registra el estado real de la fase. El alcance general se mantiene 
 * Desde el detalle de una reserva vigente se puede cobrar el saldo completo en efectivo y entregar. Se registra el cobro en la caja de hoy de esa sucursal, se libera la cantidad reservada y se genera la salida de inventario. El costo se congela al entregar.
 * GestionarReservas::procesarVencidas() procesa las reservas vencidas del negocio actual. Se invoca al abrir Mostrador, consultar productos o ventas y antes de registrar una venta, reservar o entregar. Libera unidades y registra la seña a favor mediante una aplicación vinculada al pago original. Los reintentos mantienen una sola liberación y una sola aplicación.
 * Mis ventas filtra por fecha, condición y estado. El detalle muestra la vigencia de la reserva.
+* Cancelar reserva está disponible en el detalle de una reserva vigente, desde Mostrador y los historiales de caja. Usa la autorización de anulación (View:Venta y Update:Venta), exige motivo y registra usuario y fecha en los campos de anulación existentes. Queda en estado Anulada y conserva sus productos y cobros en el historial.
+* La cancelación libera únicamente las unidades apartadas de esa reserva, sin cambiar stock físico, costo ni kardex. La seña pasa a saldo a favor con el pago original; cancelar no requiere caja abierta ni genera otro cobro o reembolso. Desde el detalle puede registrarse después el reembolso con Reembolsar:Sena, caja de hoy y la condición comercial guardada. Los reintentos y los intentos posteriores de entrega no duplican la liberación.
 
 ## Decisión comercial de reservas
 
@@ -19,7 +21,7 @@ En Configuración, permite_reembolso_senas controla las reservas nuevas. Su valo
 
 Al seleccionar un cliente en Mostrador se muestra su saldo a favor disponible. Se puede aplicar un importe a la compra y completar con un cobro nuevo. La aplicación reutiliza el pago original mediante pago_aplicaciones, marcado como es_saldo_favor. Caja contabiliza únicamente el cobro nuevo y el detalle identifica el saldo aplicado.
 
-Las señas vencidas reembolsables ofrecen Reembolsar seña desde su detalle. Exige Reembolsar:Sena, permiso de consulta, una caja abierta de hoy en la sucursal, importe disponible y motivo. Puede devolverse una parte o todo lo disponible por los métodos originales. El movimiento guarda registrado_por_id y motivo en pagos. Un reintento con un saldo desactualizado se rechaza.
+Las señas reembolsables de reservas vencidas o canceladas ofrecen Reembolsar seña desde su detalle. Exige Reembolsar:Sena, permiso de consulta, una caja abierta de hoy en la sucursal, importe disponible y motivo. Puede devolverse una parte o todo lo disponible por los métodos originales. El movimiento guarda registrado_por_id y motivo en pagos. Un reintento con un saldo desactualizado se rechaza.
 
 Una seña sin permiso comercial de reembolso conserva el saldo para compras futuras. La retención definitiva por incumplimiento sigue pendiente de definición y desarrollo.
 
@@ -43,6 +45,8 @@ Como referencia, ERPNext crea registros de Stock Reservation Entry asociados a l
 
 ## Operación local
 
+El Mostrador permite navegar, consultar ventas y preparar el carrito sin caja abierta. Para confirmar una venta o reserva se necesita la caja de hoy en la sucursal seleccionada. El aviso enlaza a Caja en otra pestaña y permite actualizar el estado conservando el carrito. Las sesiones abiertas de días anteriores no cuentan como caja vigente.
+
 Los vencimientos se procesan cuando el negocio vuelve a operar. Una reserva cuyo plazo pasó durante la inactividad se libera al siguiente acceso operativo. La comprobación anterior a confirmar evita usar reservas vencidas aunque la pantalla haya quedado abierta. El procesamiento se confirma antes de la transacción de la nueva operación, de modo que un intento fallido conserva la liberación.
 
 El comando php artisan ventas:vencer-reservas queda disponible para mantenimiento manual de todos los negocios. No hay una tarea programada cada minuto para reservas. Este flujo permite aprovechar la hibernación del alojamiento y no requiere schedule:work para liberar reservas al operar.
@@ -59,7 +63,6 @@ Estos cambios están relacionados con la operación de ventas. La fase 7 de devo
 
 ## Pendientes para cerrar la fase
 
-* Cancelar reservas con un flujo explícito para stock y seña.
 * Cambiar el vencimiento de una reserva existente mediante permiso y registro del cambio.
 * Ampliar los métodos del cobro del saldo y de los abonos cuando se defina ese alcance.
 * Completar las pruebas de integración entre reservas, saldo a favor y pagos del alcance actual, y ejecutar la suite completa.
@@ -73,4 +76,4 @@ Por decisión del 7 de noviembre de 2026, estos puntos quedan fuera de los requi
 
 ## Verificación realizada
 
-Pruebas enfocadas cubren creación desde Mostrador, stock físico y reservado, entrega con pago del saldo, vencimiento y reintentos. También se verificaron los abonos a crédito y la venta de contado existente. La compilación de estilos terminó correctamente. La suite completa del proyecto queda por ejecutar antes de cerrar la fase.
+Pruebas enfocadas cubren creación desde Mostrador, stock físico y reservado, entrega con pago del saldo, vencimiento y reintentos. La ampliación de cancelación pasó 12 pruebas con 235 comprobaciones, incluyendo permisos, motivo, pagos pendientes, cancelación con caja cerrada, conservación de otra reserva, rechazo de entrega posterior, aislamiento entre negocios y reembolso según la condición guardada. También se verificaron los abonos a crédito y la venta de contado existente. La compilación de estilos terminó correctamente. La suite completa del proyecto queda por ejecutar antes de cerrar la fase.

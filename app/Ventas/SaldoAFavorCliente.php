@@ -96,7 +96,7 @@ class SaldoAFavorCliente
             $caja = CajaSesion::query()->where('user_id', $usuario->id)->where('sucursal_id', $reserva->sucursal_id)
                 ->where('estado_sesion', EstadoCajaSesion::Abierta)->whereDate('fecha_apertura', now()->toDateString())->lockForUpdate()->first();
             $reserva = Venta::query()->lockForUpdate()->findOrFail($reserva->id);
-            if ($reserva->estado !== EstadoVenta::Vencida || ! $reserva->sena_reembolsable) {
+            if (! in_array($reserva->estado, [EstadoVenta::Vencida, EstadoVenta::Anulada], true) || ! $reserva->sena_reembolsable) {
                 throw ValidationException::withMessages(['monto' => 'Esta seña no está habilitada para reembolso.']);
             }
             if (! $caja) {

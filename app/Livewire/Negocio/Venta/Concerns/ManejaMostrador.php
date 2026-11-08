@@ -185,6 +185,7 @@ trait ManejaMostrador
             ? CajaSesion::query()
                 ->where('user_id', $usuario->id)
                 ->where('estado_sesion', EstadoCajaSesion::Abierta)
+                ->whereDate('fecha_apertura', now()->toDateString())
                 ->orderByDesc('id')
                 ->first()
             : null;
@@ -711,6 +712,12 @@ trait ManejaMostrador
         }
 
         $this->resetValidation();
+
+        if ($this->cajaAbierta() === null) {
+            Notification::make()->title('Abrí la caja de hoy')->body('Necesitás una caja abierta en esta sucursal para confirmar la operación.')->warning()->send();
+
+            return;
+        }
 
         try {
             $this->validarComprobantesDePago();
@@ -1366,6 +1373,7 @@ trait ManejaMostrador
             ->where('sucursal_id', $this->sucursalId)
             ->where('user_id', $usuario->id)
             ->where('estado_sesion', EstadoCajaSesion::Abierta)
+            ->whereDate('fecha_apertura', now()->toDateString())
             ->first();
     }
 

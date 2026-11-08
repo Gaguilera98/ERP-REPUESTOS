@@ -10,6 +10,7 @@ use App\Filament\Negocio\Pages\CajasDelDia;
 use App\Filament\Negocio\Pages\MostradorDelNegocio;
 use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
+use App\Models\PagoAplicacion;
 use App\Models\TenantUser;
 use App\Models\Venta;
 use App\Ventas\AnularVenta;
@@ -148,7 +149,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Cerrar')
                     ->extraModalFooterActions(fn (Venta $record): array => [
-                        ...$this->accionesAbono($record), $this->accionReembolsarSena($record), $this->accionEntregarReserva($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
+                        ...$this->accionesAbono($record), $this->accionReembolsarSena($record), $this->accionEntregarReserva($record), $this->accionCancelarReserva($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
                     ])
                     ->modalContent(function (Venta $record): View {
                         abort_unless(auth('tenant')->user()?->can('view', $record), 403);
@@ -166,11 +167,16 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                             'aplicacionesPago.pago.registradoPor',
                             'aplicacionesPago.usos',
                         ]);
+                        $reservaCancelada = $record->estado === EstadoVenta::Anulada && $record->aplicacionesPago->contains(
+                            fn (PagoAplicacion $aplicacion): bool => $aplicacion->usos->contains(
+                                fn (PagoAplicacion $uso): bool => $uso->venta_id === null && (int) $uso->reserva_saldo_origen_id === $record->id,
+                            ),
+                        );
 
                         return view('filament.negocio.pages.caja.detalle-venta', [
                             'venta' => $record,
                             'moneda' => NegocioConfiguracion::codigoMoneda(),
-                            'saldoSenaDisponible' => $record->estado === EstadoVenta::Vencida ? app(SaldoAFavorCliente::class)->disponibleDeReserva($record) : null,
+                            'saldoSenaDisponible' => $record->estado === EstadoVenta::Vencida || $reservaCancelada ? app(SaldoAFavorCliente::class)->disponibleDeReserva($record) : null,
                             'saldoPendiente' => $record->condicion === CondicionVenta::Credito || $record->estado === EstadoVenta::Reserva ? $record->saldoPendiente() : null,
                             'colorEstado' => $this->colorEstado($record->estado),
                         ]);
@@ -257,6 +263,32 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
             });
     }
 
+    private function accionCancelarReserva(Venta $venta): Action
+    {
+        return Action::make('cancelarReserva')
+            ->label('Cancelar reserva')->color('danger')->icon(Heroicon::OutlinedXCircle)
+            ->visible(fn (): bool => $venta->estado === EstadoVenta::Reserva)
+            ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('anular', $venta))
+            ->modalHeading('Cancelar reserva · '.$venta->codigo)
+            ->modalDescription('Los productos quedarán disponibles y la seña pasará al saldo a favor del cliente. Esta acción no devuelve dinero. Después podrás registrar el reembolso desde el detalle, si las condiciones de la reserva y tus permisos lo permiten.')
+            ->modalSubmitActionLabel('Confirmar cancelación')
+            ->schema([Textarea::make('motivo')->label('Motivo de la cancelación')->trim()->required()->maxLength(500)])
+            ->action(function (array $data, Action $action, GestionarReservas $reservas) use ($venta): void {
+                $usuario = auth('tenant')->user();
+                abort_unless($usuario instanceof TenantUser, 403);
+                try {
+                    $reservas->cancelar($venta, $data['motivo'], $usuario);
+                } catch (ValidationException $exception) {
+                    Notification::make()->title('No se pudo cancelar la reserva')->body(collect($exception->errors())->flatten()->first())->danger()->send();
+                    $action->halt();
+
+                    return;
+                }
+                $venta->refresh();
+                Notification::make()->title('Reserva cancelada')->body('Los productos se liberaron y la seña quedó a favor del cliente.')->success()->send();
+            });
+    }
+
     private function autorizarConsulta(): void
     {
         if ($this->sucursalMostradorId !== null) {
@@ -272,7 +304,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
     {
         return Action::make('reembolsarSena')->label('Reembolsar seña')
             ->color('warning')->icon(Heroicon::OutlinedArrowUturnLeft)
-            ->visible(fn (): bool => $venta->estado === EstadoVenta::Vencida && $venta->sena_reembolsable
+            ->visible(fn (): bool => in_array($venta->estado, [EstadoVenta::Vencida, EstadoVenta::Anulada], true) && $venta->sena_reembolsable
                 && bccomp(app(SaldoAFavorCliente::class)->disponibleDeReserva($venta), '0', 2) > 0)
             ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('Reembolsar:Sena'))
             ->modalHeading('Reembolsar seña · '.$venta->codigo)

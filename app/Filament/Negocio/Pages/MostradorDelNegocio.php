@@ -2,14 +2,11 @@
 
 namespace App\Filament\Negocio\Pages;
 
-use App\Enums\EstadoCajaSesion;
 use App\Livewire\Negocio\Venta\Concerns\ManejaMostrador;
-use App\Models\CajaSesion;
 use App\Models\TenantUser;
 use App\Models\Venta;
 use BackedEnum;
 use Filament\Actions\Action;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\View\View;
@@ -81,23 +78,6 @@ class MostradorDelNegocio extends Page
         $usuario = auth('tenant')->user();
 
         if (! $usuario instanceof TenantUser) {
-            return;
-        }
-
-        $tieneCajaAbierta = CajaSesion::query()
-            ->where('user_id', $usuario->id)
-            ->where('estado_sesion', EstadoCajaSesion::Abierta)
-            ->exists();
-
-        if (! $tieneCajaAbierta) {
-            Notification::make()
-                ->title('Abrí la caja primero')
-                ->body('El mostrador solo se usa con un turno abierto en la sucursal.')
-                ->warning()
-                ->send();
-
-            $this->redirect(CajaDelNegocio::getUrl());
-
             return;
         }
 

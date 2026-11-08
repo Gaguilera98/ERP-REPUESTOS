@@ -15,6 +15,7 @@ use App\Models\Pago;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Venta;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -39,17 +40,49 @@ class GestionarReservas
                 return;
             }
             $this->liberar($venta);
-            foreach ($venta->aplicacionesPago()->with('pago')->get() as $origen) {
-                if ($origen->pago->estado_pago === EstadoPago::Aprobado && $origen->pago->sentido === SentidoPago::Cobro) {
-                    $origen->pago->aplicaciones()->create([
-                        'venta_id' => null, 'aplicacion_origen_id' => $origen->id, 'monto' => $origen->monto,
-                        'reserva_saldo_origen_id' => $venta->id,
-                    ]);
-                }
-            }
+            $this->liberarSena($venta);
             $venta->estado = EstadoVenta::Vencida;
             $venta->save();
         }, attempts: 3);
+    }
+
+    public function cancelar(Venta $venta, string $motivo, TenantUser $usuario): void
+    {
+        abort_unless($usuario->can('anular', $venta), 403);
+        $motivo = trim($motivo);
+        validator(['motivo' => $motivo], ['motivo' => ['required', 'string', 'max:500']])->validate();
+        $this->procesarVencidas();
+
+        DB::transaction(function () use ($venta, $motivo, $usuario): void {
+            $venta = Venta::query()->lockForUpdate()->findOrFail($venta->id);
+            abort_unless($usuario->can('anular', $venta), 403);
+            if ($venta->estado !== EstadoVenta::Reserva || ! $venta->vence_en->isFuture()) {
+                throw ValidationException::withMessages(['venta' => 'La reserva venció, fue entregada o ya fue cancelada. Volvé a consultar su detalle.']);
+            }
+            if ($venta->aplicacionesPago()->whereHas('pago', fn (Builder $query): Builder => $query->where('estado_pago', EstadoPago::Pendiente))->exists()) {
+                throw ValidationException::withMessages(['venta' => 'La reserva tiene pagos pendientes. Revisalos antes de cancelar.']);
+            }
+
+            $this->liberar($venta);
+            $this->liberarSena($venta);
+            $venta->estado = EstadoVenta::Anulada;
+            $venta->anulada_por_id = $usuario->id;
+            $venta->anulada_en = now();
+            $venta->motivo_anulacion = $motivo;
+            $venta->save();
+        }, attempts: 3);
+    }
+
+    private function liberarSena(Venta $venta): void
+    {
+        foreach ($venta->aplicacionesPago()->with('pago')->get() as $origen) {
+            if ($origen->pago->estado_pago === EstadoPago::Aprobado && $origen->pago->sentido === SentidoPago::Cobro) {
+                $origen->pago->aplicaciones()->create([
+                    'venta_id' => null, 'aplicacion_origen_id' => $origen->id, 'monto' => $origen->monto,
+                    'reserva_saldo_origen_id' => $venta->id,
+                ]);
+            }
+        }
     }
 
     public function entregar(Venta $venta, string $saldoConfirmado, TenantUser $usuario): void

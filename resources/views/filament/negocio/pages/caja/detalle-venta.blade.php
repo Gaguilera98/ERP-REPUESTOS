@@ -32,8 +32,10 @@
         <p class="text-sm text-gray-600 dark:text-gray-300">Reserva vigente hasta {{ $venta->vence_en?->format('d/m/Y H:i') }}.</p>
     @elseif ($venta->estado === \App\Enums\EstadoVenta::Vencida)
         <p class="text-sm text-gray-600 dark:text-gray-300">Reserva vencida. Los productos se liberaron y la seña quedó a favor del cliente.</p>
+    @elseif ($venta->estado === \App\Enums\EstadoVenta::Anulada && isset($saldoSenaDisponible))
+        <p class="text-sm text-gray-600 dark:text-gray-300">Reserva cancelada. Los productos se liberaron y la seña pasó al saldo a favor del cliente. La cancelación no registra un reembolso de dinero.</p>
     @endif
-    @if (in_array($venta->estado, [\App\Enums\EstadoVenta::Reserva, \App\Enums\EstadoVenta::Vencida], true))
+    @if (in_array($venta->estado, [\App\Enums\EstadoVenta::Reserva, \App\Enums\EstadoVenta::Vencida], true) || isset($saldoSenaDisponible))
         <p class="text-sm text-gray-600 dark:text-gray-300">{{ $venta->sena_reembolsable ? 'Seña reembolsable con autorización.' : 'Seña utilizable en otra compra. Sin reembolso según las condiciones de esta reserva.' }}</p>
     @endif
     @if (isset($saldoSenaDisponible))

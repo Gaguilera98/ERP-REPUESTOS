@@ -178,7 +178,11 @@
 
         @unless ($cajaAbierta)
             <div class="rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:bg-amber-400/10 dark:text-amber-100">
-                Abrí caja en esta sucursal para poder cobrar.
+                Abrí la caja de hoy en esta sucursal para confirmar ventas o reservas.
+                <div class="mt-2 flex flex-wrap items-center gap-3">
+                    <a href="{{ \App\Filament\Negocio\Pages\CajaDelNegocio::getUrl() }}" target="_blank" rel="noopener" class="font-semibold underline">Ir a Caja</a>
+                    <button type="button" wire:click="$refresh" class="font-semibold underline">Ya abrí mi caja</button>
+                </div>
             </div>
         @endunless
 
