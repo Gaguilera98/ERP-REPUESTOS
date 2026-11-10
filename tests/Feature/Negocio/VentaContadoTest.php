@@ -50,6 +50,7 @@ use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
@@ -813,6 +814,48 @@ it('rechaza efectivo insuficiente o inválido y vuelto en métodos electrónicos
     'transferencia' => ['transferencia', '200'],
     'tarjeta' => ['voucher_tarjeta', '200'],
 ]);
+
+it('congela la política de devolución y registra la entrega sin cambiarla por abonos o retiro', function (string $operacion) {
+    $this->travelTo(Carbon::parse('2026-11-10 10:00:00'));
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('politica-venta');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '3');
+    $cliente = Cliente::factory()->personaNatural()->create();
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $configuracion = NegocioConfiguracion::query()->firstOrFail();
+    $configuracion->update(['acepta_devoluciones' => true, 'dias_devolucion' => 7, 'devolucion_permite_reembolso' => true]);
+    $datos = [
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'cliente_id' => $cliente->id,
+        'vence_en' => now()->addDays(2)->toDateTimeString(),
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => $operacion === 'contado' ? '100' : '30']],
+    ];
+    $ventas = app(CompletarVentaContado::class);
+    $resultado = match ($operacion) {
+        'reserva' => $ventas->reservar($datos, $cajero),
+        'credito' => $ventas->venderFiado($datos, $cajero),
+        default => $ventas->completar($datos, $cajero),
+    };
+    $venta = $resultado['venta'];
+    expect($venta->politica_devolucion_snapshot['version'])->toBe(1);
+    expect($venta->politica_devolucion_snapshot['acepta_devoluciones'])->toBeTrue();
+    expect($venta->politica_devolucion_snapshot['dias_devolucion'])->toBe(7);
+    expect($venta->entregada_en?->format('Y-m-d H:i:s'))->toBe($operacion === 'reserva' ? null : '2026-11-10 10:00:00');
+    $configuracion->update(['acepta_devoluciones' => false, 'dias_devolucion' => 1, 'devolucion_permite_reembolso' => false]);
+    $this->travel(1)->hour();
+    if ($operacion === 'reserva') {
+        app(GestionarReservas::class)->entregar($venta, '70.00', $cajero);
+    } elseif ($operacion === 'credito') {
+        $ventas->abonarEnEfectivo($venta->codigo, $sucursal->id, '70', $cajero);
+    }
+    $venta->refresh();
+    expect($venta->politica_devolucion_snapshot['acepta_devoluciones'])->toBeTrue();
+    expect($venta->politica_devolucion_snapshot['dias_devolucion'])->toBe(7);
+    expect($venta->politica_devolucion_snapshot['permite_reembolso'])->toBeTrue();
+    expect($venta->entregada_en->format('Y-m-d H:i:s'))->toBe($operacion === 'reserva' ? '2026-11-10 11:00:00' : '2026-11-10 10:00:00');
+    $nueva = $ventas->completar([...$datos, 'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '100']]], $cajero)['venta'];
+    expect($nueva->politica_devolucion_snapshot['acepta_devoluciones'])->toBeFalse();
+    expect($nueva->politica_devolucion_snapshot['dias_devolucion'])->toBe(1);
+})->with(['contado', 'credito', 'reserva']);
 
 it('no vende sin caja abierta', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('sincaja');

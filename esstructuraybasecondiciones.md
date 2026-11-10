@@ -282,16 +282,16 @@ Configuración implementada el 9 de noviembre de 2026 en Configuración del nego
 
 La pantalla exige al menos una resolución cuando acepta_devoluciones está activado. El permiso actual View:ConfiguracionDelNegocio controla acceso y guardado, según la policy existente. Al desactivar devoluciones, el plazo, las resoluciones y las excepciones quedan deshabilitados y no se sobrescriben al guardar; conservan sus valores para la próxima activación. La configuración no se aplica a una operación por sí misma.
 
-Diseño acordado para el flujo, todavía pendiente de implementar:
+Diseño y avance del flujo al 10 de noviembre de 2026:
 
-1. Guardar una copia versionada de la política en cada venta nueva, conservando lo ofrecido en el momento de contratar; también en reservas al crearlas. Propuesta: politica_devolucion_snapshot en ventas. No crear esos campos ni rellenar ventas históricas con la política actual en esta primera entrega.
-2. Registrar la entrega real (entregada_en) para iniciar el plazo. Contado y crédito con entrega inmediata usarán el momento de confirmación; una reserva usará el momento de retiro. Ampliar una reserva o registrar un abono no inicia ni reinicia ese plazo.
+1. Implementado: ventas.politica_devolucion_snapshot guarda una copia JSON versionada de las condiciones y zona horaria al registrar contado, crédito o reserva. Cambiar la configuración no modifica esas ventas. La captura proviene de NegocioConfiguracion::politicaDevolucion(), nunca del contenido enviado por el navegador.
+2. Implementado: ventas.entregada_en registra la confirmación en contado y crédito con entrega inmediata, y el retiro en reservas. En una reserva sin entregar permanece nulo. La entrega conserva la política original; ni los abonos ni las ampliaciones reinician la fecha de entrega.
 3. Registrar devoluciones en notas_credito_devoluciones y sus líneas, referenciando lo efectivamente vendido y conservado tras correcciones y devoluciones previas. Cantidades e importes se validarán bajo bloqueo dentro de la transacción.
 4. Autorizar mediante permisos independientes del nombre de rol: uno para registrar devoluciones y otro para excepciones al plazo, con motivo, responsable, fecha y regla exceptuada. Los nombres definitivos se definirán junto con las acciones. La configuración no asigna permisos a usuarios.
-5. Una venta histórica sin condiciones guardadas no se declarará elegible aplicando silenciosamente la configuración actual. Definir un tratamiento explícito y auditado antes de habilitar su devolución.
+5. Decisión de desarrollo local: no implementar compatibilidad para ventas históricas. Se ajustó la migración original de ventas y se recreó el único pool local de prueba, conservando el tenant central y recreando su acceso God con las credenciales demo acordadas. DemoLocalSeeder repuso 2 sucursales y 5 productos; quedaron 0 ventas. En producción las migraciones ya desplegadas se mantendrán y los cambios serán incrementales.
 6. Mostrar el plazo y los motivos de rechazo. Separar la resolución comercial del destino físico de la pieza; lo dañado no vuelve automáticamente al stock vendible. Revisar correcciones y anulaciones para que no eludan la política.
 
-Esta entrega implementa únicamente configuración y persistencia por tenant. El registro de devoluciones, los permisos operativos, las copias por venta y el tratamiento de garantía siguen pendientes. Las exclusiones por producto/categoría también quedan para después.
+Implementados configuración por tenant, copia de política por venta y fecha de entrega. El registro de devoluciones, sus permisos operativos, la evaluación del plazo y el tratamiento de garantía siguen pendientes. Las exclusiones por producto/categoría también quedan para después. Las pruebas enfocadas de copias de política, entrega, vencimiento y cancelación pasaron: 10 pruebas y 168 comprobaciones.
 
 Referencias de diseño: [Shopify POS](https://help.shopify.com/es/manual/sell-in-person/shopify-pos/order-management/return-rules) para plazos, condiciones guardadas y excepciones; [Dynamics 365](https://learn.microsoft.com/en-us/dynamics365/commerce/refund_policy_returns) para resoluciones y métodos de reembolso. La política comercial no sustituye las obligaciones sobre reclamos o garantías.
 

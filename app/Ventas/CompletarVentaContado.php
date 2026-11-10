@@ -143,7 +143,7 @@ class CompletarVentaContado
                 $cliente = Cliente::query()->whereKey($clienteId)->lockForUpdate()->firstOrFail();
             }
 
-            $config = NegocioConfiguracion::query()->first();
+            $config = NegocioConfiguracion::query()->firstOrFail();
             $topePorcentaje = Montos::dos($config?->descuento_max_porcentaje ?? '10');
             $topeImporte = Montos::dos($config?->descuento_max_importe ?? '0');
 
@@ -334,6 +334,8 @@ class CompletarVentaContado
                 'condicion' => $condicion,
                 'estado' => $reserva ? EstadoVenta::Reserva : EstadoVenta::Completada,
                 'vence_en' => $reserva ? $data['vence_en'] : null,
+                'politica_devolucion_snapshot' => $config->politicaDevolucion(),
+                'entregada_en' => $reserva ? null : now(),
                 'sena_reembolsable' => $config?->permite_reembolso_senas ?? true,
                 'tipo_comprobante' => TipoComprobante::NotaVenta,
                 'numero_comprobante' => null,

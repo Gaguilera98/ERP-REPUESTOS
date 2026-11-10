@@ -161,9 +161,9 @@ Pantalla: la misma venta Livewire gana estos modos. GestionarReservas::procesarV
 
 ## Fase 7. Devoluciones
 
-Estado al 9 de noviembre de 2026: en curso. Implementada la pestaña Devoluciones en Configuración del negocio, con aceptación comercial, días de plazo (0 = mismo día), cambio de producto, saldo a favor, reembolso y excepciones al plazo. Se guardan por tenant en negocio_configuracion y se exige al menos una resolución al activar. Desactivadas inicialmente. La acción de devolver todavía no está implementada.
+Estado al 10 de noviembre de 2026: en curso. Implementada la pestaña Devoluciones en Configuración del negocio, con aceptación comercial, días de plazo (0 = mismo día), cambio de producto, saldo a favor, reembolso y excepciones al plazo. Se guardan por tenant en negocio_configuracion y se exige al menos una resolución al activar. Desactivadas inicialmente. Las ventas nuevas ya guardan politica_devolucion_snapshot y entregada_en; las reservas registran la entrega al retirarse conservando la política original. La acción de devolver todavía no está implementada.
 
-Diseño y campos detallados en esstructuraybasecondiciones.md, sección «Fase 7: política comercial de devoluciones». Pendientes las copias versionadas de condiciones por venta, la fecha real de entrega, los documentos y permisos operativos. No aplicar la configuración actual retroactivamente a ventas históricas.
+Diseño y campos detallados en esstructuraybasecondiciones.md, sección «Fase 7: política comercial de devoluciones». Pendientes los documentos, permisos operativos y evaluación del plazo. Sin compatibilidad de ventas antiguas en local por decisión del usuario: se ajustó la migración original y se recreó el tenant de prueba con DemoLocalSeeder. Verificados contado, crédito y reserva, cambios de configuración y conservación de la política durante entrega y abonos.
 
 Tablas: `notas_credito_devoluciones`, `nota_credito_detalles`.
 

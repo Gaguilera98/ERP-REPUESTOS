@@ -20,6 +20,8 @@ return new class extends Migration
             $table->enum('condicion', ['contado', 'credito'])->default('contado');
             $table->enum('estado', ['pendiente', 'completada', 'anulada', 'reserva', 'vencida'])->default('pendiente');
             $table->timestamp('vence_en')->nullable();
+            $table->json('politica_devolucion_snapshot')->nullable();
+            $table->timestamp('entregada_en')->nullable();
             $table->enum('tipo_comprobante', ['nota_venta', 'factura_manual']);
             $table->string('numero_comprobante')->nullable();
             $table->decimal('subtotal', 10, 2);

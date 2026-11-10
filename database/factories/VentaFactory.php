@@ -6,6 +6,7 @@ use App\Enums\CondicionVenta;
 use App\Enums\EstadoVenta;
 use App\Enums\TipoComprobante;
 use App\Models\Almacen;
+use App\Models\NegocioConfiguracion;
 use App\Models\Sucursal;
 use App\Models\TenantUser;
 use App\Models\Venta;
@@ -30,6 +31,8 @@ class VentaFactory extends Factory
             'user_id' => TenantUser::factory(),
             'condicion' => CondicionVenta::Contado,
             'estado' => EstadoVenta::Completada,
+            'politica_devolucion_snapshot' => fn (): array => NegocioConfiguracion::query()->firstOrFail()->politicaDevolucion(),
+            'entregada_en' => now(),
             'tipo_comprobante' => TipoComprobante::NotaVenta,
             'subtotal' => '100.00',
             'descuento' => '0.00',

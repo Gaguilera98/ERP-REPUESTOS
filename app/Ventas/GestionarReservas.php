@@ -170,6 +170,7 @@ class GestionarReservas
                 $pago->aplicaciones()->create(['venta_id' => $venta->id, 'monto' => $saldo]);
             }
             $venta->estado = EstadoVenta::Completada;
+            $venta->entregada_en = now();
             $venta->save();
         }, attempts: 3);
     }

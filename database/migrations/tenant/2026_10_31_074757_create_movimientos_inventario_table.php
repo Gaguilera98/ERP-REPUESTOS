@@ -50,7 +50,7 @@ return new class extends Migration
         if ($driver === 'pgsql') {
             Schema::getConnection()->statement('alter table movimientos_inventario add constraint movimientos_inventario_stock_check check (stock_previo >= 0 and stock_posterior >= 0)');
             Schema::getConnection()->statement(<<<'SQL'
-                create function movimientos_inventario_solo_insercion() returns trigger
+                create or replace function movimientos_inventario_solo_insercion() returns trigger
                 language plpgsql
                 as $$
                 begin

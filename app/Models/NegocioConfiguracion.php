@@ -71,6 +71,23 @@ class NegocioConfiguracion extends Model
         return static::query()->first()?->moneda->value ?? Moneda::Bob->value;
     }
 
+    /**
+     * @return array{version: int, acepta_devoluciones: bool, dias_devolucion: int, permite_cambio: bool, permite_saldo_favor: bool, permite_reembolso: bool, permite_excepcion: bool, zona_horaria: string}
+     */
+    public function politicaDevolucion(): array
+    {
+        return [
+            'version' => 1,
+            'acepta_devoluciones' => $this->acepta_devoluciones,
+            'dias_devolucion' => $this->dias_devolucion,
+            'permite_cambio' => $this->devolucion_permite_cambio,
+            'permite_saldo_favor' => $this->devolucion_permite_saldo_favor,
+            'permite_reembolso' => $this->devolucion_permite_reembolso,
+            'permite_excepcion' => $this->devolucion_permite_excepcion,
+            'zona_horaria' => (string) config('app.timezone'),
+        ];
+    }
+
     public function exigeComprobanteArchivo(MetodoPago $metodo): bool
     {
         return match ($metodo) {
