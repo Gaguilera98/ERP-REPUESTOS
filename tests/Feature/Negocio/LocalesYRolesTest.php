@@ -2,6 +2,7 @@
 
 use App\Enums\ModoMoneda;
 use App\Enums\Moneda;
+use App\Filament\Negocio\Pages\ConfiguracionDelNegocio;
 use App\Filament\Negocio\Resources\Almacens\Pages\ListAlmacens;
 use App\Models\Almacen;
 use App\Models\NegocioConfiguracion;
@@ -47,6 +48,61 @@ it('seeds the store roles and the default configuration', function () {
         ->and($configuracion->descuento_max_importe)->toBe('0.00')
         ->and($configuracion->siguiente_numero_venta)->toBe(1);
 
+    tenancy()->end();
+});
+
+it('guarda la política comercial de devoluciones solo para el negocio actual', function () {
+    $tenant = Tenant::factory()->create();
+    $otroTenant = Tenant::factory()->create();
+    tenancy()->initialize($tenant);
+    $usuario = TenantUser::factory()->create();
+    $usuario->assignRole('supervisor');
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $configuracion = NegocioConfiguracion::query()->firstOrFail();
+    expect($configuracion->acepta_devoluciones)->toBeFalse();
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(ConfiguracionDelNegocio::class)
+        ->assertSee('Devoluciones')
+        ->set('data.acepta_devoluciones', true)->set('data.dias_devolucion', 7)
+        ->set('data.devolucion_permite_cambio', false)
+        ->set('data.devolucion_permite_saldo_favor', false)
+        ->set('data.devolucion_permite_reembolso', false)
+        ->call('save')->assertHasErrors(['data.devolucion_permite_cambio']);
+    expect($configuracion->refresh()->acepta_devoluciones)->toBeFalse();
+    $pagina->set('data.devolucion_permite_saldo_favor', true)
+        ->set('data.devolucion_permite_excepcion', true)->call('save')->assertHasNoErrors()->assertNotified('Configuración guardada');
+    expect($configuracion->refresh()->dias_devolucion)->toBe(7);
+    expect($configuracion->devolucion_permite_saldo_favor)->toBeTrue();
+    expect($configuracion->devolucion_permite_excepcion)->toBeTrue();
+    expect($configuracion->horas_reserva)->toBe(48);
+    $pagina->set('data.acepta_devoluciones', false)
+        ->set('data.dias_devolucion', 30)
+        ->set('data.devolucion_permite_saldo_favor', false)
+        ->call('save')->assertHasNoErrors();
+    expect($configuracion->refresh()->acepta_devoluciones)->toBeFalse();
+    expect($configuracion->dias_devolucion)->toBe(7);
+    expect($configuracion->devolucion_permite_saldo_favor)->toBeTrue();
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(ConfiguracionDelNegocio::class)
+        ->set('data.acepta_devoluciones', true)->call('save')->assertHasNoErrors();
+    expect($configuracion->refresh()->acepta_devoluciones)->toBeTrue();
+    $pagina->set('data.dias_devolucion', -1)->call('save')->assertHasErrors(['data.dias_devolucion']);
+    expect($configuracion->refresh()->dias_devolucion)->toBe(7);
+    tenancy()->initialize($otroTenant);
+    expect(NegocioConfiguracion::query()->firstOrFail()->acepta_devoluciones)->toBeFalse();
+    expect(NegocioConfiguracion::query()->firstOrFail()->dias_devolucion)->toBe(0);
+    tenancy()->end();
+});
+
+it('rechaza guardar una política de devoluciones sin permiso de configuración', function () {
+    $tenant = Tenant::factory()->create();
+    tenancy()->initialize($tenant);
+    $usuario = TenantUser::factory()->create();
+    $usuario->assignRole('cajero');
+    $usuario->givePermissionTo('View:ConfiguracionDelNegocio');
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(ConfiguracionDelNegocio::class);
+    $usuario->revokePermissionTo('View:ConfiguracionDelNegocio');
+    $pagina->call('save')->assertForbidden();
+    expect(NegocioConfiguracion::query()->firstOrFail()->acepta_devoluciones)->toBeFalse();
     tenancy()->end();
 });
 

@@ -269,7 +269,34 @@ Actualizado el 9 de noviembre de 2026. La fase 6 queda cerrada con el alcance ac
 * El detalle distingue productos actuales y originales, historial de correcciones, cobros y reembolsos. El bloque independiente para ingresar abonos por código fue retirado del Mostrador.
 * Las devoluciones físicas de productos siguen previstas para la fase 7. Las correcciones actuales atienden errores de registro.
 
+### Fase 7: política comercial de devoluciones
+
+Configuración implementada el 9 de noviembre de 2026 en Configuración del negocio → Devoluciones. Se reutiliza negocio_configuracion, aislada por tenant, con estos campos:
+
+* acepta_devoluciones: booleano, inicialmente falso. Afecta devoluciones comerciales; no bloquea reclamos por fallas o garantía.
+* dias_devolucion: entero de 0 a 3650. Cero significa el mismo día de entrega; N significa N días calendario adicionales, hasta las 23:59 del último día. Sin plazo ilimitado implícito.
+* devolucion_permite_cambio: booleano, inicialmente verdadero como opción preparada; no habilita operaciones mientras acepta_devoluciones sea falso.
+* devolucion_permite_saldo_favor: booleano, inicialmente falso.
+* devolucion_permite_reembolso: booleano, inicialmente falso.
+* devolucion_permite_excepcion: booleano, inicialmente falso. Diseñado para excepciones al plazo; no habilita devoluciones globalmente desactivadas ni permite superar cantidades o importes disponibles.
+
+La pantalla exige al menos una resolución cuando acepta_devoluciones está activado. El permiso actual View:ConfiguracionDelNegocio controla acceso y guardado, según la policy existente. Al desactivar devoluciones, el plazo, las resoluciones y las excepciones quedan deshabilitados y no se sobrescriben al guardar; conservan sus valores para la próxima activación. La configuración no se aplica a una operación por sí misma.
+
+Diseño acordado para el flujo, todavía pendiente de implementar:
+
+1. Guardar una copia versionada de la política en cada venta nueva, conservando lo ofrecido en el momento de contratar; también en reservas al crearlas. Propuesta: politica_devolucion_snapshot en ventas. No crear esos campos ni rellenar ventas históricas con la política actual en esta primera entrega.
+2. Registrar la entrega real (entregada_en) para iniciar el plazo. Contado y crédito con entrega inmediata usarán el momento de confirmación; una reserva usará el momento de retiro. Ampliar una reserva o registrar un abono no inicia ni reinicia ese plazo.
+3. Registrar devoluciones en notas_credito_devoluciones y sus líneas, referenciando lo efectivamente vendido y conservado tras correcciones y devoluciones previas. Cantidades e importes se validarán bajo bloqueo dentro de la transacción.
+4. Autorizar mediante permisos independientes del nombre de rol: uno para registrar devoluciones y otro para excepciones al plazo, con motivo, responsable, fecha y regla exceptuada. Los nombres definitivos se definirán junto con las acciones. La configuración no asigna permisos a usuarios.
+5. Una venta histórica sin condiciones guardadas no se declarará elegible aplicando silenciosamente la configuración actual. Definir un tratamiento explícito y auditado antes de habilitar su devolución.
+6. Mostrar el plazo y los motivos de rechazo. Separar la resolución comercial del destino físico de la pieza; lo dañado no vuelve automáticamente al stock vendible. Revisar correcciones y anulaciones para que no eludan la política.
+
+Esta entrega implementa únicamente configuración y persistencia por tenant. El registro de devoluciones, los permisos operativos, las copias por venta y el tratamiento de garantía siguen pendientes. Las exclusiones por producto/categoría también quedan para después.
+
+Referencias de diseño: [Shopify POS](https://help.shopify.com/es/manual/sell-in-person/shopify-pos/order-management/return-rules) para plazos, condiciones guardadas y excepciones; [Dynamics 365](https://learn.microsoft.com/en-us/dynamics365/commerce/refund_policy_returns) para resoluciones y métodos de reembolso. La política comercial no sustituye las obligaciones sobre reclamos o garantías.
+
 ### Cosas a tener en cuenta a futuro
+
 Implementado el 9 de noviembre de 2026 como ampliación posterior al cierre de fase 6: vuelto/cambio en Mostrador, señas, abonos y retiro de reservas. pagos.monto conserva lo aplicado; efectivo_recibido y cambio_entregado guardan recibido y vuelto en cada cobro en efectivo. El servidor calcula el cambio, caja registra solo monto y una anulación devuelve lo aplicado. Los datos históricos quedan vacíos. QR, tarjeta y transferencia no generan cambio automático. Ver alcance y límites en fase_6_estado_actual.md.
 
 Ítems conscientes que **no** se implementan en v1, para no rediseñar a ciegas después:

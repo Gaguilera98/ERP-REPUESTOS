@@ -14,6 +14,12 @@ use Illuminate\Database\Eloquent\Model;
 #[Fillable([
     'tenant_id',
     'horas_reserva',
+    'acepta_devoluciones',
+    'dias_devolucion',
+    'devolucion_permite_cambio',
+    'devolucion_permite_saldo_favor',
+    'devolucion_permite_reembolso',
+    'devolucion_permite_excepcion',
     'permite_reembolso_senas',
     'descuento_max_porcentaje',
     'descuento_max_importe',
@@ -42,6 +48,12 @@ class NegocioConfiguracion extends Model
     {
         return [
             'horas_reserva' => 'integer',
+            'acepta_devoluciones' => 'boolean',
+            'dias_devolucion' => 'integer',
+            'devolucion_permite_cambio' => 'boolean',
+            'devolucion_permite_saldo_favor' => 'boolean',
+            'devolucion_permite_reembolso' => 'boolean',
+            'devolucion_permite_excepcion' => 'boolean',
             'permite_reembolso_senas' => 'boolean',
             'descuento_max_porcentaje' => 'decimal:2',
             'descuento_max_importe' => 'decimal:2',

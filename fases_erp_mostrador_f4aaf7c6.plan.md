@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: fase-7-devolucion
     content: "Fase 7: notas de crédito y devolución Livewire"
-    status: pending
+    status: in_progress
   - id: fase-8-factura
     content: "Fase 8: talonario y factura manual"
     status: pending
@@ -161,9 +161,13 @@ Pantalla: la misma venta Livewire gana estos modos. GestionarReservas::procesarV
 
 ## Fase 7. Devoluciones
 
+Estado al 9 de noviembre de 2026: en curso. Implementada la pestaña Devoluciones en Configuración del negocio, con aceptación comercial, días de plazo (0 = mismo día), cambio de producto, saldo a favor, reembolso y excepciones al plazo. Se guardan por tenant en negocio_configuracion y se exige al menos una resolución al activar. Desactivadas inicialmente. La acción de devolver todavía no está implementada.
+
+Diseño y campos detallados en esstructuraybasecondiciones.md, sección «Fase 7: política comercial de devoluciones». Pendientes las copias versionadas de condiciones por venta, la fecha real de entrega, los documentos y permisos operativos. No aplicar la configuración actual retroactivamente a ventas históricas.
+
 Tablas: `notas_credito_devoluciones`, `nota_credito_detalles`.
 
-Reglas: supervisor obligatorio; se devuelve la línea vendida, no un producto suelto, y no más unidades de las vendidas; el reingreso usa el costo congelado de esa línea; la plata sale de la caja de hoy; si la seña sigue vigente, se anula y se libera lo apartado; si el fiado se devuelve, deja de ser deuda y solo se reembolsa lo ya cobrado.
+Reglas: permiso de devolución obligatorio y permiso distinto para excepciones al plazo; respetar la política guardada, sin depender del nombre de rol. Se devuelve la línea vigente vendida, no un producto suelto, y no más unidades de las disponibles tras correcciones/devoluciones previas. El reingreso vendible usa el costo congelado; lo dañado requiere un destino separado. La plata sale de la caja de hoy según resolución y método autorizados. Las reservas vigentes usan su cancelación existente para liberar lo apartado. En crédito se ajusta la deuda y solo se reembolsa lo que corresponda de lo cobrado.
 
 Pantalla: flujo Livewire de devolución, abierto desde la venta `VNT-`.
 
