@@ -126,6 +126,7 @@ class SeedNegocioRoles
         $names = [
             'Corregir:Venta',
             'Reembolsar:Sena',
+            'Ampliar:Reserva',
             'View:ConfiguracionDelNegocio',
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',

@@ -41,6 +41,40 @@
     @if (isset($saldoSenaDisponible))
         <p class="text-sm font-semibold">Saldo disponible de esta seña · {{ $moneda }} {{ $saldoSenaDisponible }}</p>
     @endif
+    @if (($ampliacionesReserva ?? collect())->isNotEmpty())
+        <details class="group rounded-lg border border-gray-200 dark:border-white/10">
+            <summary class="flex cursor-pointer list-none items-center gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-gray-950 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-primary-500 dark:text-white dark:hover:bg-white/5 [&::-webkit-details-marker]:hidden">
+                <x-filament::icon icon="heroicon-o-clock" class="size-5 shrink-0 text-gray-400" />
+                <span class="min-w-0 flex-1">Historial de ampliaciones</span>
+                <x-filament::badge color="gray">{{ $ampliacionesReserva->count() }}</x-filament::badge>
+                <x-filament::icon icon="heroicon-m-chevron-down" class="size-4 shrink-0 text-gray-400 transition-transform group-open:rotate-180" />
+            </summary>
+            <div class="max-h-80 divide-y divide-gray-200 overflow-y-auto border-t border-gray-200 dark:divide-white/10 dark:border-white/10">
+                @foreach ($ampliacionesReserva as $ampliacion)
+                    <div class="space-y-3 px-4 py-4 text-sm">
+                        <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                            <p class="min-w-0 break-words font-medium text-gray-950 dark:text-white">{{ $ampliacion->usuario_nombre }}</p>
+                            <p class="text-xs tabular-nums text-gray-500 dark:text-gray-400">{{ \Illuminate\Support\Carbon::parse($ampliacion->created_at)->format('d/m/Y H:i') }}</p>
+                        </div>
+                        <dl class="grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-3 sm:grid-cols-2 dark:bg-white/5">
+                            <div>
+                                <dt class="text-xs text-gray-500 dark:text-gray-400">Vencimiento anterior</dt>
+                                <dd class="mt-1 tabular-nums text-gray-700 dark:text-gray-300">{{ \Illuminate\Support\Carbon::parse($ampliacion->vencimiento_anterior)->format('d/m/Y H:i') }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs text-gray-500 dark:text-gray-400">Nuevo vencimiento</dt>
+                                <dd class="mt-1 font-semibold tabular-nums text-gray-950 dark:text-white">{{ \Illuminate\Support\Carbon::parse($ampliacion->vencimiento_nuevo)->format('d/m/Y H:i') }}</dd>
+                            </div>
+                        </dl>
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">Motivo</p>
+                            <p class="mt-1 whitespace-pre-line break-words text-gray-700 dark:text-gray-300">{{ $ampliacion->motivo }}</p>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        </details>
+    @endif
     @if (bccomp($reembolsado, '0', 2) > 0)
         <div class="flex items-start gap-3 rounded-lg border border-warning-300 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-400/30 dark:bg-warning-400/10 dark:text-warning-300">
             <x-filament::icon icon="heroicon-o-arrow-uturn-left" class="mt-0.5 size-5 shrink-0" />

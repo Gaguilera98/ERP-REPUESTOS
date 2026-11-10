@@ -133,7 +133,7 @@ Tener en cuenta (hablarlo después): aviso al cobrar **sin cliente**. Hoy el con
 
 ## Fase 6. Seña, fiado y adelanto
 
-**Estado al 6 de noviembre de 2026:** en curso. El detalle de lo implementado, los límites actuales y los pendientes está en [fase_6_estado_actual.md](fase_6_estado_actual.md).
+**Estado al 8 de noviembre de 2026:** en curso. El detalle de lo implementado, los límites actuales y los pendientes está en [fase_6_estado_actual.md](fase_6_estado_actual.md).
 
 Implementado: venta a crédito con cliente y cobro parcial opcional, abonos en efectivo desde Mis ventas, reserva con cliente/seña/vencimiento, entrega con cobro del saldo en efectivo y procesamiento de vencidas al operar que libera unidades y registra la seña a favor del cliente.
 
@@ -143,13 +143,19 @@ Implementado también al 7 de noviembre de 2026: aplicación del saldo a favor e
 
 Implementado también: cancelación de reservas vigentes con View:Venta y Update:Venta, motivo, usuario y fecha. Conserva el documento como Anulada, libera las unidades apartadas y deja la seña a favor sin mover caja. El reembolso posterior respeta la condición guardada y exige Reembolsar:Sena y caja actual.
 
-Pendiente para cerrar la fase: modificación autorizada del vencimiento y pruebas del alcance actual con ejecución de la suite completa.
+Implementado: ampliación del vencimiento de reservas vigentes mediante Ampliar:Reserva y permiso de consulta, con motivo e historial de cambios. El permiso puede asignarse a un rol o directamente a un usuario.
+
+Al crear reservas se proponen las 23:59 del día calculado con horas_reserva. Al ampliar se propone el día siguiente al vencimiento vigente a las 23:59. Ambas horas son editables. Si el pago cubre el total, un aviso orienta a elegir Contado cuando el cliente retira los productos en ese momento.
+
+Mostrador permite consultar y preparar operaciones sin caja. La confirmación requiere la caja de hoy en la sucursal, y el aviso permite abrir Caja en otra pestaña y actualizar el estado sin perder el carrito.
+
+Pendiente para cerrar la fase: pruebas de integración del alcance actual y ejecución de la suite completa.
 
 Pospuesto por decisión del 7 de noviembre de 2026: adelantos de clientes sin productos y aplicación de un mismo pago a varias ventas pendientes. No bloquean el cierre de la fase 6 y todavía no tienen fase futura asignada. Mientras tanto, las señas se reciben al crear reservas con productos y los abonos se registran por separado en cada venta.
 
-Se completa `pago_aplicaciones` y los estados `reserva`, `credito` y `vencida`.
+Se utiliza `pago_aplicaciones` y los estados `reserva` y `vencida`; `credito` es una condición de venta, no un estado.
 
-Reglas: la seña aparta `cantidad_reservada` y no saca la pieza; el plazo parte de 48 horas y al crearla puede ser menor o mayor; solo el supervisor cambia `vence_en` después; al vencer, el stock se libera, no hay kardex y la seña queda a favor; el fiado saca stock hoy y el cobro entra en la caja del día en que pagan; el saldo no se guarda en el cliente, se calcula. Para la ampliación futura, un pago podrá cubrir varias ventas y aplicar un adelanto sin productos no deberá registrar un segundo cobro.
+Reglas: la seña aparta `cantidad_reservada` y no saca la pieza; el plazo parte de 48 horas y al crearla puede ser menor o mayor; quien tenga el permiso específico puede ampliar `vence_en` después; al vencer, el stock se libera, no hay kardex y la seña queda a favor; el fiado saca stock hoy y el cobro entra en la caja del día en que pagan; el saldo no se guarda en el cliente, se calcula. Para la ampliación futura, un pago podrá cubrir varias ventas y aplicar un adelanto sin productos no deberá registrar un segundo cobro.
 
 Pantalla: la misma venta Livewire gana estos modos. GestionarReservas::procesarVencidas() libera reservas vencidas al abrir Mostrador, consultar productos o ventas y antes de confirmar ventas, reservas o entregas. El comando de mantenimiento reutiliza el servicio y queda disponible manualmente.
 

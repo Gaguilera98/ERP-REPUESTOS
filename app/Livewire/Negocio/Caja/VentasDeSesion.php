@@ -22,6 +22,7 @@ use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -39,6 +40,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -149,7 +151,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Cerrar')
                     ->extraModalFooterActions(fn (Venta $record): array => [
-                        ...$this->accionesAbono($record), $this->accionReembolsarSena($record), $this->accionEntregarReserva($record), $this->accionCancelarReserva($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
+                        ...$this->accionesAbono($record), $this->accionReembolsarSena($record), $this->accionEntregarReserva($record), $this->accionAmpliarReserva($record), $this->accionCancelarReserva($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
                     ])
                     ->modalContent(function (Venta $record): View {
                         abort_unless(auth('tenant')->user()?->can('view', $record), 403);
@@ -175,6 +177,11 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
 
                         return view('filament.negocio.pages.caja.detalle-venta', [
                             'venta' => $record,
+                            'ampliacionesReserva' => DB::table('ampliaciones_reserva as ampliacion')
+                                ->join('users as usuario', function ($join): void {
+                                    $join->on('usuario.id', '=', 'ampliacion.user_id')->on('usuario.tenant_id', '=', 'ampliacion.tenant_id');
+                                })->where('ampliacion.tenant_id', $record->tenant_id)->where('ampliacion.venta_id', $record->id)
+                                ->orderByDesc('ampliacion.id')->get(['ampliacion.*', 'usuario.name as usuario_nombre']),
                             'moneda' => NegocioConfiguracion::codigoMoneda(),
                             'saldoSenaDisponible' => $record->estado === EstadoVenta::Vencida || $reservaCancelada ? app(SaldoAFavorCliente::class)->disponibleDeReserva($record) : null,
                             'saldoPendiente' => $record->condicion === CondicionVenta::Credito || $record->estado === EstadoVenta::Reserva ? $record->saldoPendiente() : null,
@@ -260,6 +267,37 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                 }
                 $venta->refresh();
                 Notification::make()->title('Reserva entregada')->success()->send();
+            });
+    }
+
+    private function accionAmpliarReserva(Venta $venta): Action
+    {
+        return Action::make('ampliarReserva')->label('Ampliar reserva')->color('gray')->icon(Heroicon::OutlinedCalendarDays)
+            ->visible(fn (): bool => $venta->estado === EstadoVenta::Reserva && $venta->vence_en->isFuture())
+            ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('Ampliar:Reserva'))
+            ->modalHeading('Ampliar reserva · '.$venta->codigo)
+            ->modalDescription(fn (): string => 'Vencimiento actual: '.$venta->vence_en->format('d/m/Y H:i').'. Elegí una fecha posterior y explicá el motivo.')
+            ->schema([
+                Hidden::make('actual')->default(fn (): string => $venta->vence_en->format('Y-m-d H:i:s')),
+                DateTimePicker::make('vencimiento')->label('Nuevo vencimiento')->seconds(false)
+                    ->default(fn (): string => $venta->vence_en->copy()->addDay()->setTime(23, 59)->format('Y-m-d H:i:s'))
+                    ->required(),
+                Textarea::make('motivo')->label('Motivo de la ampliación')->trim()->required()->maxLength(500),
+            ])
+            ->modalSubmitActionLabel('Confirmar ampliación')
+            ->action(function (array $data, Action $action, GestionarReservas $reservas) use ($venta): void {
+                $usuario = auth('tenant')->user();
+                abort_unless($usuario instanceof TenantUser, 403);
+                try {
+                    $reservas->ampliar($venta, $data['vencimiento'], $data['actual'], $data['motivo'], $usuario);
+                } catch (ValidationException $exception) {
+                    Notification::make()->title('No se pudo ampliar la reserva')->body(collect($exception->errors())->flatten()->first())->danger()->send();
+                    $action->halt();
+
+                    return;
+                }
+                $venta->refresh();
+                Notification::make()->title('Reserva ampliada')->success()->send();
             });
     }
 

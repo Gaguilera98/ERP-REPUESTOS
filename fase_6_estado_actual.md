@@ -1,6 +1,6 @@
 # Fase 6 en curso
 
-Actualizado el 7 de noviembre de 2026.
+Actualizado el 8 de noviembre de 2026.
 
 Este archivo registra el estado real de la fase. El alcance general se mantiene en fases_erp_mostrador_f4aaf7c6.plan.md y las condiciones del proyecto en esstructuraybasecondiciones.md.
 
@@ -14,6 +14,7 @@ Este archivo registra el estado real de la fase. El alcance general se mantiene 
 * Mis ventas filtra por fecha, condición y estado. El detalle muestra la vigencia de la reserva.
 * Cancelar reserva está disponible en el detalle de una reserva vigente, desde Mostrador y los historiales de caja. Usa la autorización de anulación (View:Venta y Update:Venta), exige motivo y registra usuario y fecha en los campos de anulación existentes. Queda en estado Anulada y conserva sus productos y cobros en el historial.
 * La cancelación libera únicamente las unidades apartadas de esa reserva, sin cambiar stock físico, costo ni kardex. La seña pasa a saldo a favor con el pago original; cancelar no requiere caja abierta ni genera otro cobro o reembolso. Desde el detalle puede registrarse después el reembolso con Reembolsar:Sena, caja de hoy y la condición comercial guardada. Los reintentos y los intentos posteriores de entrega no duplican la liberación.
+* Ampliar reserva permite cambiar el vencimiento de una reserva vigente a una fecha posterior, con motivo obligatorio. Exige View:Venta y Ampliar:Reserva, permiso independiente asignable a roles o directamente a usuarios. Registra fecha anterior, nueva, usuario, momento y motivo en ampliaciones_reserva, consultable desde el detalle. Si el vencimiento cambió durante la revisión se rechaza y se debe volver a abrir el formulario. Las reservas vencidas, canceladas o entregadas no se amplían.
 
 ## Decisión comercial de reservas
 
@@ -29,9 +30,15 @@ Si se corrige o anula una compra pagada con saldo a favor, esa parte se restituy
 
 Seña al crear y saldo completo al retirar. El flujo actual no ofrece abonos sucesivos a una reserva. El pago a crédito tiene su propio flujo de abonos.
 
+Cuando el importe aplicado alcanza o supera el total, la reserva no se confirma y el aviso junto al botón indica: «Si el cliente paga todo y retira los productos ahora, elegí Contado. Para reservar, ingresá una seña menor al total». No se muestra «Completo» como si la reserva estuviera lista. Una reserva pagada íntegramente con retiro posterior todavía no forma parte del flujo.
+
 La fecha de retiro debe ser futura. La entrega exige una reserva vigente, los permisos de crear y consultar ventas y una caja abierta de hoy en la sucursal. El saldo se vuelve a comprobar al confirmar.
 
 La fecha inicial se calcula con horas_reserva y se propone a las 23:59 de ese día. El usuario puede cambiar tanto el día como la hora antes de confirmar la reserva.
+
+Al ampliar una reserva, el formulario propone el día siguiente al vencimiento actual a las 23:59. El usuario puede ajustar la fecha y la hora antes de confirmar.
+
+El permiso Ampliar:Reserva se incorpora al rol supervisor por defecto. La autorización usa el permiso y View:Venta; también funciona con una asignación directa a un usuario. La pantalla general para administrar permisos individuales queda para un desarrollo posterior.
 
 ## Arquitectura de reservas y evolución futura
 
@@ -63,11 +70,12 @@ Estos cambios están relacionados con la operación de ventas. La fase 7 de devo
 
 ## Pendientes para cerrar la fase
 
-* Cambiar el vencimiento de una reserva existente mediante permiso y registro del cambio.
 * Ampliar los métodos del cobro del saldo y de los abonos cuando se defina ese alcance.
 * Completar las pruebas de integración entre reservas, saldo a favor y pagos del alcance actual, y ejecutar la suite completa.
 
 ## Mejoras pospuestas para el futuro
+
+Pendiente solicitado el 8 de noviembre de 2026: implementar el vuelto o cambio en el Mostrador para cobros en efectivo. Al retomarlo, definir cómo ingresar el efectivo entregado por el cliente, mostrar el cambio a devolver y distinguirlo del importe aplicado a la venta, para que el excedente devuelto no se contabilice como ingreso. Revisar también pagos combinados. Alcance y fase por acordar; todavía no implementado.
 
 Por decisión del 7 de noviembre de 2026, estos puntos quedan fuera de los requisitos para cerrar la fase 6, sin asignarles todavía una fase futura:
 
@@ -77,3 +85,5 @@ Por decisión del 7 de noviembre de 2026, estos puntos quedan fuera de los requi
 ## Verificación realizada
 
 Pruebas enfocadas cubren creación desde Mostrador, stock físico y reservado, entrega con pago del saldo, vencimiento y reintentos. La ampliación de cancelación pasó 12 pruebas con 235 comprobaciones, incluyendo permisos, motivo, pagos pendientes, cancelación con caja cerrada, conservación de otra reserva, rechazo de entrega posterior, aislamiento entre negocios y reembolso según la condición guardada. También se verificaron los abonos a crédito y la venta de contado existente. La compilación de estilos terminó correctamente. La suite completa del proyecto queda por ejecutar antes de cerrar la fase.
+
+El 8 de noviembre se verificó además la navegación sin caja vigente y la conservación del carrito (3 pruebas, 23 comprobaciones), la ampliación con permiso individual junto con detalle y cancelación (4 pruebas, 117 comprobaciones), y la hora inicial de la ampliación (prueba enfocada, 24 comprobaciones). Las pruebas de creación de reservas también comprueban las 23:59. Estas ejecuciones son parciales y sus conteos se superponen; no equivalen a la suite completa. La migración local del historial ampliaciones_reserva y del permiso Ampliar:Reserva quedó aplicada.

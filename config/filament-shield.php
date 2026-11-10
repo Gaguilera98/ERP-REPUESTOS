@@ -255,6 +255,7 @@ return [
     'custom_permissions' => [
         'Corregir:Venta' => 'Corregir productos o cantidades de una venta',
         'Reembolsar:Sena' => 'Reembolsar una seña vencida',
+        'Ampliar:Reserva' => 'Ampliar el vencimiento de una reserva',
     ],
 
     /*

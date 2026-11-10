@@ -16,6 +16,7 @@ use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Venta;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -42,6 +43,37 @@ class GestionarReservas
             $this->liberar($venta);
             $this->liberarSena($venta);
             $venta->estado = EstadoVenta::Vencida;
+            $venta->save();
+        }, attempts: 3);
+    }
+
+    public function ampliar(Venta $venta, string $nuevoVencimiento, string $vencimientoConfirmado, string $motivo, TenantUser $usuario): void
+    {
+        abort_unless($usuario->can('Ampliar:Reserva') && $usuario->can('view', $venta), 403);
+        $motivo = trim($motivo);
+        validator(['vencimiento' => $nuevoVencimiento, 'motivo' => $motivo], [
+            'vencimiento' => ['required', 'date'], 'motivo' => ['required', 'string', 'max:500'],
+        ])->validate();
+        $this->procesarVencidas();
+        DB::transaction(function () use ($venta, $nuevoVencimiento, $vencimientoConfirmado, $motivo, $usuario): void {
+            $venta = Venta::query()->lockForUpdate()->findOrFail($venta->id);
+            abort_unless($usuario->can('Ampliar:Reserva') && $usuario->can('view', $venta), 403);
+            if ($venta->estado !== EstadoVenta::Reserva || ! $venta->vence_en->isFuture()) {
+                throw ValidationException::withMessages(['venta' => 'La reserva ya no está vigente.']);
+            }
+            if ($venta->vence_en->format('Y-m-d H:i:s') !== $vencimientoConfirmado) {
+                throw ValidationException::withMessages(['venta' => 'El vencimiento cambió. Volvé a abrir la reserva.']);
+            }
+            $nuevo = Carbon::parse($nuevoVencimiento);
+            if (! $nuevo->greaterThan($venta->vence_en)) {
+                throw ValidationException::withMessages(['vencimiento' => 'La nueva fecha debe ser posterior al vencimiento actual.']);
+            }
+            DB::table('ampliaciones_reserva')->insert([
+                'tenant_id' => $venta->tenant_id, 'venta_id' => $venta->id, 'user_id' => $usuario->id,
+                'vencimiento_anterior' => $venta->vence_en, 'vencimiento_nuevo' => $nuevo,
+                'motivo' => $motivo, 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $venta->vence_en = $nuevo;
             $venta->save();
         }, attempts: 3);
     }

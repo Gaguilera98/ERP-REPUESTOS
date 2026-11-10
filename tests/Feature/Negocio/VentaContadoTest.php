@@ -50,6 +50,7 @@ use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -481,6 +482,49 @@ it('aparta una reserva y la entrega o libera al vencer sin duplicar la seña', f
     'venta fallida conserva el vencimiento' => [false, 'venta fallida'],
     'entrega rechazada conserva el vencimiento' => [false, 'entrega vencida'],
 ]);
+
+it('amplía una reserva vigente con permiso individual y conserva el historial', function () {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('ampliar-reserva');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '3');
+    $cliente = Cliente::factory()->personaNatural()->create();
+    $caja = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $reserva = app(CompletarVentaContado::class)->reservar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'cliente_id' => $cliente->id,
+        'vence_en' => now()->addDay()->toDateTimeString(),
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '30']],
+    ], $cajero)['venta'];
+    $actual = $reserva->vence_en->format('Y-m-d H:i:s');
+    $nuevo = $reserva->vence_en->copy()->addDay()->startOfMinute()->format('Y-m-d H:i:s');
+    $reservas = app(GestionarReservas::class);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $accion = [TestAction::make('verDetalle')->table($reserva), TestAction::make('ampliarReserva')];
+    $tabla = fn () => Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $caja->id]);
+    $tabla()->assertActionHidden($accion);
+    expect(fn () => $reservas->ampliar($reserva, $nuevo, $actual, 'Solicitud', $cajero))->toThrow(HttpException::class);
+    $cajero->givePermissionTo('Ampliar:Reserva');
+    $tabla()->mountAction($accion)->assertSchemaStateSet([
+        'vencimiento' => $reserva->vence_en->copy()->addDay()->format('Y-m-d').' 23:59',
+    ]);
+    expect(fn () => $reservas->ampliar($reserva, $actual, $actual, 'Solicitud', $cajero))->toThrow(ValidationException::class);
+    expect(fn () => $reservas->ampliar($reserva, $nuevo, $actual, ' ', $cajero))->toThrow(ValidationException::class);
+
+    $tabla()->callAction($accion, data: ['vencimiento' => $nuevo, 'motivo' => 'Cliente solicita más tiempo'])->assertNotified('Reserva ampliada');
+
+    expect($reserva->refresh()->vence_en->format('Y-m-d H:i:s'))->toBe($nuevo);
+    expect(fn () => $reservas->ampliar($reserva, now()->addDays(5)->toDateTimeString(), $actual, 'Reintento', $cajero))->toThrow(ValidationException::class);
+    $registro = DB::table('ampliaciones_reserva')->sole();
+    expect($registro->user_id)->toBe($cajero->id);
+    expect($registro->motivo)->toBe('Cliente solicita más tiempo');
+    expect(InventarioStock::query()->sole()->cantidad_reservada)->toBe('1.0000');
+    expect(Pago::query()->count())->toBe(1);
+    $detalle = $tabla()->mountAction(TestAction::make('verDetalle')->table($reserva));
+    expect($detalle->instance()->getMountedAction()->getModalContent()->render())->toContain('Historial de ampliaciones', 'Cliente solicita más tiempo');
+    $this->travelTo($reserva->vence_en->copy()->addSecond());
+    expect(fn () => $reservas->ampliar($reserva, now()->addDay()->toDateTimeString(), $nuevo, 'Tarde', $cajero))->toThrow(ValidationException::class);
+    expect($reserva->refresh()->estado)->toBe(EstadoVenta::Vencida);
+    expect(InventarioStock::query()->sole()->cantidad_reservada)->toBe('0.0000');
+});
 
 it('cancela una reserva con motivo y libera stock y seña una sola vez sin mover caja', function (bool $reembolsable) {
     ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('cancelar-reserva');

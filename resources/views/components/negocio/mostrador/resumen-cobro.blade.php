@@ -31,6 +31,7 @@
         && (float) $totalTentativo > 0;
     $cantidadProductos = count($lineas);
     $vistaPrevia = 2;
+    $senaAlcanzaTotal = $ventaReserva && bccomp((string) $totalTentativo, '0', 2) > 0 && bccomp((string) $totalRecibido, (string) $totalTentativo, 2) >= 0;
 @endphp
 
 <aside class="{{ $panel }} flex min-w-0 flex-col lg:sticky lg:top-4 lg:max-h-[calc(100dvh-5.5rem)]">
@@ -339,7 +340,9 @@
                 <span class="font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ number_format((float) $totalRecibido, 2, '.', ',') }}</span>
             </div>
             <div class="mt-2">
-                @if ($diferenciaCobros['estado'] === 'completo' && (float) $totalTentativo > 0)
+                @if ($senaAlcanzaTotal)
+                    <span class="text-xs font-semibold text-amber-800 dark:text-amber-300">La seña debe ser menor al total.</span>
+                @elseif ($diferenciaCobros['estado'] === 'completo' && (float) $totalTentativo > 0)
                     <span class="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800 dark:bg-emerald-400/15 dark:text-emerald-200">Completo</span>
                 @elseif ($diferenciaCobros['estado'] === 'falta')
                     <span class="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">
@@ -362,6 +365,9 @@
     </div>
 
     <div class="{{ $panel }} negocio-hairline shrink-0 border-t p-4 max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-30 max-lg:rounded-none max-lg:pb-[max(1rem,env(safe-area-inset-bottom))]">
+        @if ($senaAlcanzaTotal)
+            <p role="status" class="mb-2 text-sm font-semibold text-amber-800 dark:text-amber-300">Si el cliente paga todo y retira los productos ahora, elegí Contado. Para reservar, ingresá una seña menor al total.</p>
+        @endif
         <div class="mb-2 flex items-center justify-between gap-3 text-sm lg:hidden">
             <span class="text-gray-500 dark:text-gray-400">Total</span>
             <span class="font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ number_format((float) $totalTentativo, 2, '.', ',') }}</span>
