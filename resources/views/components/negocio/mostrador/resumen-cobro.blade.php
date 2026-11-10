@@ -278,7 +278,9 @@
                                     <option value="{{ $metodoPago->value }}" @selected($metodo === $metodoPago->value)>{{ $metodoPago->etiqueta() }}</option>
                                 @endforeach
                             </x-negocio.select>
+                            <label for="pago-monto-{{ $i }}" class="text-xs font-medium text-gray-600 dark:text-gray-300">Importe a cobrar</label>
                             <x-negocio.input-monto
+                                id="pago-monto-{{ $i }}"
                                 :moneda="$moneda"
                                 wire:model.live="pagos.{{ $i }}.monto"
                                 inputmode="decimal"
@@ -287,6 +289,22 @@
                             @error('pagos.'.$i.'.monto')
                                 <p class="text-xs font-semibold text-danger-600">{{ $message }}</p>
                             @enderror
+                            @if ($metodo === 'efectivo')
+                                <label for="efectivo-recibido-{{ $i }}" class="text-xs font-medium text-gray-600 dark:text-gray-300">Efectivo recibido</label>
+                                <x-negocio.input-monto id="efectivo-recibido-{{ $i }}" :moneda="$moneda" wire:model.live="pagos.{{ $i }}.efectivo_recibido" inputmode="decimal" placeholder="Importe exacto" />
+                                <p class="text-xs text-gray-500 dark:text-gray-400">Dejalo vacío si entrega el importe exacto.</p>
+                                @error('pagos.'.$i.'.efectivo_recibido') <p class="text-xs font-semibold text-danger-600 dark:text-danger-400">{{ $message }}</p> @enderror
+                                @php
+                                    $recibido = trim((string) ($pago['efectivo_recibido'] ?? ''));
+                                    $aplicado = trim((string) ($pago['monto'] ?? ''));
+                                    $importesValidos = preg_match('/^\d{1,8}(\.\d{1,2})?$/', $recibido) === 1 && preg_match('/^\d{1,8}(\.\d{1,2})?$/', $aplicado) === 1;
+                                @endphp
+                                @if ($importesValidos)
+                                    <p role="status" class="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                                        {{ bccomp($recibido, $aplicado, 2) >= 0 ? 'Cambio a entregar' : 'Falta efectivo' }} · {{ $moneda }} {{ bccomp($recibido, $aplicado, 2) >= 0 ? bcsub($recibido, $aplicado, 2) : bcsub($aplicado, $recibido, 2) }}
+                                    </p>
+                                @endif
+                            @endif
                             @if ($pideRef)
                                 <x-negocio.input
                                     wire:model="pagos.{{ $i }}.numero_referencia_banco"

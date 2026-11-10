@@ -15,6 +15,7 @@ use App\Models\Pago;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Venta;
+use App\Ventas\Pagos\Handlers\EfectivoHandler;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -117,12 +118,12 @@ class GestionarReservas
         }
     }
 
-    public function entregar(Venta $venta, string $saldoConfirmado, TenantUser $usuario): void
+    public function entregar(Venta $venta, string $saldoConfirmado, TenantUser $usuario, ?string $efectivoRecibido = null): void
     {
         abort_unless($usuario->can('create', Venta::class) && $usuario->can('view', $venta), 403);
         $this->procesarVencidas();
 
-        DB::transaction(function () use ($venta, $saldoConfirmado, $usuario): void {
+        DB::transaction(function () use ($venta, $saldoConfirmado, $usuario, $efectivoRecibido): void {
             $caja = CajaSesion::query()->where('user_id', $usuario->id)->where('sucursal_id', $venta->sucursal_id)
                 ->where('estado_sesion', EstadoCajaSesion::Abierta)->whereDate('fecha_apertura', now()->toDateString())
                 ->lockForUpdate()->first();
@@ -160,9 +161,11 @@ class GestionarReservas
                 ]);
             }
             if (bccomp($saldo, '0', 2) > 0) {
+                $preparado = app(EfectivoHandler::class)->preparar(['monto' => $saldo, 'efectivo_recibido' => $efectivoRecibido], 0, $caja);
                 $pago = Pago::query()->create([
                     'cliente_id' => $venta->cliente_id, 'caja_sesion_id' => $caja->id, 'sentido' => SentidoPago::Cobro,
                     'metodo_pago' => MetodoPago::Efectivo, 'monto' => $saldo, 'estado_pago' => EstadoPago::Aprobado, 'fecha_pago' => now(),
+                    'efectivo_recibido' => $preparado['efectivo_recibido'], 'cambio_entregado' => $preparado['cambio_entregado'],
                 ]);
                 $pago->aplicaciones()->create(['venta_id' => $venta->id, 'monto' => $saldo]);
             }

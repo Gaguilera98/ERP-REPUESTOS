@@ -280,6 +280,10 @@
                         </td>
                         <td data-label="Monto aplicado" class="px-2 py-3 text-end font-semibold tabular-nums">
                             {{ $pago?->sentido === SentidoPago::Reembolso ? '−' : '+' }} {{ $moneda }} {{ $aplicacion->monto }}
+                            @if (! $aplicacion->es_saldo_favor && $pago?->efectivo_recibido !== null)
+                                <p class="text-xs font-normal text-gray-500 dark:text-gray-400">Recibido: {{ $moneda }} {{ $pago->efectivo_recibido }}</p>
+                                <p class="text-xs font-normal text-gray-500 dark:text-gray-400">Cambio: {{ $moneda }} {{ $pago->cambio_entregado }}</p>
+                            @endif
                             @if ($aplicacion->es_saldo_favor)
                                 @foreach ($aplicacion->usos as $uso)
                                     @if ($uso->venta_id === null && $uso->es_saldo_favor)

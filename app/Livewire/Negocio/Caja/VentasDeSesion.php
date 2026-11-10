@@ -27,6 +27,7 @@ use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Colors\Color;
@@ -254,11 +255,11 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
             ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('create', Venta::class))
             ->modalHeading('Entregar reserva · '.$venta->codigo)
             ->modalDescription(fn (): string => 'Cobro del saldo en efectivo: '.NegocioConfiguracion::codigoMoneda().' '.$venta->saldoPendiente().'. Confirmá al entregar los productos.')
-            ->schema([Hidden::make('saldo')->default(fn (): string => $venta->saldoPendiente())])
+            ->schema([Hidden::make('saldo')->default(fn (): string => $venta->saldoPendiente()), $this->campoEfectivoRecibido('saldo')])
             ->requiresConfirmation()
             ->action(function (array $data, Action $action) use ($venta): void {
                 try {
-                    app(GestionarReservas::class)->entregar($venta, $data['saldo'], auth('tenant')->user());
+                    app(GestionarReservas::class)->entregar($venta, $data['saldo'], auth('tenant')->user(), $data['efectivo_recibido'] ?? null);
                 } catch (ValidationException $exception) {
                     Notification::make()->title('No se pudo entregar la reserva')->body(collect($exception->errors())->flatten()->first())->danger()->send();
                     $action->halt();
@@ -387,10 +388,12 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                 ->schema([
                     TextInput::make('monto')
                         ->label('Importe del abono')
+                        ->live()
                         ->prefix(NegocioConfiguracion::codigoMoneda())
                         ->numeric()
                         ->rules(['regex:/^\d{1,8}(\.\d{1,2})?$/', 'gt:0'])
                         ->required(),
+                    $this->campoEfectivoRecibido('monto'),
                 ])
                 ->action(function (array $data, Action $action, CompletarVentaContado $ventas) use ($venta): void {
                     abort_unless($this->puedeAbonar($venta), 403);
@@ -398,7 +401,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     abort_unless($usuario instanceof TenantUser, 403);
 
                     try {
-                        $saldo = $ventas->abonarEnEfectivo($venta->codigo, (int) $venta->sucursal_id, (string) $data['monto'], $usuario);
+                        $saldo = $ventas->abonarEnEfectivo($venta->codigo, (int) $venta->sucursal_id, (string) $data['monto'], $usuario, $data['efectivo_recibido'] ?? null);
                     } catch (ValidationException $exception) {
                         Notification::make()->title('No se pudo registrar el abono')
                             ->body(collect($exception->errors())->flatten()->first())
@@ -414,6 +417,21 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                         ->success()->send();
                 }),
         ];
+    }
+
+    private function campoEfectivoRecibido(string $campoMonto): TextInput
+    {
+        return TextInput::make('efectivo_recibido')->label('Efectivo recibido')->prefix(NegocioConfiguracion::codigoMoneda())
+            ->inputMode('decimal')->live()->rules(['nullable', 'regex:/^\d{1,8}(\.\d{1,2})?$/'])
+            ->helperText(function (Get $get) use ($campoMonto): string {
+                $recibido = (string) $get('efectivo_recibido');
+                $monto = (string) $get($campoMonto);
+                if (preg_match('/^\d{1,8}(\.\d{1,2})?$/', $recibido) !== 1 || preg_match('/^\d{1,8}(\.\d{1,2})?$/', $monto) !== 1) {
+                    return 'Dejalo vacío si entrega el importe exacto.';
+                }
+
+                return bccomp($recibido, $monto, 2) >= 0 ? 'Cambio a entregar: '.NegocioConfiguracion::codigoMoneda().' '.bcsub($recibido, $monto, 2) : 'El efectivo recibido no alcanza para cubrir este cobro.';
+            });
     }
 
     private function puedeAbonar(Venta $venta): bool

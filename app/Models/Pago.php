@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'sentido',
     'metodo_pago',
     'monto',
+    'efectivo_recibido',
+    'cambio_entregado',
     'comprobante_archivo_path',
     'numero_referencia_banco',
     'qr_id_transaccion_banco',
@@ -49,6 +51,8 @@ class Pago extends Model
             'sentido' => SentidoPago::class,
             'metodo_pago' => MetodoPago::class,
             'monto' => 'decimal:2',
+            'efectivo_recibido' => 'decimal:2',
+            'cambio_entregado' => 'decimal:2',
             'estado_pago' => EstadoPago::class,
             'fecha_pago' => 'datetime',
         ];

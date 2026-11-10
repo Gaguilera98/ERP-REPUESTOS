@@ -17,6 +17,7 @@ use App\Models\CategoriaAtributo;
 use App\Models\Cliente;
 use App\Models\InventarioStock;
 use App\Models\NegocioConfiguracion;
+use App\Models\Pago;
 use App\Models\ProductoVariante;
 use App\Models\Sucursal;
 use App\Models\SucursalAlmacen;
@@ -738,6 +739,7 @@ trait ManejaMostrador
                 $pagos[] = [
                     'metodo_pago' => $pago['metodo_pago'],
                     'monto' => $pago['monto'],
+                    'efectivo_recibido' => $pago['metodo_pago'] === MetodoPago::Efectivo->value ? ($pago['efectivo_recibido'] ?? null) : null,
                     'numero_referencia_banco' => $pago['numero_referencia_banco'] ?: null,
                     'qr_id_transaccion_banco' => $pago['qr_id_transaccion_banco'] ?: null,
                     'comprobante_archivo_path' => $path,
@@ -785,8 +787,10 @@ trait ManejaMostrador
             $this->quitarDescuentoVenta();
             $this->busqueda = '';
 
+            $cambio = Montos::dos((string) Pago::query()->whereHas('aplicaciones', fn ($query) => $query->where('venta_id', $resultado['venta']->id))->sum('cambio_entregado'));
             Notification::make()
                 ->title('Venta '.$resultado['venta']->codigo)
+                ->body(bccomp($cambio, '0', 2) > 0 ? 'Cambio a entregar: '.NegocioConfiguracion::codigoMoneda().' '.$cambio : null)
                 ->success()
                 ->send();
 
@@ -944,6 +948,9 @@ trait ManejaMostrador
 
     private function limpiarCamposDePago(int $indice, string $metodo): void
     {
+        if ($metodo !== MetodoPago::Efectivo->value) {
+            $this->pagos[$indice]['efectivo_recibido'] = '';
+        }
         if (! in_array($metodo, ['transferencia', 'qr_externo', 'voucher_tarjeta'], true)) {
             $this->pagos[$indice]['numero_referencia_banco'] = '';
         }

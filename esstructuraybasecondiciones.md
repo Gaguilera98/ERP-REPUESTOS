@@ -253,7 +253,7 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 
 ### Estado de la implementación y decisiones vigentes
 
-Actualizado el 8 de noviembre de 2026. El estado operativo de la fase 6 se mantiene en [fase_6_estado_actual.md](fase_6_estado_actual.md). Las secciones de diseño posteriores describen también funciones planificadas; consultar ese estado antes de asumir que están implementadas.
+Actualizado el 9 de noviembre de 2026. La fase 6 queda cerrada con el alcance acordado, tras la ejecución completa compartida por el usuario: 163 pruebas aprobadas y 1.419 comprobaciones en 337,40 segundos. Sus funciones, límites y mejoras pendientes se mantienen en [fase_6_estado_actual.md](fase_6_estado_actual.md). Las secciones de diseño posteriores describen también funciones planificadas; consultar ese estado antes de asumir que están implementadas.
 
 * Las reservas actuales reciben una seña al crearse y el saldo completo al entregar. Se requiere cliente, se aparta stock disponible y se guarda un vencimiento cuyo valor inicial viene de la configuración del negocio. La entrega cobra el saldo en efectivo en la caja de hoy y descuenta stock. El vencimiento libera las unidades y registra la seña a favor del cliente. La aplicación de ese saldo a una compra se realiza desde Mostrador.
 * Desde el 7 de noviembre de 2026 el saldo a favor disponible puede aplicarse a una compra en Mostrador. Se consume mediante una aplicación vinculada al pago original y no genera otro cobro. Las señas vencidas pueden reembolsarse según la condición guardada en la reserva, con Reembolsar:Sena, motivo y caja actual. La configuración permite_reembolso_senas se copia al crear cada reserva; valor inicial habilitado para reservas nuevas y anteriores. Retener definitivamente la seña sigue pendiente.
@@ -270,7 +270,7 @@ Actualizado el 8 de noviembre de 2026. El estado operativo de la fase 6 se manti
 * Las devoluciones físicas de productos siguen previstas para la fase 7. Las correcciones actuales atienden errores de registro.
 
 ### Cosas a tener en cuenta a futuro
-Pendiente solicitado el 8 de noviembre de 2026: manejo de vuelto o cambio en cobros en efectivo del Mostrador. Definir efectivo entregado por el cliente, importe aplicado a la venta y cambio a devolver, incluyendo pagos combinados. El excedente devuelto no debe contabilizarse como ingreso. Alcance y fase por acordar.
+Implementado el 9 de noviembre de 2026 como ampliación posterior al cierre de fase 6: vuelto/cambio en Mostrador, señas, abonos y retiro de reservas. pagos.monto conserva lo aplicado; efectivo_recibido y cambio_entregado guardan recibido y vuelto en cada cobro en efectivo. El servidor calcula el cambio, caja registra solo monto y una anulación devuelve lo aplicado. Los datos históricos quedan vacíos. QR, tarjeta y transferencia no generan cambio automático. Ver alcance y límites en fase_6_estado_actual.md.
 
 Ítems conscientes que **no** se implementan en v1, para no rediseñar a ciegas después:
 

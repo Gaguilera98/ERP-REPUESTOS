@@ -24,6 +24,9 @@ trait PreparaPagoBase
     protected function base(array $pago, int $indice, CajaSesion $caja, MetodoPago $metodo): array
     {
         $monto = $this->montoDos($pago['monto'] ?? null, "pagos.{$indice}.monto");
+        if ($metodo !== MetodoPago::Efectivo && isset($pago['efectivo_recibido']) && $pago['efectivo_recibido'] !== '') {
+            throw ValidationException::withMessages(["pagos.{$indice}.efectivo_recibido" => 'El vuelto solo está disponible para pagos en efectivo.']);
+        }
 
         if (Montos::comparar($monto, '0', 2) !== 1) {
             throw ValidationException::withMessages([

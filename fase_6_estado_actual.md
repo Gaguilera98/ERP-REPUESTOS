@@ -1,6 +1,8 @@
-# Fase 6 en curso
+# Fase 6 cerrada con el alcance acordado
 
-Actualizado el 8 de noviembre de 2026.
+Actualizado el 9 de noviembre de 2026.
+
+El usuario ejecutó la suite completa con php artisan test --compact y compartió el resultado: 163 pruebas aprobadas, 1.419 comprobaciones y 337,40 segundos. Se cierra la fase con las funciones y límites descritos aquí; las mejoras futuras continúan pendientes.
 
 Este archivo registra el estado real de la fase. El alcance general se mantiene en fases_erp_mostrador_f4aaf7c6.plan.md y las condiciones del proyecto en esstructuraybasecondiciones.md.
 
@@ -68,14 +70,28 @@ El comando php artisan ventas:vencer-reservas queda disponible para mantenimient
 
 Estos cambios están relacionados con la operación de ventas. La fase 7 de devoluciones físicas sigue pendiente.
 
-## Pendientes para cerrar la fase
+## Límites del alcance cerrado
 
-* Ampliar los métodos del cobro del saldo y de los abonos cuando se defina ese alcance.
-* Completar las pruebas de integración entre reservas, saldo a favor y pagos del alcance actual, y ejecutar la suite completa.
+* El cobro del saldo al entregar y los abonos posteriores siguen en efectivo. Ampliar sus métodos de pago queda pendiente de definir como mejora posterior.
+* Los adelantos sin productos y pagos para varias ventas mantienen el estado pendiente descrito abajo.
+
+## Ampliación posterior: vuelto o cambio en efectivo
+
+Implementado el 9 de noviembre de 2026. Cada cobro en efectivo distingue el importe aplicado del efectivo recibido. El segundo campo es opcional en pantalla: vacío significa pago exacto. El servidor calcula el cambio y exige recibido mayor o igual al importe aplicado. En pagos combinados se ingresa el importe que corresponde a cada método; solo la línea de efectivo admite recibido y cambio.
+
+pagos incorpora efectivo_recibido y cambio_entregado, ambos decimales opcionales. monto conserva el importe aplicado. Los pagos anteriores quedan con esos datos vacíos, sin inventar información histórica. Los nuevos cobros en efectivo guardan ambos valores, incluso en pago exacto. PostgreSQL comprueba que recibido menos cambio coincida con monto y que estos datos correspondan a cobros en efectivo.
+
+Funciona al crear ventas de contado, señas y pagos iniciales a crédito desde Mostrador, así como en Registrar abono y Cobrar saldo y entregar. El detalle muestra los valores guardados junto al pago original; al reutilizar saldo a favor no se presentan como si se hubiera recibido efectivo nuevamente. El cambio no crea un reembolso comercial ni se suma como ingreso de caja. Anular devuelve únicamente lo cobrado y las correcciones conservan sus reglas existentes. El formulario de corrección no incorpora por ahora un campo de efectivo recibido.
+
+QR, tarjeta y transferencia no generan vuelto. Los excedentes electrónicos no se convierten automáticamente en una salida del cajón. Los importes y aplicaciones mantienen sus validaciones actuales. La emisión de comprobantes impresos sigue fuera de esta ampliación; los valores quedan disponibles para usarlos cuando se implemente.
+
+Verificación del vuelto: 10 pruebas con 73 comprobaciones para los casos nuevos y validaciones; luego 12 pruebas con 209 comprobaciones incluyendo las acciones reales de entrega y abono, vencimientos y saldo a favor. Los conteos se superponen. Compilación y formato correctos, migración local aplicada. El resultado de 163 pruebas de cierre que figura al inicio es anterior a esta ampliación; no se repitió la suite completa tras agregar vuelto.
+
+Prueba manual en la interfaz local: se abrió la sesión #7 de God en Alto San Pedro con fondo cero y se registraron VNT-000010 (total 52, efectivo recibido 100, cambio 48) y VNT-000011 (total 52, QR 30, efectivo aplicado 22, recibido 100, cambio 78). Se verificaron el aviso de cambio, el detalle guardado del pago combinado y el resumen de caja: cobros 104, efectivo esperado 74 y QR 30. Estas dos ventas son datos de prueba locales y la sesión se dejó abierta.
 
 ## Mejoras pospuestas para el futuro
 
-Pendiente solicitado el 8 de noviembre de 2026: implementar el vuelto o cambio en el Mostrador para cobros en efectivo. Al retomarlo, definir cómo ingresar el efectivo entregado por el cliente, mostrar el cambio a devolver y distinguirlo del importe aplicado a la venta, para que el excedente devuelto no se contabilice como ingreso. Revisar también pagos combinados. Alcance y fase por acordar; todavía no implementado.
+El vuelto/cambio solicitado el 8 de noviembre se implementó como ampliación posterior al cierre de fase, con el alcance descrito arriba.
 
 Por decisión del 7 de noviembre de 2026, estos puntos quedan fuera de los requisitos para cerrar la fase 6, sin asignarles todavía una fase futura:
 
@@ -84,6 +100,6 @@ Por decisión del 7 de noviembre de 2026, estos puntos quedan fuera de los requi
 
 ## Verificación realizada
 
-Pruebas enfocadas cubren creación desde Mostrador, stock físico y reservado, entrega con pago del saldo, vencimiento y reintentos. La ampliación de cancelación pasó 12 pruebas con 235 comprobaciones, incluyendo permisos, motivo, pagos pendientes, cancelación con caja cerrada, conservación de otra reserva, rechazo de entrega posterior, aislamiento entre negocios y reembolso según la condición guardada. También se verificaron los abonos a crédito y la venta de contado existente. La compilación de estilos terminó correctamente. La suite completa del proyecto queda por ejecutar antes de cerrar la fase.
+Pruebas enfocadas cubren creación desde Mostrador, stock físico y reservado, entrega con pago del saldo, vencimiento y reintentos. La ampliación de cancelación pasó 12 pruebas con 235 comprobaciones, incluyendo permisos, motivo, pagos pendientes, cancelación con caja cerrada, conservación de otra reserva, rechazo de entrega posterior, aislamiento entre negocios y reembolso según la condición guardada. También se verificaron los abonos a crédito y la venta de contado existente. La compilación de estilos terminó correctamente. La suite completa del proyecto fue ejecutada por el usuario el 9 de noviembre de 2026, con el resultado de cierre registrado al inicio de este documento.
 
 El 8 de noviembre se verificó además la navegación sin caja vigente y la conservación del carrito (3 pruebas, 23 comprobaciones), la ampliación con permiso individual junto con detalle y cancelación (4 pruebas, 117 comprobaciones), y la hora inicial de la ampliación (prueba enfocada, 24 comprobaciones). Las pruebas de creación de reservas también comprueban las 23:59. Estas ejecuciones son parciales y sus conteos se superponen; no equivalen a la suite completa. La migración local del historial ampliaciones_reserva y del permiso Ampliar:Reserva quedó aplicada.

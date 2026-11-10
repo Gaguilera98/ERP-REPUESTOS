@@ -18,8 +18,8 @@ todos:
     content: "Fase 5: mostrador Livewire de contado, código VNT y compra flash"
     status: completed
   - id: fase-6-credito
-    content: "Fase 6: seña, fiado, adelanto y aplicaciones de pago"
-    status: in_progress
+    content: "Fase 6: crédito, reservas y saldo a favor; adelantos y pagos para varias ventas pospuestos"
+    status: completed
   - id: fase-7-devolucion
     content: "Fase 7: notas de crédito y devolución Livewire"
     status: pending
@@ -133,7 +133,7 @@ Tener en cuenta (hablarlo después): aviso al cobrar **sin cliente**. Hoy el con
 
 ## Fase 6. Seña, fiado y adelanto
 
-**Estado al 8 de noviembre de 2026:** en curso. El detalle de lo implementado, los límites actuales y los pendientes está en [fase_6_estado_actual.md](fase_6_estado_actual.md).
+**Estado al 9 de noviembre de 2026:** cerrada con el alcance acordado. El usuario ejecutó la suite completa: 163 pruebas aprobadas y 1.419 comprobaciones en 337,40 segundos. El detalle de lo implementado, los límites actuales y las mejoras futuras está en [fase_6_estado_actual.md](fase_6_estado_actual.md).
 
 Implementado: venta a crédito con cliente y cobro parcial opcional, abonos en efectivo desde Mis ventas, reserva con cliente/seña/vencimiento, entrega con cobro del saldo en efectivo y procesamiento de vencidas al operar que libera unidades y registra la seña a favor del cliente.
 
@@ -149,7 +149,7 @@ Al crear reservas se proponen las 23:59 del día calculado con horas_reserva. Al
 
 Mostrador permite consultar y preparar operaciones sin caja. La confirmación requiere la caja de hoy en la sucursal, y el aviso permite abrir Caja en otra pestaña y actualizar el estado sin perder el carrito.
 
-Pendiente para cerrar la fase: pruebas de integración del alcance actual y ejecución de la suite completa.
+Verificación de cierre completada con la suite completa. El cobro del saldo al entregar y los abonos posteriores siguen en efectivo; ampliar sus métodos de pago queda pendiente de definir como mejora posterior. El 9 de noviembre se implementó vuelto/cambio como ampliación posterior: recibido y cambio por cobro en efectivo, incluidos pagos combinados, señas, abonos y retiro de reservas, sin generar vuelto electrónico ni alterar el importe aplicado en caja. Esta ampliación tiene sus pruebas propias; el resultado de cierre corresponde a la versión anterior.
 
 Pospuesto por decisión del 7 de noviembre de 2026: adelantos de clientes sin productos y aplicación de un mismo pago a varias ventas pendientes. No bloquean el cierre de la fase 6 y todavía no tienen fase futura asignada. Mientras tanto, las señas se reciben al crear reservas con productos y los abonos se registran por separado en cada venta.
 

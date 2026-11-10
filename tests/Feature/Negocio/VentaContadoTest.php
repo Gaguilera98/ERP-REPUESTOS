@@ -747,6 +747,73 @@ it('permite preparar una venta sin caja vigente y conserva el carrito al intenta
     expect(Venta::query()->count())->toBe(1);
 })->with(['sin sesión' => false, 'sesión anterior abierta' => true]);
 
+it('registra el efectivo recibido y el vuelto sin aumentar cobros ni reembolsos', function (string $operacion, string $aplicado, bool $combinado) {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('vuelto');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '3');
+    $cliente = Cliente::factory()->personaNatural()->create();
+    $caja = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $mostrador = Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)->call('seleccionarCliente', $cliente->id)
+        ->call('seleccionarOperacion', $operacion)->set('pagos.0.monto', $aplicado)->set('pagos.0.efectivo_recibido', '200');
+    if ($combinado) {
+        $mostrador->call('agregarPago')->set('pagos.1.metodo_pago', 'qr_externo')->set('pagos.1.monto', '30');
+    }
+    $mostrador->assertSee('Cambio a entregar')->call('completar')->assertHasNoErrors();
+    $venta = Venta::query()->sole();
+    $pago = Pago::query()->where('metodo_pago', MetodoPago::Efectivo)->sole();
+    expect($pago->monto)->toBe($aplicado);
+    expect($pago->efectivo_recibido)->toBe('200.00');
+    expect($pago->cambio_entregado)->toBe($combinado ? '130.00' : ($operacion === 'contado' ? '100.00' : '170.00'));
+    expect(app(ArqueoCajaSesion::class)->de($caja)['total_cobros'])->toBe($operacion === 'contado' ? '100.00' : '30.00');
+    $detalle = Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $caja->id])
+        ->mountAction(TestAction::make('verDetalle')->table($venta));
+    expect($detalle->instance()->getMountedAction()->getModalContent()->render())->toContain('Recibido:', 'Cambio:', '200.00');
+    if ($combinado) {
+        expect(Pago::query()->where('metodo_pago', MetodoPago::QrExterno)->sole()->efectivo_recibido)->toBeNull();
+    }
+    if ($operacion === 'reserva') {
+        Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $caja->id])
+            ->callAction([TestAction::make('verDetalle')->table($venta), TestAction::make('entregarReserva')], data: ['efectivo_recibido' => '100'])
+            ->assertNotified('Reserva entregada');
+    } elseif ($operacion === 'credito') {
+        Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sucursalMostradorId' => $sucursal->id])
+            ->callAction([TestAction::make('verDetalle')->table($venta), TestAction::make('registrarAbono')], data: ['monto' => '70', 'efectivo_recibido' => '100'])
+            ->assertNotified('Abono registrado');
+    }
+    expect($venta->refresh()->saldoPendiente())->toBe('0.00');
+    expect(app(ArqueoCajaSesion::class)->de($caja)['total_cobros'])->toBe('100.00');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $supervisor);
+    app(AnularVenta::class)->anular($venta, 'Comprobar reembolso del cobro aplicado', '100.00', $supervisor);
+    expect(Pago::query()->where('sentido', SentidoPago::Reembolso)->sum('monto'))->toEqual(100);
+})->with([
+    'contado' => ['contado', '100.00', false],
+    'QR y efectivo' => ['contado', '70.00', true],
+    'seña y entrega' => ['reserva', '30.00', false],
+    'crédito y abono' => ['credito', '30.00', false],
+]);
+
+it('rechaza efectivo insuficiente o inválido y vuelto en métodos electrónicos', function (string $metodo, string $recibido) {
+    ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('vuelto-invalido');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '3');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    expect(fn () => app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => $metodo, 'monto' => '100', 'efectivo_recibido' => $recibido, 'cambio_entregado' => '999']],
+    ], $cajero))->toThrow(ValidationException::class);
+    expect(Venta::query()->count())->toBe(0);
+    expect(Pago::query()->count())->toBe(0);
+    expect(InventarioStock::query()->sole()->cantidad_actual)->toBe('3.0000');
+})->with([
+    'insuficiente' => ['efectivo', '99'],
+    'negativo' => ['efectivo', '-1'],
+    'demasiados decimales' => ['efectivo', '100.001'],
+    'QR' => ['qr_externo', '200'],
+    'transferencia' => ['transferencia', '200'],
+    'tarjeta' => ['voucher_tarjeta', '200'],
+]);
+
 it('no vende sin caja abierta', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('sincaja');
 

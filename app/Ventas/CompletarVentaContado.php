@@ -409,11 +409,11 @@ class CompletarVentaContado
         });
     }
 
-    public function abonarEnEfectivo(string $codigo, int $sucursalId, string $monto, TenantUser $usuario): string
+    public function abonarEnEfectivo(string $codigo, int $sucursalId, string $monto, TenantUser $usuario, ?string $efectivoRecibido = null): string
     {
         abort_unless($usuario->can('create', Venta::class), 403);
 
-        return DB::transaction(function () use ($codigo, $sucursalId, $monto, $usuario): string {
+        return DB::transaction(function () use ($codigo, $sucursalId, $monto, $usuario, $efectivoRecibido): string {
             app(CongelarTurnosVencidos::class)->de($usuario, $sucursalId);
             $caja = CajaSesion::query()
                 ->where('sucursal_id', $sucursalId)
@@ -439,7 +439,7 @@ class CompletarVentaContado
             abort_unless($usuario->can('view', $venta), 403);
 
             $saldo = $venta->saldoPendiente();
-            $pago = $this->metodosPago->make(MetodoPago::Efectivo)->preparar(['monto' => $monto], 0, $caja);
+            $pago = $this->metodosPago->make(MetodoPago::Efectivo)->preparar(['monto' => $monto, 'efectivo_recibido' => $efectivoRecibido], 0, $caja);
 
             if (Montos::comparar($pago['monto'], $saldo, 2) > 0) {
                 throw ValidationException::withMessages(['montoAbono' => 'El abono supera el saldo pendiente ('.$saldo.').']);
@@ -459,6 +459,8 @@ class CompletarVentaContado
             'sentido' => SentidoPago::Cobro,
             'metodo_pago' => $pagoData['metodo_pago'],
             'monto' => $pagoData['monto'],
+            'efectivo_recibido' => $pagoData['efectivo_recibido'] ?? null,
+            'cambio_entregado' => $pagoData['cambio_entregado'] ?? null,
             'comprobante_archivo_path' => $pagoData['comprobante_archivo_path'],
             'numero_referencia_banco' => $pagoData['numero_referencia_banco'],
             'qr_id_transaccion_banco' => $pagoData['qr_id_transaccion_banco'],

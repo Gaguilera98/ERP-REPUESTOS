@@ -16,6 +16,8 @@ interface MetodoPagoHandler
      * @return array{
      *     metodo_pago: MetodoPago,
      *     monto: string,
+     *     efectivo_recibido?: string,
+     *     cambio_entregado?: string,
      *     caja_sesion_id: int|null,
      *     numero_referencia_banco: string|null,
      *     qr_id_transaccion_banco: string|null,
