@@ -34,6 +34,7 @@ use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -364,6 +365,56 @@ it('rechaza consultar el detalle de la sesión de otro vendedor', function () {
     Livewire::actingAs($cajero, 'tenant')->test(SesionesDelDia::class, ['fecha' => $ajena->fecha_apertura->toDateString()])
         ->mountAction(TestAction::make('verSesion')->table($ajena))
         ->assertActionNotMounted();
+});
+
+it('cuenta un turno anterior sin sustituir el turno actual ni su declaración', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal] = negocioConCaja('conteo-turno-anterior');
+    $this->travelTo(Carbon::parse('2026-11-11 10:00:00'));
+    $anterior = CajaSesion::factory()->create([
+        'user_id' => $cajero->id,
+        'sucursal_id' => $sucursal->id,
+        'estado_sesion' => EstadoCajaSesion::PendienteArqueo,
+        'fecha_apertura' => now()->subDay(),
+        'monto_apertura' => '20.00',
+    ]);
+    Pago::factory()->create(['caja_sesion_id' => $anterior->id, 'fecha_pago' => now()->subDay()]);
+    $ajena = CajaSesion::factory()->create([
+        'user_id' => $supervisor->id,
+        'sucursal_id' => $sucursal->id,
+        'estado_sesion' => EstadoCajaSesion::PendienteArqueo,
+        'fecha_apertura' => now()->subDay(),
+    ]);
+    $actual = CajaSesion::factory()->create([
+        'user_id' => $cajero->id, 'sucursal_id' => $sucursal->id, 'monto_apertura' => '30.00',
+    ]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $conteo = fn (CajaSesion $sesion): TestAction => TestAction::make('contarTurnoAnterior')->arguments(['sesionId' => $sesion->id]);
+    $pagina = Livewire::actingAs($cajero, 'tenant')->test(CajaDelNegocio::class)
+        ->set('data.medios_declarados.efectivo', '31')
+        ->mountAction($conteo($ajena))->assertActionNotMounted()
+        ->mountAction($conteo($actual))->assertActionNotMounted();
+
+    $pagina->call('contar', $anterior->id)->assertActionMounted('contarTurnoAnterior')
+        ->assertSee('Turno actual · Sesión #'.$actual->id)
+        ->assertSchemaStateSet(['medios_declarados.efectivo' => '120.00'])
+        ->assertSet('data.medios_declarados.efectivo', '31');
+    expect($pagina->instance()->getMountedAction()->getModalHeading())->toBe('Turno anterior · 10/11/2026');
+    $pagina->unmountAction()
+        ->assertSet('data.medios_declarados.efectivo', '31');
+    expect($anterior->refresh()->estado_sesion)->toBe(EstadoCajaSesion::PendienteArqueo);
+
+    $pagina->mountAction($conteo($anterior))
+        ->fillForm(['medios_declarados.efectivo' => '119'])
+        ->callMountedAction()
+        ->assertHasActionErrors(['justificacion_diferencia' => 'required'])
+        ->fillForm(['justificacion_diferencia' => 'Faltó un boliviano al contar.'])
+        ->callMountedAction()
+        ->assertNotified('Caja cerrada')
+        ->assertSet('data.medios_declarados.efectivo', '31');
+
+    expect($anterior->refresh()->estado_sesion)->toBe(EstadoCajaSesion::Cerrada)
+        ->and($anterior->monto_cierre_real)->toBe('119.00')
+        ->and($actual->refresh()->estado_sesion)->toBe(EstadoCajaSesion::Abierta);
 });
 
 it('abre el historial desde las acciones superiores de caja', function () {

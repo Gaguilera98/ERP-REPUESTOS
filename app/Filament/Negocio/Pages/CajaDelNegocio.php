@@ -14,6 +14,7 @@ use App\Models\NegocioConfiguracion;
 use App\Models\Sucursal;
 use App\Models\TenantUser;
 use BackedEnum;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
@@ -22,7 +23,10 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Wizard;
+use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
@@ -66,7 +70,11 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
 
     public bool $confirmandoCierre = false;
 
-    public ?int $sesionEnConteo = null;
+    /** @var array<int, CajaSesion|null> */
+    private array $turnosAnteriores = [];
+
+    /** @var array<int, array<string, mixed>> */
+    private array $arqueos = [];
 
     public static function canAccess(): bool
     {
@@ -110,6 +118,41 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
     public function form(Schema $schema): Schema
     {
         $moneda = NegocioConfiguracion::codigoMoneda();
+
+        return $schema
+            ->components([
+                Grid::make(1)
+                    ->visible(fn (): bool => $this->sesionActual() === null)
+                    ->schema([
+                        Select::make('sucursal_id')
+                            ->label('Sucursal')
+                            ->options(fn (): array => Sucursal::query()
+                                ->where('is_active', true)
+                                ->orderBy('nombre')
+                                ->pluck('nombre', 'id')
+                                ->all())
+                            ->required()
+                            ->searchable()
+                            ->native(false),
+                        TextInput::make('monto_apertura')
+                            ->label('Monto de apertura')
+                            ->prefix($moneda)
+                            ->numeric()
+                            ->minValue(0)
+                            ->required()
+                            ->default('0'),
+                    ]),
+                Grid::make(1)
+                    ->extraAttributes(['class' => 'caja-declaracion-medios'])
+                    ->visible(fn (): bool => $this->sesionActual() instanceof CajaSesion)
+                    ->schema($this->camposConteo($moneda, fn (): ?array => $this->arqueoTurno())),
+            ])
+            ->statePath('data');
+    }
+
+    /** @return list<TextInput|Textarea> */
+    private function camposConteo(string $moneda, Closure $arqueo): array
+    {
         $camposMedios = [];
 
         foreach (MetodoPago::cases() as $metodo) {
@@ -121,18 +164,18 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
                 ->required()
                 ->live(onBlur: true)
                 ->autofocus(fn (): bool => $metodo === MetodoPago::Efectivo)
-                ->hintIcon(function (Get $get) use ($metodo): ?Heroicon {
-                    return $this->medioTieneDiferencia($metodo->value, $get('medios_declarados'))
+                ->hintIcon(function (Get $get) use ($metodo, $arqueo): ?Heroicon {
+                    return $this->medioTieneDiferencia($arqueo(), $metodo->value, $get('medios_declarados'))
                         ? Heroicon::ExclamationCircle
                         : null;
                 })
-                ->hintColor(function (Get $get) use ($metodo): ?string {
-                    return $this->medioTieneDiferencia($metodo->value, $get('medios_declarados'))
+                ->hintColor(function (Get $get) use ($metodo, $arqueo): ?string {
+                    return $this->medioTieneDiferencia($arqueo(), $metodo->value, $get('medios_declarados'))
                         ? 'danger'
                         : null;
                 })
-                ->extraFieldWrapperAttributes(function (Get $get) use ($metodo): array {
-                    if (! $this->medioTieneDiferencia($metodo->value, $get('medios_declarados'))) {
+                ->extraFieldWrapperAttributes(function (Get $get) use ($metodo, $arqueo): array {
+                    if (! $this->medioTieneDiferencia($arqueo(), $metodo->value, $get('medios_declarados'))) {
                         return [];
                     }
 
@@ -140,8 +183,8 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
                         'class' => 'fi-fo-field-wrp-error',
                     ];
                 })
-                ->helperText(function (Get $get) use ($metodo, $moneda): string|HtmlString {
-                    $esperado = $this->esperadoDeMedio($metodo->value);
+                ->helperText(function (Get $get) use ($metodo, $moneda, $arqueo): string|HtmlString {
+                    $esperado = $this->esperadoDeMedio($arqueo(), $metodo->value);
 
                     if ($esperado === null) {
                         return '';
@@ -149,6 +192,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
 
                     $declarados = $get('medios_declarados');
                     $dif = $this->diferenciaDeMedio(
+                        $arqueo(),
                         $metodo->value,
                         is_array($declarados) ? ($declarados[$metodo->value] ?? null) : null,
                     );
@@ -172,44 +216,18 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
                 });
         }
 
-        return $schema
-            ->components([
-                Grid::make(1)
-                    ->visible(fn (): bool => $this->sesionParaCerrar() === null)
-                    ->schema([
-                        Select::make('sucursal_id')
-                            ->label('Sucursal')
-                            ->options(fn (): array => Sucursal::query()
-                                ->where('is_active', true)
-                                ->orderBy('nombre')
-                                ->pluck('nombre', 'id')
-                                ->all())
-                            ->required()
-                            ->searchable()
-                            ->native(false),
-                        TextInput::make('monto_apertura')
-                            ->label('Monto de apertura')
-                            ->prefix($moneda)
-                            ->numeric()
-                            ->minValue(0)
-                            ->required()
-                            ->default('0'),
-                    ]),
-                Grid::make(1)
-                    ->extraAttributes(['class' => 'caja-declaracion-medios'])
-                    ->visible(fn (): bool => $this->sesionParaCerrar() instanceof CajaSesion)
-                    ->schema($camposMedios),
-                Textarea::make('justificacion_diferencia')
-                    ->label('Justificación de la diferencia')
-                    ->placeholder('Ingresá la justificación (obligatoria)...')
-                    ->rows(3)
-                    ->columnSpanFull()
-                    ->visible(fn (Get $get): bool => $this->hayDiferenciaEnMedios($get('medios_declarados')))
-                    ->required(fn (Get $get): bool => $this->hayDiferenciaEnMedios($get('medios_declarados')))
-                    ->helperText('La justificación es obligatoria para cerrar con descuadre.')
-                    ->live(debounce: 300),
-            ])
-            ->statePath('data');
+        return [
+            ...$camposMedios,
+            Textarea::make('justificacion_diferencia')
+                ->label('Justificación de la diferencia')
+                ->placeholder('Ingresá la justificación (obligatoria)...')
+                ->rows(3)
+                ->columnSpanFull()
+                ->visible(fn (Get $get): bool => $this->hayDiferenciaEnMedios($arqueo(), $get('medios_declarados')))
+                ->required(fn (Get $get): bool => $this->hayDiferenciaEnMedios($arqueo(), $get('medios_declarados')))
+                ->helperText('La justificación es obligatoria para cerrar con descuadre.')
+                ->live(debounce: 300),
+        ];
     }
 
     public function abrir(): void
@@ -240,26 +258,91 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         $this->confirmandoCierre = false;
     }
 
-    public function contar(int $sesionId): void
+    public function cerrar(): void
     {
-        $this->sesionEnConteo = $sesionId;
+        $sesion = $this->sesionActual();
+        abort_unless($sesion instanceof CajaSesion && auth('tenant')->user()?->can('update', $sesion), 403);
+
+        $this->cerrarTurno($sesion, $this->form->getState());
         $this->confirmandoCierre = false;
         $this->rellenarFormulario();
     }
 
-    public function cerrar(): void
+    public function contarTurnoAnteriorAction(): Action
+    {
+        return Action::make('contarTurnoAnterior')
+            ->record(fn (array $arguments): ?CajaSesion => $this->turnoAnteriorPendiente($arguments['sesionId'] ?? null))
+            ->authorize(fn (?CajaSesion $record): bool => $record !== null && (bool) auth('tenant')->user()?->can('update', $record))
+            ->slideOver()
+            ->modalWidth('3xl')
+            ->stickyModalHeader()
+            ->stickyModalFooter()
+            ->closeModalByClickingAway(false)
+            ->modalHeading(fn (CajaSesion $record): string => 'Turno anterior · '.$record->fecha_apertura->format('d/m/Y'))
+            ->modalDescription(fn (CajaSesion $record): string => 'Sesión #'.$record->id.' · '.$record->sucursal?->nombre.' · Apertura '.$record->fecha_apertura->format('H:i'))
+            ->modalCancelActionLabel('Salir del conteo')
+            ->modalSubmitActionLabel(fn (CajaSesion $record): string => $this->sinMovimientos($this->arqueoDe($record)) ? 'Anular turno vacío' : 'Confirmar cierre')
+            ->modalContent(fn (CajaSesion $record): View => view('filament.negocio.pages.caja.resumen-turno', [
+                'sesion' => $record,
+                'arqueo' => $this->arqueoDe($record),
+                'moneda' => $this->moneda(),
+            ]))
+            ->fillForm(fn (CajaSesion $record): array => $this->declaracionInicial($this->arqueoDe($record)))
+            ->steps(function (?CajaSesion $record): array {
+                if ($record === null) {
+                    return [];
+                }
+
+                $moneda = $this->moneda();
+                $arqueo = $this->arqueoDe($record);
+                $confirmacion = $this->sinMovimientos($arqueo)
+                    ? [Text::make('Este turno quedó sin cobros ni reembolsos y se registrará como anulado.')]
+                    : array_map(
+                        fn (MetodoPago $metodo): Text => Text::make(fn (Get $get): string => $metodo->etiqueta().' · '.$moneda.' '.$get('medios_declarados.'.$metodo->value)),
+                        MetodoPago::cases(),
+                    );
+
+                return [
+                    Step::make('Conteo')->schema($this->camposConteo($moneda, fn (): array => $arqueo)),
+                    Step::make('Confirmación')->schema($confirmacion),
+                ];
+            })
+            ->modifyWizardUsing(fn (Wizard $wizard): Wizard => $wizard->nextAction(fn (Action $action): Action => $action->label('Revisar cierre')))
+            ->action(function (CajaSesion $record, array $data): void {
+                $this->cerrarTurno($record, $data);
+            });
+    }
+
+    public function contar(int $sesionId): void
+    {
+        $this->mountAction('contarTurnoAnterior', ['sesionId' => $sesionId]);
+    }
+
+    private function turnoAnteriorPendiente(mixed $sesionId): ?CajaSesion
+    {
+        if (! is_int($sesionId) || $sesionId < 1 || auth('tenant')->id() === null) {
+            return null;
+        }
+
+        if (! array_key_exists($sesionId, $this->turnosAnteriores)) {
+            $this->turnosAnteriores[$sesionId] = CajaSesion::query()
+                ->with('sucursal')
+                ->whereKey($sesionId)
+                ->where('user_id', auth('tenant')->id())
+                ->where('estado_sesion', EstadoCajaSesion::PendienteArqueo)
+                ->first();
+        }
+
+        return $this->turnosAnteriores[$sesionId];
+    }
+
+    /** @param array<string, mixed> $data */
+    private function cerrarTurno(CajaSesion $sesion, array $data): void
     {
         $usuario = auth('tenant')->user();
-        $sesion = $this->sesionParaCerrar();
+        abort_unless($usuario instanceof TenantUser && $usuario->can('update', $sesion), 403);
 
-        abort_unless(
-            $usuario instanceof TenantUser
-            && $sesion instanceof CajaSesion
-            && $usuario->can('update', $sesion),
-            403,
-        );
-
-        $cerrada = app(CerrarCajaSesion::class)->cerrar($sesion, $this->form->getState(), $usuario);
+        $cerrada = app(CerrarCajaSesion::class)->cerrar($sesion, $data, $usuario);
         $anulada = $cerrada->estado_sesion === EstadoCajaSesion::Anulada;
 
         Notification::make()
@@ -269,10 +352,6 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
                 : 'El arqueo del turno se registró correctamente.')
             ->success()
             ->send();
-
-        $this->confirmandoCierre = false;
-        $this->sesionEnConteo = null;
-        $this->rellenarFormulario();
     }
 
     public function table(Table $table): Table
@@ -359,13 +438,19 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
      */
     public function arqueoTurno(): ?array
     {
-        $sesion = $this->sesionParaCerrar();
+        $sesion = $this->sesionActual();
 
         if (! $sesion instanceof CajaSesion) {
             return null;
         }
 
-        return app(ArqueoCajaSesion::class)->de($sesion);
+        return $this->arqueoDe($sesion);
+    }
+
+    /** @return array<string, mixed> */
+    private function arqueoDe(CajaSesion $sesion): array
+    {
+        return $this->arqueos[$sesion->id] ??= app(ArqueoCajaSesion::class)->de($sesion);
     }
 
     public function moneda(): string
@@ -397,35 +482,16 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
             ->get();
     }
 
-    public function sesionParaCerrar(): ?CajaSesion
-    {
-        if ($this->sesionEnConteo !== null) {
-            $usuario = auth('tenant')->user();
-            $pendiente = CajaSesion::query()
-                ->with('sucursal')
-                ->whereKey($this->sesionEnConteo)
-                ->where('estado_sesion', EstadoCajaSesion::PendienteArqueo)
-                ->when($usuario instanceof TenantUser, fn ($query) => $query->where('user_id', $usuario->id))
-                ->first();
-
-            if ($pendiente instanceof CajaSesion) {
-                return $pendiente;
-            }
-        }
-
-        return $this->sesionActual();
-    }
-
     public function turnoSinVentas(): bool
     {
-        $sesion = $this->sesionParaCerrar();
+        $arqueo = $this->arqueoTurno();
 
-        if (! $sesion instanceof CajaSesion) {
-            return false;
-        }
+        return $arqueo !== null && $this->sinMovimientos($arqueo);
+    }
 
-        $arqueo = app(ArqueoCajaSesion::class)->de($sesion);
-
+    /** @param array<string, mixed> $arqueo */
+    private function sinMovimientos(array $arqueo): bool
+    {
         return $arqueo['total_cobros'] === '0.00' && $arqueo['total_reembolsos'] === '0.00';
     }
 
@@ -451,7 +517,16 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
      */
     public function diferenciasPorMedio(array $declarados): array
     {
-        $arqueo = $this->arqueoTurno();
+        return $this->diferenciasDeConteo($this->arqueoTurno(), $declarados);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $arqueo
+     * @param  array<string, mixed>  $declarados
+     * @return array<string, string>
+     */
+    private function diferenciasDeConteo(?array $arqueo, array $declarados): array
+    {
         $salida = [];
 
         if ($arqueo === null) {
@@ -459,7 +534,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         }
 
         foreach ($arqueo['por_metodo'] as $fila) {
-            $dif = $this->diferenciaDeMedio($fila['metodo'], $declarados[$fila['metodo']] ?? null);
+            $dif = $this->diferenciaDeMedio($arqueo, $fila['metodo'], $declarados[$fila['metodo']] ?? null);
             $salida[$fila['metodo']] = $dif ?? '0.00';
         }
 
@@ -468,20 +543,10 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
 
     private function rellenarFormulario(): void
     {
-        $sesion = $this->sesionParaCerrar();
+        $arqueo = $this->arqueoTurno();
 
-        if ($sesion instanceof CajaSesion) {
-            $arqueo = app(ArqueoCajaSesion::class)->de($sesion);
-            $medios = [];
-
-            foreach ($arqueo['por_metodo'] as $fila) {
-                $medios[$fila['metodo']] = $fila['esperado'];
-            }
-
-            $this->form->fill([
-                'medios_declarados' => $medios,
-                'justificacion_diferencia' => null,
-            ]);
+        if ($arqueo !== null) {
+            $this->form->fill($this->declaracionInicial($arqueo));
 
             return;
         }
@@ -492,10 +557,21 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         ]);
     }
 
-    private function esperadoDeMedio(string $metodo): ?string
+    /**
+     * @param  array<string, mixed>  $arqueo
+     * @return array{medios_declarados: array<string, string>, justificacion_diferencia: null}
+     */
+    private function declaracionInicial(array $arqueo): array
     {
-        $arqueo = $this->arqueoTurno();
+        return [
+            'medios_declarados' => array_column($arqueo['por_metodo'], 'esperado', 'metodo'),
+            'justificacion_diferencia' => null,
+        ];
+    }
 
+    /** @param array<string, mixed>|null $arqueo */
+    private function esperadoDeMedio(?array $arqueo, string $metodo): ?string
+    {
         if ($arqueo === null) {
             return null;
         }
@@ -509,9 +585,10 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         return null;
     }
 
-    private function diferenciaDeMedio(string $metodo, mixed $valor): ?string
+    /** @param array<string, mixed>|null $arqueo */
+    private function diferenciaDeMedio(?array $arqueo, string $metodo, mixed $valor): ?string
     {
-        $esperado = $this->esperadoDeMedio($metodo);
+        $esperado = $this->esperadoDeMedio($arqueo, $metodo);
 
         if ($esperado === null || ! is_numeric($valor)) {
             return null;
@@ -524,24 +601,26 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         ));
     }
 
-    private function medioTieneDiferencia(string $metodo, mixed $declarados): bool
+    /** @param array<string, mixed>|null $arqueo */
+    private function medioTieneDiferencia(?array $arqueo, string $metodo, mixed $declarados): bool
     {
         if (! is_array($declarados)) {
             return false;
         }
 
-        $dif = $this->diferenciaDeMedio($metodo, $declarados[$metodo] ?? null);
+        $dif = $this->diferenciaDeMedio($arqueo, $metodo, $declarados[$metodo] ?? null);
 
         return $dif !== null && $dif !== '0.00';
     }
 
-    private function hayDiferenciaEnMedios(mixed $declarados): bool
+    /** @param array<string, mixed>|null $arqueo */
+    private function hayDiferenciaEnMedios(?array $arqueo, mixed $declarados): bool
     {
         if (! is_array($declarados)) {
             return false;
         }
 
-        foreach ($this->diferenciasPorMedio($declarados) as $diferencia) {
+        foreach ($this->diferenciasDeConteo($arqueo, $declarados) as $diferencia) {
             if ($diferencia !== '0.00') {
                 return true;
             }
