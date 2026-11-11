@@ -20,6 +20,7 @@ use App\Models\Cliente;
 use App\Models\InventarioStock;
 use App\Models\MovimientoInventario;
 use App\Models\NegocioConfiguracion;
+use App\Models\NotaCreditoDevolucion;
 use App\Models\Pago;
 use App\Models\PagoAplicacion;
 use App\Models\ProductoVariante;
@@ -89,12 +90,40 @@ class CompletarVentaContado
         return $this->registrar($data, $usuario, CondicionVenta::Contado, true);
     }
 
-    private function registrar(array $data, TenantUser $usuario, CondicionVenta $condicion, bool $reserva = false): array
+    /**
+     * @param  array{producto_variante_id: mixed, cantidad: mixed}  $linea
+     * @return array<string, mixed>
+     */
+    public function prepararReemplazo(array $linea, ?Cliente $cliente): array
+    {
+        return $this->prepararLinea(
+            ['producto_variante_id' => $linea['producto_variante_id'], 'cantidad' => $linea['cantidad']],
+            0, $this->listaPedida([], $cliente), '0', '0',
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $datos
+     * @param  list<array{origen: int, monto: string}>  $aplicaciones
+     */
+    public function completarReemplazo(array $datos, TenantUser $usuario, NotaCreditoDevolucion $nota, array $aplicaciones, string $total): Venta
+    {
+        return $this->registrar($datos, $usuario, CondicionVenta::Contado, cambio: [
+            'nota' => $nota, 'aplicaciones' => $aplicaciones, 'total' => $total,
+        ])['venta'];
+    }
+
+    /**
+     * @param  array{nota: NotaCreditoDevolucion, aplicaciones: list<array{origen: int, monto: string}>, total: string}|null  $cambio
+     */
+    private function registrar(array $data, TenantUser $usuario, CondicionVenta $condicion, bool $reserva = false, ?array $cambio = null): array
     {
         abort_unless($usuario->can('create', Venta::class), 403);
-        app(GestionarReservas::class)->procesarVencidas();
+        if ($cambio === null) {
+            app(GestionarReservas::class)->procesarVencidas();
+        }
 
-        return DB::transaction(function () use ($data, $usuario, $condicion, $reserva): array {
+        return DB::transaction(function () use ($data, $usuario, $condicion, $reserva, $cambio): array {
             $sucursalId = $this->id($data['sucursal_id'] ?? null, 'sucursal_id', 'Elegí la sucursal.');
             $almacenId = $this->id($data['almacen_id'] ?? null, 'almacen_id', 'Elegí el almacén.');
 
@@ -270,16 +299,26 @@ class CompletarVentaContado
             $base = Montos::sumar($base, bcmul($descuentoVenta['aplicado'], '-1', 2), 2);
             $total = $base;
 
+            $importeCambio = '0.00';
+            if ($cambio !== null) {
+                if ($total !== $cambio['total']) {
+                    throw ValidationException::withMessages(['cambio' => 'El precio del reemplazo cambió. Volvé a revisar la diferencia.']);
+                }
+                foreach ($cambio['aplicaciones'] as $parte) {
+                    $importeCambio = bcadd($importeCambio, $parte['monto'], 2);
+                }
+            }
+
             $pagosRaw = $data['pagos'] ?? null;
 
-            if (! is_array($pagosRaw) || ($pagosRaw === [] && $condicion === CondicionVenta::Contado && $saldoFavor === '0.00')) {
+            if (! is_array($pagosRaw) || ($pagosRaw === [] && $condicion === CondicionVenta::Contado && $saldoFavor === '0.00' && $cambio === null)) {
                 throw ValidationException::withMessages([
                     'pagos' => 'Registrá al menos un cobro.',
                 ]);
             }
 
             $pagosPreparados = [];
-            $sumaPagos = $saldoFavor;
+            $sumaPagos = bcadd($saldoFavor, $importeCambio, 2);
 
             foreach (array_values($pagosRaw) as $indice => $pago) {
                 if (! is_array($pago)) {
@@ -399,6 +438,17 @@ class CompletarVentaContado
 
             foreach ($pagosPreparados as $pagoData) {
                 $this->guardarCobro($venta, $pagoData);
+            }
+            if ($cambio !== null) {
+                foreach ($cambio['aplicaciones'] as $parte) {
+                    $origen = PagoAplicacion::query()->lockForUpdate()->findOrFail($parte['origen']);
+                    $venta->aplicacionesPago()->create([
+                        'pago_id' => $origen->pago_id, 'nota_credito_id' => $cambio['nota']->id,
+                        'aplicacion_origen_id' => $origen->id, 'monto' => $parte['monto'],
+                        'es_compensacion_cambio' => true, 'es_saldo_favor' => $origen->es_saldo_favor,
+                        'cliente_saldo_id' => $origen->cliente_saldo_id, 'reserva_saldo_origen_id' => $origen->reserva_saldo_origen_id,
+                    ]);
+                }
             }
             if ($saldoFavor !== '0.00') {
                 app(SaldoAFavorCliente::class)->aplicar($venta, $saldoFavor);

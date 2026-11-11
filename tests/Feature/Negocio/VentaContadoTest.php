@@ -19,6 +19,7 @@ use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
 use App\Filament\Negocio\Resources\OrdenCompras\Pages\ViewOrdenCompra;
 use App\Livewire\Negocio\Caja\VentasDeSesion;
 use App\Models\Almacen;
+use App\Models\CajaSesion;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
 use App\Models\Cliente;
@@ -41,6 +42,7 @@ use App\Models\TipoDocumentoIdentidad;
 use App\Models\UnidadMedida;
 use App\Models\Venta;
 use App\Ventas\AnularVenta;
+use App\Ventas\CambiarProductoVenta;
 use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
 use App\Ventas\CorregirVenta;
@@ -1125,6 +1127,133 @@ it('repone la cantidad base exacta al devolver por partes una unidad convertida'
     }
     expect(InventarioStock::query()->sole()->cantidad_actual)->toBe('5.0000');
     expect($venta->refresh()->saldoPendiente())->toBe('0.00');
+});
+
+/** @return array{venta: Venta, reemplazo: ProductoVariante, cliente: Cliente, supervisor: TenantUser, cajaOriginal: CajaSesion, caja: CajaSesion} */
+function prepararCambioDeMostrador(string $precio, bool $reembolso = false, bool $saldoFavor = false): array
+{
+    test()->travelTo(Carbon::parse('2026-11-10 10:00:00'));
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('cambio-producto');
+    NegocioConfiguracion::query()->firstOrFail()->update([
+        'acepta_devoluciones' => true, 'dias_devolucion' => 7, 'devolucion_permite_cambio' => true,
+        'devolucion_permite_reembolso' => $reembolso, 'devolucion_permite_saldo_favor' => $saldoFavor,
+    ]);
+    $reemplazo = ProductoVariante::factory()->create(['sku' => 'REPUESTO-CAMBIO', 'precio_venta' => $precio]);
+    $cliente = Cliente::factory()->personaNatural()->create();
+    cargarStock($variante, $almacen, $cajero, $ocasional, '5');
+    cargarStock($reemplazo, $almacen, $cajero, $ocasional, '3');
+    $cajaOriginal = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1', 'tipo_descuento' => 'porcentaje', 'valor_descuento' => '5']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '95']],
+    ], $cajero)['venta'];
+    $variante->update(['precio_venta' => '999']);
+    test()->travel(1)->day();
+    $caja = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '50'], $supervisor);
+
+    return compact('venta', 'reemplazo', 'cliente', 'supervisor', 'cajaOriginal', 'caja');
+}
+
+it('registra un cambio de contado y refleja solo la diferencia en la caja de hoy', function (
+    string $precio, ?string $resolucion, string $cobro, string $reembolso, string $saldo,
+) {
+    ['venta' => $venta, 'reemplazo' => $reemplazo, 'cliente' => $cliente, 'supervisor' => $supervisor, 'caja' => $caja, 'cajaOriginal' => $cajaOriginal] = prepararCambioDeMostrador($precio, $resolucion === 'reembolso', $resolucion === 'saldo_favor');
+    $lineas = [['indice' => 0, 'cantidad' => '1']];
+    $entrega = ['producto_variante_id' => $reemplazo->id, 'cantidad' => '1'];
+    $cambios = app(CambiarProductoVenta::class);
+    $resumen = $cambios->revisar($venta, $lineas, $entrega, '', $supervisor);
+
+    $datos = [
+        'lineas' => $lineas, 'reemplazo' => $entrega, 'motivo' => 'Otra medida', 'revision' => $resumen['revision'],
+        'resolucion' => $resolucion, 'cliente_saldo_id' => $resolucion === 'saldo_favor' ? $cliente->id : null,
+        'metodo_pago' => 'efectivo',
+    ];
+    $nueva = $cambios->confirmar($venta, $datos, $supervisor);
+
+    expect($venta->refresh()->cliente_id)->toBeNull();
+    expect($venta->saldoPendiente())->toBe('0.00');
+    expect($venta->cobradoNeto())->toBe('0.00');
+    expect($nueva->total)->toBe($precio);
+    expect($nueva->saldoPendiente())->toBe('0.00');
+    expect($nueva->cambioOrigen->venta_id)->toBe($venta->id);
+    expect(InventarioStock::query()->where('producto_variante_id', $venta->detalles()->sole()->producto_variante_id)->sole()->cantidad_actual)->toBe('5.0000');
+    expect(InventarioStock::query()->where('producto_variante_id', $reemplazo->id)->sole()->cantidad_actual)->toBe('2.0000');
+    $arqueo = app(ArqueoCajaSesion::class);
+    expect($arqueo->de($cajaOriginal)['total_cobros'])->toBe('95.00');
+    expect($arqueo->de($caja)['total_cobros'])->toBe($cobro);
+    expect($arqueo->de($caja)['total_reembolsos'])->toBe($reembolso);
+    expect(app(SaldoAFavorCliente::class)->disponible($cliente->id))->toBe($saldo);
+    expect(fn () => $cambios->confirmar($venta, $datos, $supervisor))->toThrow(ValidationException::class);
+    expect($venta->devoluciones()->count())->toBe(1);
+})->with([
+    'más caro' => ['110.00', null, '15.00', '0.00', '0.00'],
+    'mismo valor sin cliente' => ['95.00', null, '0.00', '0.00', '0.00'],
+    'más barato con reembolso' => ['85.00', 'reembolso', '0.00', '10.00', '0.00'],
+    'más barato con saldo de consumidor final identificado' => ['85.00', 'saldo_favor', '0.00', '0.00', '10.00'],
+]);
+
+it('rechaza un reemplazo más barato si la política solo permite cambios', function () {
+    ['venta' => $venta, 'reemplazo' => $reemplazo, 'supervisor' => $supervisor] = prepararCambioDeMostrador('85.00');
+
+    expect(fn () => app(CambiarProductoVenta::class)->revisar($venta, [['indice' => 0, 'cantidad' => '1']], [
+        'producto_variante_id' => $reemplazo->id, 'cantidad' => '1',
+    ], '', $supervisor))->toThrow(ValidationException::class, 'Elegí un reemplazo de igual o mayor valor.');
+    expect($venta->devoluciones()->count())->toBe(0);
+});
+
+it('revierte el cambio entero si el cobro de la diferencia es inválido', function () {
+    ['venta' => $venta, 'reemplazo' => $reemplazo, 'supervisor' => $supervisor, 'caja' => $caja] = prepararCambioDeMostrador('110.00');
+    $cambios = app(CambiarProductoVenta::class);
+    $lineas = [['indice' => 0, 'cantidad' => '1']];
+    $entrega = ['producto_variante_id' => $reemplazo->id, 'cantidad' => '1'];
+    $resumen = $cambios->revisar($venta, $lineas, $entrega, '', $supervisor);
+
+    expect(fn () => $cambios->confirmar($venta, [
+        'lineas' => $lineas, 'reemplazo' => $entrega, 'motivo' => 'Otra medida', 'revision' => $resumen['revision'],
+        'metodo_pago' => 'efectivo', 'efectivo_recibido' => '14.00',
+    ], $supervisor))->toThrow(ValidationException::class, 'El efectivo recibido no alcanza');
+
+    expect($venta->devoluciones()->count())->toBe(0);
+    expect(Venta::query()->count())->toBe(1);
+    expect(MovimientoInventario::query()->where('tipo_movimiento', TipoMovimientoInventario::Devolucion)->exists())->toBeFalse();
+    expect(InventarioStock::query()->where('producto_variante_id', $venta->detalles()->sole()->producto_variante_id)->sole()->cantidad_actual)->toBe('4.0000');
+    expect(app(ArqueoCajaSesion::class)->de($caja)['total_cobros'])->toBe('0.00');
+});
+
+it('confirma el cambio desde el detalle y muestra ambas piezas en el historial', function () {
+    ['venta' => $venta, 'reemplazo' => $reemplazo, 'supervisor' => $supervisor, 'cajaOriginal' => $cajaOriginal, 'caja' => $caja] = prepararCambioDeMostrador('110.00');
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $pagina = Livewire::actingAs($supervisor, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $cajaOriginal->id, 'supervision' => true]);
+    $pagina->mountAction([TestAction::make('verDetalle')->table($venta), TestAction::make('cambiarProducto')])
+        ->assertActionMounted('cambiarProducto')
+        ->fillForm([
+            'lineas' => [['indice' => 0, 'cantidad' => '1']],
+            'reemplazo' => ['producto_variante_id' => $reemplazo->id, 'cantidad' => '1'],
+            'motivo' => 'Otra medida',
+        ]);
+    $wizard = $pagina->instance()->getSchema($pagina->instance()->getMountedActionSchemaName())->getComponents()[0];
+    $pagina->call('callSchemaComponentMethod', $wizard->getKey(), 'nextStep', ['currentStepIndex' => 0])
+        ->assertDispatched('next-wizard-step')
+        ->assertSchemaStateSet(['resumen.diferencia' => '15.00'])
+        ->fillForm(['metodo_pago' => 'efectivo', 'efectivo_recibido' => '20', 'confirmado' => true])
+        ->callMountedAction()
+        ->assertNotified('Cambio registrado');
+
+    $cambio = $venta->devoluciones()->sole();
+    $nueva = $cambio->ventaReemplazo;
+    expect($nueva->aplicacionesPago()->where('es_compensacion_cambio', false)->sole()->pago->cambio_entregado)->toBe('5.00');
+    $detalle = $pagina->instance()->getMountedAction()->getModalContent()->render();
+    expect($detalle)->toContain('Cambio completado', 'Aplicado de la venta original', 'Valor del reemplazo',
+        'Todas las piezas volvieron', 'Ver reemplazo', 'Cambio registrado', 'Recibido', 'Entregado', $nueva->codigo, 'Diferencia cobrada de BOB 15.00');
+    $pagina->mountAction(TestAction::make('verReemplazo')->arguments(['nota' => $cambio->id]))->assertActionMounted('verReemplazo');
+    expect($pagina->instance()->getMountedAction()->getRecord()->is($nueva))->toBeTrue();
+
+    $cajaNueva = Livewire::actingAs($supervisor, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $caja->id, 'supervision' => true])
+        ->assertSee('Reemplazo')
+        ->mountAction([TestAction::make('verDetalle')->table($nueva), TestAction::make('verVentaOriginal')])
+        ->assertActionMounted('verVentaOriginal');
+    expect($cajaNueva->instance()->getMountedAction()->getRecord()->is($venta))->toBeTrue();
 });
 
 it('no vende sin caja abierta', function () {

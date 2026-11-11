@@ -64,6 +64,22 @@ class RegistrarDevolucion
     /** @return array<string, mixed> */
     public function revisar(Venta $venta, array $seleccion, string $resolucion, string $motivoExcepcion, TenantUser $usuario): array
     {
+        if (! in_array($resolucion, ['reembolso', 'saldo_favor'], true)) {
+            $this->rechazar('Elegí una resolución para la devolución.');
+        }
+
+        return $this->revisarOperacion($venta, $seleccion, $resolucion, $motivoExcepcion, $usuario);
+    }
+
+    /** @return array<string, mixed> */
+    public function revisarCambio(Venta $venta, array $seleccion, string $motivoExcepcion, TenantUser $usuario): array
+    {
+        return $this->revisarOperacion($venta, $seleccion, 'cambio', $motivoExcepcion, $usuario);
+    }
+
+    /** @return array<string, mixed> */
+    private function revisarOperacion(Venta $venta, array $seleccion, string $resolucion, string $motivoExcepcion, TenantUser $usuario): array
+    {
         $venta = Venta::query()->findOrFail($venta->id);
         abort_unless($usuario->can('Registrar:Devolucion') && $usuario->can('view', $venta), 403);
         if (! $venta->estaCompletada() || $venta->tipo_comprobante !== TipoComprobante::NotaVenta || ! $venta->entregada_en) {
@@ -73,8 +89,8 @@ class RegistrarDevolucion
         if (! ($politica['acepta_devoluciones'] ?? false)) {
             $this->rechazar('La política guardada en esta venta no acepta devoluciones comerciales.');
         }
-        if (! in_array($resolucion, ['reembolso', 'saldo_favor'], true) || ! ($politica['permite_'.$resolucion] ?? false)) {
-            $this->rechazar('La resolución elegida no está permitida. Los cambios por otro producto se incorporarán en otro paso.');
+        if (! ($politica['permite_'.$resolucion] ?? false)) {
+            $this->rechazar('La política guardada en esta venta no permite esta operación.');
         }
         $limite = $venta->entregada_en->copy()->setTimezone($politica['zona_horaria'])->addDays($politica['dias_devolucion'])->endOfDay();
         $fueraDePlazo = now()->greaterThan($limite);
@@ -161,30 +177,46 @@ class RegistrarDevolucion
             if ($mueveCaja && ! $caja) {
                 $this->rechazar('Abrí tu caja de hoy en la sucursal de la venta para registrar el reembolso.');
             }
-            $nota = $venta->devoluciones()->create([
-                'user_id' => $usuario->id, 'caja_sesion_id' => $mueveCaja ? $caja->id : null,
-                'motivo' => trim($motivo), 'motivo_excepcion' => $resumen['excepcion'], 'revision' => $revision,
-                'resolucion' => $resolucion, 'total' => $resumen['total'],
-                'deuda_cancelada' => $resumen['deuda'], 'importe_resuelto' => $resumen['resolver'],
-            ]);
-            $this->reingresar($venta, $nota, $resumen['lineas'], $usuario);
-            foreach ($resumen['pagos'] as $parte) {
-                $origen = PagoAplicacion::query()->with('pago')->lockForUpdate()->findOrFail($parte['origen']);
-                if ($resolucion === 'saldo_favor' || $parte['saldo_favor']) {
-                    $origen->pago->aplicaciones()->create([
-                        'venta_id' => null, 'nota_credito_id' => $nota->id, 'aplicacion_origen_id' => $origen->id,
-                        'es_saldo_favor' => true, 'monto' => $parte['monto'], 'reserva_saldo_origen_id' => $origen->reserva_saldo_origen_id,
-                    ]);
-                } else {
-                    $pago = Pago::query()->create([
-                        'cliente_id' => $venta->cliente_id, 'caja_sesion_id' => $caja->id, 'sentido' => SentidoPago::Reembolso,
-                        'metodo_pago' => $origen->pago->metodo_pago, 'monto' => $parte['monto'],
-                        'estado_pago' => EstadoPago::Aprobado, 'fecha_pago' => now(), 'registrado_por_id' => $usuario->id, 'motivo' => trim($motivo),
-                    ]);
-                    $pago->aplicaciones()->create(['venta_id' => $venta->id, 'nota_credito_id' => $nota->id, 'aplicacion_origen_id' => $origen->id, 'monto' => $parte['monto']]);
-                }
-            }
+            $this->guardar($venta, $resumen, $motivo, $usuario, $mueveCaja ? $caja : null);
         }, attempts: 3);
+    }
+
+    /**
+     * Persiste una revisión vigente dentro de la transacción que bloqueó la venta.
+     *
+     * @param  array<string, mixed>  $resumen
+     */
+    public function guardar(Venta $venta, array $resumen, string $motivo, TenantUser $usuario, ?CajaSesion $caja, ?int $clienteSaldoId = null): NotaCreditoDevolucion
+    {
+        $nota = $venta->devoluciones()->create([
+            'user_id' => $usuario->id, 'caja_sesion_id' => $caja?->id,
+            'motivo' => trim($motivo), 'motivo_excepcion' => $resumen['excepcion'], 'revision' => $resumen['revision'],
+            'resolucion' => $resumen['resolucion'], 'total' => $resumen['total'],
+            'deuda_cancelada' => $resumen['deuda'], 'importe_resuelto' => $resumen['resolver'],
+        ]);
+        $this->reingresar($venta, $nota, $resumen['lineas'], $usuario);
+
+        foreach ($resumen['pagos'] as $parte) {
+            $origen = PagoAplicacion::query()->with('pago')->lockForUpdate()->findOrFail($parte['origen']);
+            $vinculo = ['nota_credito_id' => $nota->id, 'aplicacion_origen_id' => $origen->id, 'monto' => $parte['monto']];
+
+            if ($resumen['resolucion'] === 'saldo_favor' || $parte['saldo_favor']) {
+                $origen->pago->aplicaciones()->create([
+                    ...$vinculo, 'venta_id' => null, 'es_saldo_favor' => true,
+                    'reserva_saldo_origen_id' => $origen->reserva_saldo_origen_id,
+                    'cliente_saldo_id' => $clienteSaldoId ?? $origen->cliente_saldo_id,
+                ]);
+            } else {
+                $pago = Pago::query()->create([
+                    'cliente_id' => $venta->cliente_id, 'caja_sesion_id' => $caja->id, 'sentido' => SentidoPago::Reembolso,
+                    'metodo_pago' => $origen->pago->metodo_pago, 'monto' => $parte['monto'],
+                    'estado_pago' => EstadoPago::Aprobado, 'fecha_pago' => now(), 'registrado_por_id' => $usuario->id, 'motivo' => trim($motivo),
+                ]);
+                $pago->aplicaciones()->create([...$vinculo, 'venta_id' => $venta->id]);
+            }
+        }
+
+        return $nota;
     }
 
     /** @param list<array<string,mixed>> $lineas */

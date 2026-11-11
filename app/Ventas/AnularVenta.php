@@ -40,6 +40,9 @@ class AnularVenta
 
             $venta = Venta::query()->lockForUpdate()->findOrFail($venta->id);
             abort_unless($usuario->can('anular', $venta), 403);
+            if ($venta->cambioOrigen()->exists()) {
+                throw ValidationException::withMessages(['venta' => 'Esta venta corresponde a un reemplazo. Revisá las opciones de cambio o devolución desde su detalle.']);
+            }
             if ($venta->devoluciones()->exists()) {
                 throw ValidationException::withMessages(['venta' => 'Esta venta tiene devoluciones. Usá el flujo de devolución para los productos restantes.']);
             }

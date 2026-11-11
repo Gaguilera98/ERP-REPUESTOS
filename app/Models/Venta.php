@@ -147,13 +147,18 @@ class Venta extends Model
         return $this->hasMany(NotaCreditoDevolucion::class);
     }
 
+    public function cambioOrigen(): HasOne
+    {
+        return $this->hasOne(NotaCreditoDevolucion::class, 'venta_reemplazo_id');
+    }
+
     public function cobradoNeto(): string
     {
         $pagos = $this->aplicacionesPago()->with(['pago', 'usos'])
             ->whereHas('pago', fn ($query) => $query->where('estado_pago', EstadoPago::Aprobado))->get();
 
         return $pagos->reduce(function (string $total, PagoAplicacion $aplicacion): string {
-            $restituido = $aplicacion->usos->filter(fn (PagoAplicacion $uso): bool => $uso->es_saldo_favor && $uso->venta_id === null)
+            $restituido = $aplicacion->usos->filter(fn (PagoAplicacion $uso): bool => $uso->trasladaImporteDeLaVenta())
                 ->reduce(fn (string $suma, PagoAplicacion $uso): string => bcadd($suma, $uso->monto, 2), '0.00');
             $monto = bcsub($aplicacion->monto, $restituido, 2);
 

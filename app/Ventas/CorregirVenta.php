@@ -45,6 +45,9 @@ class CorregirVenta
     /** @return array{lineas: list<array<string,mixed>>, total: string, cobrado: string, saldo: string, cobrar: string, devolver: string, reembolsos: list<array{origen: int, metodo: string, monto: string}>, cambios: list<array{variante: int, sku: string, cantidad: string, costo: ?string}>} */
     public function revisar(Venta $venta, array $edicion): array
     {
+        if ($venta->cambioOrigen()->exists()) {
+            throw ValidationException::withMessages(['lineas' => 'Esta venta corresponde a un reemplazo. Revisá las opciones de cambio o devolución desde su detalle.']);
+        }
         if ($venta->devoluciones()->exists()) {
             throw ValidationException::withMessages(['lineas' => 'Esta venta tiene devoluciones. Registrá otra devolución para los productos restantes.']);
         }
@@ -310,6 +313,7 @@ class CorregirVenta
         if ($sentido === SentidoPago::Reembolso && $aplicacion?->es_saldo_favor) {
             $aplicacion->usos()->create([
                 'pago_id' => $aplicacion->pago_id, 'venta_id' => null, 'es_saldo_favor' => true,
+                'cliente_saldo_id' => $aplicacion->cliente_saldo_id,
                 'reserva_saldo_origen_id' => $aplicacion->reserva_saldo_origen_id, 'monto' => $monto,
             ]);
 

@@ -24,8 +24,10 @@ class SaldoAFavorCliente
     {
         return PagoAplicacion::query()->whereNull('venta_id')
             ->where(fn (Builder $query): Builder => $query->whereNull('nota_credito_id')->orWhere('es_saldo_favor', true))
-            ->whereHas('pago', fn (Builder $query): Builder => $query->where('cliente_id', $clienteId)
-                ->where('sentido', SentidoPago::Cobro)->where('estado_pago', EstadoPago::Aprobado));
+            ->where(fn (Builder $query): Builder => $query->where('cliente_saldo_id', $clienteId)
+                ->orWhere(fn (Builder $historico): Builder => $historico->whereNull('cliente_saldo_id')
+                    ->whereHas('pago', fn (Builder $pago): Builder => $pago->where('cliente_id', $clienteId))))
+            ->whereHas('pago', fn (Builder $query): Builder => $query->where('sentido', SentidoPago::Cobro)->where('estado_pago', EstadoPago::Aprobado));
     }
 
     public function disponible(int $clienteId): string
@@ -65,6 +67,7 @@ class SaldoAFavorCliente
                 $venta->aplicacionesPago()->create([
                     'pago_id' => $origen->pago_id, 'aplicacion_origen_id' => $origen->id,
                     'es_saldo_favor' => true, 'monto' => $importe,
+                    'cliente_saldo_id' => $origen->cliente_saldo_id,
                     'reserva_saldo_origen_id' => $origen->reserva_saldo_origen_id,
                 ]);
                 $monto = bcsub($monto, $importe, 2);

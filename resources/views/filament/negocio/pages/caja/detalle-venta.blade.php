@@ -13,8 +13,17 @@
         ->reduce(fn (string $total, $aplicacion) => $aplicacion->usos
             ->filter(fn ($uso) => $uso->venta_id === null && $uso->es_saldo_favor)
             ->reduce(fn (string $suma, $uso) => bcadd($suma, $uso->monto, 2), $total), '0.00');
-    $pagado = bcsub(bcsub($cobrado, $saldoRestituido, 2), $reembolsado, 2);
+    $trasladadoAlReemplazo = $venta->aplicacionesPago
+        ->reduce(fn (string $total, $aplicacion) => $aplicacion->usos
+            ->filter(fn ($uso) => $uso->es_compensacion_cambio)
+            ->reduce(fn (string $suma, $uso) => bcadd($suma, $uso->monto, 2), $total), '0.00');
+    $pagado = bcsub(bcsub(bcsub($cobrado, $saldoRestituido, 2), $reembolsado, 2), $trasladadoAlReemplazo, 2);
     $hayDevoluciones = $venta->devoluciones->isNotEmpty();
+    $cambios = $venta->devoluciones->filter(fn ($nota) => $nota->ventaReemplazo !== null);
+    $hayCambios = $cambios->isNotEmpty();
+    $devolucionesSinCambio = $venta->devoluciones->whereNull('venta_reemplazo_id');
+    $soloCambios = $hayCambios && $devolucionesSinCambio->isEmpty() && ! $venta->ultimaCorreccion;
+    $sinProductosTrasCambio = $hayCambios && collect($productosTrasDevoluciones)->every(fn ($linea) => bccomp($linea['disponible'], '0', 4) === 0);
     $mostrarMovimientos = $venta->ultimaCorreccion || $hayDevoluciones || bccomp($reembolsado, '0', 2) > 0;
     $lineasActuales = collect($venta->ultimaCorreccion?->lineas ?? []);
 @endphp
@@ -23,12 +32,70 @@
     <div class="flex flex-wrap items-center justify-between gap-3">
         <p class="text-sm font-medium text-gray-950 dark:text-white">{{ $venta->created_at?->format('d/m/Y H:i') }}</p>
         <div class="flex flex-wrap gap-2">
-            @if ($hayDevoluciones)
+            @if ($hayDevoluciones && ! $hayCambios)
                 <x-filament::badge color="warning">{{ collect($productosTrasDevoluciones)->every(fn ($linea) => bccomp($linea['disponible'], '0', 4) === 0) ? 'Devolución total' : 'Devolución parcial' }}</x-filament::badge>
             @endif
             <x-filament::badge :color="$colorEstado">{{ $venta->estado->etiqueta() }}</x-filament::badge>
         </div>
     </div>
+    @if ($venta->cambioOrigen?->ventaOriginal)
+        <section class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-200 bg-primary-50/50 p-4 dark:border-primary-400/30 dark:bg-primary-400/10">
+            <div>
+                <h3 class="font-semibold text-gray-950 dark:text-white">Nota de reemplazo</h3>
+                <p class="text-sm text-gray-600 dark:text-gray-300">Parte del cambio de la venta {{ $venta->cambioOrigen->ventaOriginal->codigo }}.</p>
+            </div>
+            {{ $accionDetalle?->getModalAction('verVentaOriginal') }}
+        </section>
+    @endif
+    @foreach ($cambios as $cambio)
+        @php
+            $reemplazo = $cambio->ventaReemplazo;
+            $aplicado = bcsub($cambio->total, $cambio->importe_resuelto, 2);
+            $diferencia = bcsub($reemplazo->total, $cambio->total, 2);
+            $reembolsoCambio = $venta->aplicacionesPago
+                ->where('nota_credito_id', $cambio->id)
+                ->filter(fn ($aplicacion) => $aplicacion->pago?->estado_pago === EstadoPago::Aprobado && $aplicacion->pago?->sentido === SentidoPago::Reembolso)
+                ->reduce(fn (string $total, $aplicacion) => bcadd($total, $aplicacion->monto, 2), '0.00');
+            $saldoCambio = bcsub($cambio->importe_resuelto, $reembolsoCambio, 2);
+        @endphp
+        <section class="space-y-4 rounded-lg border border-primary-200 bg-primary-50/50 p-4 dark:border-primary-400/30 dark:bg-primary-400/10">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h3 class="font-semibold text-gray-950 dark:text-white">Cambio completado</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-300">{{ $cambio->created_at?->format('d/m/Y H:i') }} · Reemplazo {{ $reemplazo->codigo }}</p>
+                </div>
+                {{ $accionDetalle?->getModalAction('verReemplazo')?->__invoke(['nota' => $cambio->id]) }}
+            </div>
+            <dl class="grid grid-cols-1 gap-3 border-t border-primary-200 pt-3 text-sm sm:grid-cols-3 dark:border-primary-400/20">
+                <div>
+                    <dt class="text-gray-600 dark:text-gray-300">Aplicado de la venta original</dt>
+                    <dd class="text-base font-semibold tabular-nums">{{ $moneda }} {{ $aplicado }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-600 dark:text-gray-300">Valor del reemplazo</dt>
+                    <dd class="text-base font-semibold tabular-nums">{{ $moneda }} {{ $reemplazo->total }}</dd>
+                </div>
+                <div>
+                    @if (bccomp($diferencia, '0', 2) > 0)
+                        <dt class="text-gray-600 dark:text-gray-300">Diferencia cobrada</dt>
+                        <dd class="text-base font-semibold tabular-nums">{{ $moneda }} {{ $diferencia }}</dd>
+                    @elseif ($diferencia === '0.00')
+                        <dt class="text-gray-600 dark:text-gray-300">Diferencia</dt>
+                        <dd class="text-base font-semibold">Sin diferencia</dd>
+                    @else
+                        @if (bccomp($reembolsoCambio, '0', 2) > 0)
+                            <dt class="text-gray-600 dark:text-gray-300">Diferencia reembolsada</dt>
+                            <dd class="text-base font-semibold tabular-nums">{{ $moneda }} {{ $reembolsoCambio }}</dd>
+                        @endif
+                        @if (bccomp($saldoCambio, '0', 2) > 0)
+                            <dt class="text-gray-600 dark:text-gray-300">Saldo a favor</dt>
+                            <dd class="text-base font-semibold tabular-nums">{{ $moneda }} {{ $saldoCambio }}</dd>
+                        @endif
+                    @endif
+                </div>
+            </dl>
+        </section>
+    @endforeach
     @if ($venta->estado === \App\Enums\EstadoVenta::Reserva)
         <p class="text-sm text-gray-600 dark:text-gray-300">Reserva vigente hasta {{ $venta->vence_en?->format('d/m/Y H:i') }}.</p>
     @elseif ($venta->estado === \App\Enums\EstadoVenta::Vencida)
@@ -42,7 +109,7 @@
     @if (isset($saldoSenaDisponible))
         <p class="text-sm font-semibold">Saldo disponible de esta seña · {{ $moneda }} {{ $saldoSenaDisponible }}</p>
     @endif
-    @if (bccomp($reembolsado, '0', 2) > 0)
+    @if (! $soloCambios && bccomp($reembolsado, '0', 2) > 0)
         <div class="flex items-start gap-3 rounded-lg border border-warning-300 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-400/30 dark:bg-warning-400/10 dark:text-warning-300">
             <x-filament::icon icon="heroicon-o-arrow-uturn-left" class="mt-0.5 size-5 shrink-0" />
             <p><span class="font-semibold">Reembolso registrado · {{ $moneda }} {{ $reembolsado }}</span><br>Consultá los movimientos y sus fechas en los pagos de la venta.</p>
@@ -52,7 +119,7 @@
         <div class="contents md:block md:min-w-0 md:space-y-5">
     @if ($hayDevoluciones)
         <section class="order-3 rounded-lg border border-gray-200 p-4 dark:border-white/10">
-            <h3 class="mb-3 font-semibold">Productos después de las devoluciones</h3>
+            <h3 class="mb-3 font-semibold">{{ $hayCambios ? 'Productos que quedaron en esta nota' : 'Productos después de las devoluciones' }}</h3>
             <div class="overflow-x-auto">
                 <table class="caja-resumen-table w-full text-sm">
                     <thead class="bg-primary-50 text-gray-500 dark:bg-primary-400/10 dark:text-gray-400"><tr><th scope="col" class="px-2 py-2 text-start">Producto</th><th scope="col" class="px-2 py-2">Vendido</th><th scope="col" class="px-2 py-2">Devuelto</th><th scope="col" class="px-2 py-2">Conserva</th></tr></thead>
@@ -223,24 +290,26 @@
                     @php($pago = $aplicacion->pago)
                     <tr @class(['border-b border-gray-100 text-gray-950 dark:border-white/10 dark:text-white', 'bg-warning-50 dark:bg-warning-400/10' => $pago?->sentido === SentidoPago::Reembolso])>
                         <td class="px-2 py-3">
-                            {{ $aplicacion->es_saldo_favor ? 'Saldo a favor' : ($pago?->metodo_pago?->etiqueta() ?? '—') }}
-                            @if (filled($pago?->numero_referencia_banco) || filled($pago?->qr_id_transaccion_banco))
+                            {{ $aplicacion->es_compensacion_cambio ? 'Cambio de producto' : ($aplicacion->es_saldo_favor ? 'Saldo a favor' : ($pago?->metodo_pago?->etiqueta() ?? '—')) }}
+                            @if (! $aplicacion->es_compensacion_cambio && (filled($pago?->numero_referencia_banco) || filled($pago?->qr_id_transaccion_banco)))
                                 <p class="text-xs text-gray-500 dark:text-gray-400">Ref. {{ $pago->numero_referencia_banco ?? $pago->qr_id_transaccion_banco }}</p>
                             @endif
                         </td>
-                        <td data-label="Fecha y hora" class="px-2 py-3">{{ ($aplicacion->es_saldo_favor ? $aplicacion->created_at : $pago?->fecha_pago)?->format('d/m/Y H:i') ?? '—' }}</td>
+                        <td data-label="Fecha y hora" class="px-2 py-3">{{ ($aplicacion->es_saldo_favor || $aplicacion->es_compensacion_cambio ? $aplicacion->created_at : $pago?->fecha_pago)?->format('d/m/Y H:i') ?? '—' }}</td>
                         <td data-label="Movimiento" class="px-2 py-3">
-                            @if ($aplicacion->es_saldo_favor)
+                            @if ($aplicacion->es_compensacion_cambio)
+                                Valor de la pieza devuelta
+                            @elseif ($aplicacion->es_saldo_favor)
                                 Saldo aplicado
                             @elseif ($pago?->sentido === SentidoPago::Reembolso)
                                 <x-filament::badge color="warning">Reembolso</x-filament::badge>
                             @else
                                 {{ $pago?->sentido?->etiqueta() ?? '—' }}
                             @endif
-                            @if (! $aplicacion->es_saldo_favor && $pago?->caja_sesion_id)
+                            @if (! $aplicacion->es_compensacion_cambio && ! $aplicacion->es_saldo_favor && $pago?->caja_sesion_id)
                                 <p>Sesión #{{ $pago->caja_sesion_id }}</p>
                             @endif
-                            @if (filled($pago?->motivo))
+                            @if (! $aplicacion->es_compensacion_cambio && filled($pago?->motivo))
                                 <p class="text-xs text-gray-500 dark:text-gray-400">{{ $pago->motivo }}</p>
                                 <p class="text-xs text-gray-500 dark:text-gray-400">{{ $pago->registradoPor?->name ?? '—' }}</p>
                             @endif
@@ -252,7 +321,7 @@
                         </td>
                         <td data-label="Monto aplicado" class="px-2 py-3 text-end font-semibold tabular-nums">
                             {{ $pago?->sentido === SentidoPago::Reembolso ? '−' : '+' }} {{ $moneda }} {{ $aplicacion->monto }}
-                            @if (! $aplicacion->es_saldo_favor && $pago?->efectivo_recibido !== null)
+                            @if (! $aplicacion->es_compensacion_cambio && ! $aplicacion->es_saldo_favor && $pago?->efectivo_recibido !== null)
                                 <p class="text-xs font-normal text-gray-500 dark:text-gray-400">Recibido: {{ $moneda }} {{ $pago->efectivo_recibido }}</p>
                                 <p class="text-xs font-normal text-gray-500 dark:text-gray-400">Cambio: {{ $moneda }} {{ $pago->cambio_entregado }}</p>
                             @endif
@@ -280,18 +349,23 @@
         </div>
         <aside class="contents md:block md:space-y-5 md:rounded-lg md:border md:border-primary-200 md:bg-primary-50/50 md:p-4 dark:md:border-primary-400/30 dark:md:bg-primary-400/10">
             <div class="order-1 rounded-lg border border-primary-200 bg-primary-50/50 p-4 md:border-0 md:bg-transparent md:p-0 dark:border-primary-400/30 dark:bg-primary-400/10 dark:md:bg-transparent">
-                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ $venta->ultimaCorreccion || $hayDevoluciones ? 'Total actual de la venta' : 'Total de la venta' }}</p>
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ $hayCambios ? 'Productos de esta nota' : ($venta->ultimaCorreccion || $hayDevoluciones ? 'Total actual de la venta' : 'Total de la venta') }}</p>
                 @if (isset($saldoPendiente) && ! $mostrarMovimientos)
                     <p class="mt-2 text-sm font-medium">Saldo pendiente: {{ $moneda }} {{ $saldoPendiente }}</p>
                 @endif
-                <p class="mt-1 text-2xl font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $venta->totalVigente() }}</p>
+                @if ($sinProductosTrasCambio)
+                    <p class="mt-1 font-semibold text-gray-950 dark:text-white">Todas las piezas volvieron</p>
+                @else
+                    <p class="mt-1 text-2xl font-bold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $venta->totalVigente() }}</p>
+                @endif
             </div>
+        @if (! $soloCambios)
         <div class="order-4 space-y-5 rounded-lg border border-gray-200 p-4 md:border-0 md:p-0 dark:border-white/10">
             <h3 class="font-semibold text-gray-950 md:sr-only dark:text-white">Resumen</h3>
     <dl class="w-full space-y-2 text-sm">
         @if ($mostrarMovimientos)
-            @if ($hayDevoluciones)
-                <div class="flex items-center justify-between gap-4 text-warning-600 dark:text-warning-400"><dt>Valor de productos devueltos</dt><dd>{{ $moneda }} {{ $venta->devoluciones->sum('total') }}</dd></div>
+            @if ($devolucionesSinCambio->isNotEmpty())
+                <div class="flex items-center justify-between gap-4 text-warning-600 dark:text-warning-400"><dt>Valor de productos devueltos</dt><dd>{{ $moneda }} {{ Montos::dos((string) $devolucionesSinCambio->sum('total')) }}</dd></div>
             @endif
             @if (bccomp($reembolsado, '0', 2) > 0 || bccomp($saldoRestituido, '0', 2) > 0)
             <div class="flex items-center justify-between gap-4">
@@ -333,6 +407,7 @@
 </dl>
 
         </div>
+        @endif
         </aside>
     </div>
 </div>

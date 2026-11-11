@@ -87,16 +87,19 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                         ->when(! $this->supervision, fn (Builder $query): Builder => $query->where('user_id', auth('tenant')->id()));
 
                     $ventas->whereHas('cajaSesion', $sesion)->orWhereHas('aplicacionesPago', fn (Builder $aplicaciones): Builder => $aplicaciones
-                        ->where('es_saldo_favor', false)->whereHas('pago.cajaSesion', $sesion));
+                        ->where('es_saldo_favor', false)->where('es_compensacion_cambio', false)->whereHas('pago.cajaSesion', $sesion));
                 }))
             ->defaultSort('created_at', 'desc')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('ultimaCorreccion')->withSum('devoluciones as total_devuelto', 'total'))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('ultimaCorreccion')
+                ->withSum('devoluciones as total_devuelto', 'total')
+                ->withExists(['cambioOrigen', 'devoluciones as tiene_cambios' => fn (Builder $notas): Builder => $notas->whereNotNull('venta_reemplazo_id')]))
             ->queryStringIdentifier($enMostrador ? 'misVentasMostrador' : 'ventasDeSesion')
             ->defaultPaginationPageOption(10)
             ->paginationPageOptions([10, 25, 50])
             ->searchPlaceholder($enMostrador ? 'Buscar por código o cliente' : 'Buscar por código de venta')
             ->columns([
-                TextColumn::make('codigo')->label('Venta')->searchable()->extraCellAttributes(['data-label' => 'Venta']),
+                TextColumn::make('codigo')->label('Venta')->searchable()->extraCellAttributes(['data-label' => 'Venta'])
+                    ->description(fn (Venta $record): ?string => $record->cambio_origen_exists ? 'Reemplazo' : null),
                 TextColumn::make('created_at')->label('Fecha y hora')->extraCellAttributes(['data-label' => 'Fecha y hora'])->dateTime('d/m/Y H:i'),
                 TextColumn::make('cliente.razon_social')->label('Cliente')->placeholder('Consumidor final')->searchable()->visible($enMostrador)->extraCellAttributes(['data-label' => 'Cliente']),
                 TextColumn::make('condicion')->label('Condición')->formatStateUsing(fn (CondicionVenta $state): string => $state->etiqueta())->visible($enMostrador)->extraCellAttributes(['data-label' => 'Condición']),
@@ -106,7 +109,12 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     ->extraCellAttributes(['data-label' => 'Estado']),
                 TextColumn::make('total')->label('Total')->extraCellAttributes(['data-label' => 'Total'])
                     ->state(fn (Venta $record): string => $enMostrador ? $record->totalVigente() : $record->total)
-                    ->description(fn (Venta $record): ?string => bccomp((string) ($record->total_devuelto ?? '0'), '0', 2) > 0 ? 'Con devolución' : ($record->ultimaCorreccion ? 'Con corrección' : null))
+                    ->description(fn (Venta $record): ?string => match (true) {
+                        (bool) $record->tiene_cambios => 'Con cambio de producto',
+                        bccomp((string) ($record->total_devuelto ?? '0'), '0', 2) > 0 => 'Con devolución',
+                        $record->ultimaCorreccion !== null => 'Con corrección',
+                        default => null,
+                    })
                     ->money(NegocioConfiguracion::codigoMoneda()),
             ])
             ->filters($enMostrador ? [
@@ -139,7 +147,15 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
             ->recordActions([
                 app(AccionVerDetalleVenta::class)->crear()
                     ->extraModalFooterActions(fn (Venta $record): array => [
-                        ...$this->accionesAbono($record), $this->accionReembolsarSena($record), $this->accionEntregarReserva($record), $this->accionAmpliarReserva($record), $this->accionCancelarReserva($record), app(AccionDevolverVenta::class)->para($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
+                        ...$this->accionesAbono($record),
+                        $this->accionReembolsarSena($record),
+                        $this->accionEntregarReserva($record),
+                        $this->accionAmpliarReserva($record),
+                        $this->accionCancelarReserva($record),
+                        app(AccionCambiarProducto::class)->para($record),
+                        app(AccionDevolverVenta::class)->para($record),
+                        app(AccionCorregirVenta::class)->para($record),
+                        $this->accionAnular($record),
                     ]),
             ])
             ->emptyStateHeading($enMostrador ? 'No hay ventas para esta consulta' : 'Esta sesión no tiene ventas registradas');
@@ -151,7 +167,8 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
             ->label('Anular venta')
             ->color('danger')
             ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('anular', $venta))
-            ->visible(fn (): bool => $venta->estaCompletada() && $venta->tipo_comprobante === TipoComprobante::NotaVenta && ! $venta->devoluciones()->exists())
+            ->visible(fn (): bool => $venta->estaCompletada() && $venta->tipo_comprobante === TipoComprobante::NotaVenta
+                && ! $venta->devoluciones()->exists() && ! $venta->cambioOrigen()->exists())
             ->modalHeading('Anular venta · '.$venta->codigo)
             ->modalDescription(function () use ($venta): string {
                 $moneda = NegocioConfiguracion::codigoMoneda();

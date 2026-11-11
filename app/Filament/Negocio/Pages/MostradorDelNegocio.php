@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Pages;
 
+use App\Livewire\Negocio\Caja\AccionCambiarProducto;
 use App\Livewire\Negocio\Caja\AccionVerDetalleVenta;
 use App\Livewire\Negocio\Venta\Concerns\ManejaMostrador;
 use App\Models\TenantUser;
@@ -83,6 +84,7 @@ class MostradorDelNegocio extends Page
 
         return app(AccionVerDetalleVenta::class)->crear('detalleUltimaVenta')
             ->record($venta)
+            ->extraModalFooterActions(fn (Venta $record): array => [app(AccionCambiarProducto::class)->para($record)])
             ->disabled($venta === null);
     }
 

@@ -19,9 +19,9 @@ use Illuminate\Support\Facades\DB;
 
 class AccionVerDetalleVenta
 {
-    public function crear(string $nombre = 'verDetalle'): Action
+    public function crear(string $nombre = 'verDetalle', bool $conNotasVinculadas = true): Action
     {
-        return Action::make($nombre)
+        $accion = Action::make($nombre)
             ->label('Ver detalle')
             ->icon(Heroicon::OutlinedEye)
             ->authorize(fn (?Venta $record): bool => $record !== null && (bool) auth('tenant')->user()?->can('view', $record))
@@ -32,10 +32,46 @@ class AccionVerDetalleVenta
             ->stickyModalFooter()
             ->modalSubmitAction(false)
             ->modalCancelActionLabel('Cerrar')
-            ->modalContent(fn (Venta $record): View => $this->vista($record));
+            ->modalContent(fn (Venta $record, Action $action): View => $this->vista($record, $conNotasVinculadas ? $action : null));
+
+        if ($conNotasVinculadas) {
+            $accion->registerModalActions([
+                $this->accionVinculada('verReemplazo', 'Ver reemplazo'),
+                $this->accionVinculada('verVentaOriginal', 'Ver venta original'),
+            ]);
+        }
+
+        return $accion;
     }
 
-    private function vista(Venta $record): View
+    private function accionVinculada(string $nombre, string $etiqueta): Action
+    {
+        return $this->crear($nombre, conNotasVinculadas: false)
+            ->label($etiqueta)->color('gray')
+            ->record(fn (Action $action): ?Venta => $this->ventaVinculada($action))
+            ->authorize(function (Action $action): bool {
+                $venta = $this->ventaVinculada($action);
+
+                return $venta !== null && (bool) auth('tenant')->user()?->can('view', $venta);
+            });
+    }
+
+    private function ventaVinculada(Action $accion): ?Venta
+    {
+        $venta = $accion->getParentAction()?->getRecord();
+        if (! $venta instanceof Venta) {
+            return null;
+        }
+        if ($accion->getName() === 'verVentaOriginal') {
+            return $venta->cambioOrigen?->ventaOriginal;
+        }
+
+        $notaId = $accion->getArguments()['nota'] ?? null;
+
+        return is_int($notaId) ? $venta->devoluciones->find($notaId)?->ventaReemplazo : null;
+    }
+
+    private function vista(Venta $record, ?Action $accion): View
     {
         abort_unless(auth('tenant')->user()?->can('view', $record), 403);
 
@@ -47,6 +83,9 @@ class AccionVerDetalleVenta
             'ultimaCorreccion',
             'devoluciones.detalles',
             'devoluciones.usuario',
+            'devoluciones.ventaReemplazo.detalles.variante.productoMaestro',
+            'devoluciones.ventaReemplazo.detalles.unidad',
+            'cambioOrigen.ventaOriginal',
             'sucursal',
             'almacen',
             'detalles.variante.productoMaestro.unidadBase',
@@ -69,6 +108,7 @@ class AccionVerDetalleVenta
 
         return view('filament.negocio.pages.caja.detalle-venta', [
             'venta' => $record,
+            'accionDetalle' => $accion,
             'productosTrasDevoluciones' => $record->devoluciones->isNotEmpty() ? app(RegistrarDevolucion::class)->disponibles($record) : [],
             'historialVenta' => app(HistorialDeVenta::class)->eventos($record, $ampliaciones, $moneda),
             'moneda' => $moneda,

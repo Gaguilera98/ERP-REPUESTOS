@@ -36,7 +36,7 @@ class AccionDevolverVenta
                 || (! ($venta->politica_devolucion_snapshot['permite_reembolso'] ?? false) && ! ($venta->politica_devolucion_snapshot['permite_saldo_favor'] ?? false)))
             ->tooltip(fn (): ?string => ! ($venta->politica_devolucion_snapshot['acepta_devoluciones'] ?? false)
                 ? 'La política guardada en esta venta no acepta devoluciones comerciales.'
-                : ((! ($venta->politica_devolucion_snapshot['permite_reembolso'] ?? false) && ! ($venta->politica_devolucion_snapshot['permite_saldo_favor'] ?? false)) ? 'Esta venta solo permite cambio por otro producto. Ese flujo todavía está pendiente.' : null))
+                : ((! ($venta->politica_devolucion_snapshot['permite_reembolso'] ?? false) && ! ($venta->politica_devolucion_snapshot['permite_saldo_favor'] ?? false)) ? 'Esta venta solo permite cambio por otro producto.' : null))
             ->modalHeading('Devolver productos · '.$venta->codigo)->modalWidth('4xl')
             ->modalDescription('Solo piezas recibidas en buen estado, que volverán al almacén original. Indicá 0 en los productos que no devuelve.')
             ->modalSubmitActionLabel('Confirmar devolución')
@@ -62,7 +62,7 @@ class AccionDevolverVenta
                             'reembolso' => ($politica['permite_reembolso'] ?? false) ? 'Reembolso por los métodos originales' : null,
                             'saldo_favor' => ($politica['permite_saldo_favor'] ?? false) ? 'Saldo a favor del cliente' : null,
                         ], fn ($valor): bool => $valor !== null);
-                    })->helperText('En crédito primero se reduce la deuda. Lo pagado con saldo a favor se restituye como saldo. El cambio por otro producto se incorporará después.'),
+                    })->helperText('En crédito primero se reduce la deuda. Lo pagado con saldo a favor se restituye como saldo.'),
                     Textarea::make('motivo')->label('Motivo de la devolución')->trim()->required()->maxLength(500),
                     Textarea::make('motivo_excepcion')->label('Motivo de la excepción al plazo')->trim()->maxLength(500)
                         ->helperText('Solo se usa si el plazo venció y tenés autorización para exceptuarlo.')

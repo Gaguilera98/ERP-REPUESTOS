@@ -18,6 +18,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'aplicacion_origen_id',
     'monto',
     'es_saldo_favor',
+    'es_compensacion_cambio',
+    'cliente_saldo_id',
     'reserva_saldo_origen_id',
 ])]
 class PagoAplicacion extends Model
@@ -35,6 +37,7 @@ class PagoAplicacion extends Model
         return [
             'monto' => 'decimal:2',
             'es_saldo_favor' => 'boolean',
+            'es_compensacion_cambio' => 'boolean',
         ];
     }
 
@@ -56,5 +59,10 @@ class PagoAplicacion extends Model
     public function usos(): HasMany
     {
         return $this->hasMany(self::class, 'aplicacion_origen_id');
+    }
+
+    public function trasladaImporteDeLaVenta(): bool
+    {
+        return $this->es_compensacion_cambio || ($this->es_saldo_favor && $this->venta_id === null);
     }
 }

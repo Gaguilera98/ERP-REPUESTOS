@@ -45,6 +45,21 @@ class HistorialDeVenta
 
         foreach ($venta->devoluciones as $devolucion) {
             $detalles = $devolucion->detalles->map(fn (NotaCreditoDetalle $linea): string => trim(Montos::sinCeros($linea->cantidad).' '.($linea->linea_snapshot['unidad'] ?? '')).' · '.$linea->linea_snapshot['sku'])->all();
+            $reemplazo = $devolucion->ventaReemplazo;
+            if ($reemplazo !== null) {
+                $detalles = array_map(fn (string $detalle): string => 'Recibido · '.$detalle, $detalles);
+                foreach ($reemplazo->detalles as $linea) {
+                    $detalles[] = 'Entregado · '.Montos::sinCeros($linea->cantidad).' '.$linea->unidad?->simbolo
+                        .' · '.$linea->variante?->sku.' · '.$linea->variante?->productoMaestro?->nombre;
+                }
+                $detalles[] = 'Nota del reemplazo · '.$reemplazo->codigo;
+                $diferencia = bcsub($reemplazo->total, $devolucion->total, 2);
+                if (bccomp($diferencia, '0', 2) > 0) {
+                    $detalles[] = "Diferencia cobrada de {$moneda} {$diferencia}";
+                } elseif ($diferencia === '0.00') {
+                    $detalles[] = 'Sin diferencia de importe';
+                }
+            }
             $reembolso = $reembolsosPorDevolucion[$devolucion->id] ?? '0.00';
             $saldoAFavor = bcsub($devolucion->importe_resuelto, $reembolso, 2);
 
@@ -61,7 +76,8 @@ class HistorialDeVenta
                 $detalles[] = 'Excepción al plazo · '.$devolucion->motivo_excepcion;
             }
 
-            $agregar($devolucion->created_at, 'Devolución registrada', 'heroicon-o-arrow-uturn-left', $devolucion->usuario?->name, $devolucion->motivo, $detalles);
+            $agregar($devolucion->created_at, $reemplazo ? 'Cambio registrado' : 'Devolución registrada',
+                $reemplazo ? 'heroicon-o-arrows-right-left' : 'heroicon-o-arrow-uturn-left', $devolucion->usuario?->name, $devolucion->motivo, $detalles);
         }
 
         foreach ($venta->correcciones as $correccion) {
@@ -103,7 +119,12 @@ class HistorialDeVenta
             );
         }
 
-        $agregar($venta->created_at, $esReserva ? 'Reserva creada' : 'Venta registrada', 'heroicon-o-document-text', $venta->usuario?->name);
+        if ($venta->cambioOrigen !== null) {
+            $agregar($venta->created_at, 'Reemplazo entregado', 'heroicon-o-arrows-right-left', $venta->usuario?->name,
+                detalles: ['Venta original · '.$venta->cambioOrigen->ventaOriginal?->codigo]);
+        } else {
+            $agregar($venta->created_at, $esReserva ? 'Reserva creada' : 'Venta registrada', 'heroicon-o-document-text', $venta->usuario?->name);
+        }
 
         return $eventos->sortByDesc(fn (array $evento): int => $evento['fecha']->getTimestamp())->values();
     }

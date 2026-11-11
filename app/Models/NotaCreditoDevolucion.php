@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['venta_id', 'user_id', 'caja_sesion_id', 'motivo', 'motivo_excepcion', 'resolucion', 'total', 'deuda_cancelada', 'importe_resuelto', 'revision'])]
+#[Fillable(['venta_id', 'venta_reemplazo_id', 'user_id', 'caja_sesion_id', 'motivo', 'motivo_excepcion', 'resolucion', 'total', 'deuda_cancelada', 'importe_resuelto', 'revision'])]
 class NotaCreditoDevolucion extends Model
 {
     use BelongsToTenantPool;
@@ -28,5 +28,15 @@ class NotaCreditoDevolucion extends Model
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(TenantUser::class, 'user_id');
+    }
+
+    public function ventaOriginal(): BelongsTo
+    {
+        return $this->belongsTo(Venta::class, 'venta_id');
+    }
+
+    public function ventaReemplazo(): BelongsTo
+    {
+        return $this->belongsTo(Venta::class, 'venta_reemplazo_id');
     }
 }
