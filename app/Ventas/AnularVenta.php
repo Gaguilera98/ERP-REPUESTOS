@@ -40,6 +40,9 @@ class AnularVenta
 
             $venta = Venta::query()->lockForUpdate()->findOrFail($venta->id);
             abort_unless($usuario->can('anular', $venta), 403);
+            if ($venta->devoluciones()->exists()) {
+                throw ValidationException::withMessages(['venta' => 'Esta venta tiene devoluciones. Usá el flujo de devolución para los productos restantes.']);
+            }
 
             if (! $venta->estaCompletada() || $venta->tipo_comprobante !== TipoComprobante::NotaVenta) {
                 throw ValidationException::withMessages(['venta' => 'Solo se pueden anular notas de venta completadas.']);

@@ -127,6 +127,8 @@ class SeedNegocioRoles
             'Corregir:Venta',
             'Reembolsar:Sena',
             'Ampliar:Reserva',
+            'Registrar:Devolucion',
+            'Autorizar:ExcepcionDevolucion',
             'View:ConfiguracionDelNegocio',
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',

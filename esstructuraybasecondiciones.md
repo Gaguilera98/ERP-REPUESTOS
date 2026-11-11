@@ -286,12 +286,16 @@ Diseño y avance del flujo al 10 de noviembre de 2026:
 
 1. Implementado: ventas.politica_devolucion_snapshot guarda una copia JSON versionada de las condiciones y zona horaria al registrar contado, crédito o reserva. Cambiar la configuración no modifica esas ventas. La captura proviene de NegocioConfiguracion::politicaDevolucion(), nunca del contenido enviado por el navegador.
 2. Implementado: ventas.entregada_en registra la confirmación en contado y crédito con entrega inmediata, y el retiro en reservas. En una reserva sin entregar permanece nulo. La entrega conserva la política original; ni los abonos ni las ampliaciones reinician la fecha de entrega.
-3. Registrar devoluciones en notas_credito_devoluciones y sus líneas, referenciando lo efectivamente vendido y conservado tras correcciones y devoluciones previas. Cantidades e importes se validarán bajo bloqueo dentro de la transacción.
-4. Autorizar mediante permisos independientes del nombre de rol: uno para registrar devoluciones y otro para excepciones al plazo, con motivo, responsable, fecha y regla exceptuada. Los nombres definitivos se definirán junto con las acciones. La configuración no asigna permisos a usuarios.
+3. Implementado: RegistrarDevolucion registra notas_credito_devoluciones y nota_credito_detalles para piezas recibidas en buen estado. Usa las líneas vigentes tras correcciones, descuenta devoluciones previas y valida cantidades e importes bajo bloqueo en una transacción. El precio, descuento y costo salen de la venta, no de la tarifa actual. El descuento global se reparte proporcionalmente entre líneas. El redondeo acumulado de importes y cantidades base evita devolver centavos de más o de menos y repone exactamente el stock vendido al devolver toda la línea. Las cantidades demasiado pequeñas para representar un reingreso a cuatro decimales se rechazan.
+4. Implementado: permisos Registrar:Devolucion y Autorizar:ExcepcionDevolucion, independientes del nombre de rol. El supervisor los recibe como plantilla inicial. La excepción solo amplía el plazo si la política guardada lo permite; exige motivo y conserva responsable, fecha y motivo_excepcion. No habilita una venta que no aceptaba devoluciones.
 5. Decisión de desarrollo local: no implementar compatibilidad para ventas históricas. Se ajustó la migración original de ventas y se recreó el único pool local de prueba, conservando el tenant central y recreando su acceso God con las credenciales demo acordadas. DemoLocalSeeder repuso 2 sucursales y 5 productos; quedaron 0 ventas. En producción las migraciones ya desplegadas se mantendrán y los cambios serán incrementales.
-6. Mostrar el plazo y los motivos de rechazo. Separar la resolución comercial del destino físico de la pieza; lo dañado no vuelve automáticamente al stock vendible. Revisar correcciones y anulaciones para que no eludan la política.
+6. Implementado: acción Registrar devolución desde el detalle compartido en Mis ventas, Caja y Cajas del día. Dos pasos: productos/motivo/resolución y revisión con confirmación. Valida el plazo hasta el final del día en la zona horaria guardada. La acción queda deshabilitada con explicación si la venta no acepta devoluciones o solo permite un cambio todavía no implementado. El detalle muestra vendido/devuelto/conserva, distintivo parcial/total e historial. Tras una devolución se bloquean correcciones y anulaciones completas para impedir reingresos o reintegros duplicados; se pueden devolver las unidades restantes.
+7. Resoluciones implementadas: reembolso por métodos originales y saldo a favor de un cliente identificado. En crédito, primero baja la deuda y solo el excedente sobre esa deuda se resuelve contra cobros aprobados. El saldo a favor utilizado siempre se restituye como saldo, aunque se elija reembolso. El dinero devuelto crea Pago de reembolso en la caja abierta de hoy del operador, en la sucursal original; no modifica la caja cerrada de la venta. Generar/restaurar saldo o reducir deuda no crea un pago ni exige caja abierta. Un reembolso electrónico se registra por su método original después de realizarlo externamente; no hay ejecución bancaria automática.
+8. Inventario: reingreso al almacén original, kardex de tipo devolucion con referencia nota_credito_devolucion y costo congelado de la línea. El PPP se recalcula ponderando ese costo y las existencias físicas actuales de todos los almacenes. Toda la operación se revierte si falla. Una revisión desactualizada, pago pendiente, cantidad excesiva o acceso a otro tenant se rechaza.
 
-Implementados configuración por tenant, copia de política por venta y fecha de entrega. El registro de devoluciones, sus permisos operativos, la evaluación del plazo y el tratamiento de garantía siguen pendientes. Las exclusiones por producto/categoría también quedan para después. Las pruebas enfocadas de copias de política, entrega, vencimiento y cancelación pasaron: 10 pruebas y 168 comprobaciones.
+Fase 7 sigue en curso: quedan cambio por otro producto, tratamiento separado de piezas dañadas/garantía, exclusiones por producto/categoría y la revisión final del alcance. Este paso no entrega documentos fiscales ni incorpora facturación manual. Las devoluciones comerciales no sustituyen reclamos o garantías.
+
+Verificación de este avance: 14 pruebas enfocadas y 118 comprobaciones aprobadas, incluyendo devolución parcial, crédito, saldo a favor reutilizado, venta corregida, métodos combinados, plazo/excepción, aislamiento entre tenants y redondeo acumulado de importes y stock. Build de assets y Pint correctos. Pendiente ejecutar la suite completa como cierre general.
 
 Referencias de diseño: [Shopify POS](https://help.shopify.com/es/manual/sell-in-person/shopify-pos/order-management/return-rules) para plazos, condiciones guardadas y excepciones; [Dynamics 365](https://learn.microsoft.com/en-us/dynamics365/commerce/refund_policy_returns) para resoluciones y métodos de reembolso. La política comercial no sustituye las obligaciones sobre reclamos o garantías.
 
@@ -746,38 +750,37 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `aplicacion_origen_id` (int, Foreign Key compuesta con `tenant_id` -> Pago_Aplicaciones, Nullable) -- La fila de saldo a favor que este uso consume
   * `monto` (decimal 10,2) -- CHECK `monto > 0`
   * `timestamps` (timestamp)
-  * Una aplicación original tiene `aplicacion_origen_id` nulo y apunta a una venta, a una nota, o a ninguna (saldo a favor). No apunta a las dos.
-  * La suma de las aplicaciones originales de un pago es igual a `pagos.monto`.
+  * Un cobro original tiene `aplicacion_origen_id` nulo y apunta a una venta o a ninguna (saldo a favor). En devoluciones de fase 7, la aplicación del nuevo reembolso apunta tanto a `venta_id` como a `nota_credito_id`, y `aplicacion_origen_id` identifica el cobro que compensa. Este doble vínculo conserva los historiales y el cálculo de cobrado de la venta. Un saldo restituido tiene `venta_id` nulo, `nota_credito_id` informado y `es_saldo_favor = true`, ligado al pago original sin crear otro movimiento de caja.
+  * La asignación inicial de cada cobro coincide con `pagos.monto`. Cada reembolso nuevo se aplica por su importe a la venta y a su nota; el vínculo al cobro original no duplica ese pago. Las transferencias de saldo reutilizan el cobro original y no se suman como entradas nuevas de dinero.
   * Usar un adelanto, o soltar la seña de una reserva vencida, inserta otra fila con `aplicacion_origen_id` y el mismo `pago_id`. No crea un pago nuevo. Si pasa a saldo a favor, `venta_id` va nulo. La suma usada no supera el monto de la fila de origen.
   * Todas las ventas de un mismo pago son del mismo `cliente_id`. Lo comprueba la aplicación.
-  * El por cobrar de una venta es `total` menos las aplicaciones de cobros `aprobado` a esa venta. El contado solo pasa a `completada` cuando ese saldo es cero. El fiado puede completarse con saldo. La reserva no descuenta `cantidad_actual`: suma `cantidad_reservada`. Al vencer, esa suma se revierte y la venta no sigue como por cobrar.
+  * El por cobrar usa el total vigente (última corrección o total original menos notas de devolución) y los cobros aprobados, descontando reembolsos y saldo restituido. El contado solo pasa a `completada` cuando ese saldo es cero. El crédito puede completarse con saldo. La reserva no descuenta `cantidad_actual`: suma `cantidad_reservada`. Al vencer, esa suma se revierte y la venta no sigue como por cobrar.
 
 ### 6. Módulo de Notas de Crédito y Cambios de Mostrador
 * **Notas_Credito_Devoluciones**
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
-  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales)
-  * `venta_original_id` (int, Foreign Key compuesta con `tenant_id` -> Ventas)
+  * `venta_id` (int, Foreign Key compuesta con `tenant_id` -> Ventas) -- La sucursal y almacén son los de esa venta
   * `caja_sesion_id` (int, Foreign Key compuesta con `tenant_id` -> Cajas_Sesiones, Nullable) -- Turno donde se compensa el dinero
   * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
-  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Rol Shield `supervisor` del mismo negocio
-  * `tipo_operacion` (enum: 'devolucion_parcial', 'cambio_producto', 'anulacion_total')
-  * `monto_diferencia` (decimal 10,2)
   * `motivo` (text)
-  * `observacion_anulacion_fisica` (text, Nullable) -- Obligatoria si la venta original es `factura_manual` y la operación es `anulacion_total`
+  * `motivo_excepcion` (text, Nullable) -- Excepción al plazo autorizada por el mismo operador con permiso específico
+  * `resolucion` (enum: 'reembolso', 'saldo_favor')
+  * `total`, `deuda_cancelada`, `importe_resuelto` (decimal 10,2) -- Valor devuelto = reducción de deuda + importe resuelto
+  * `revision` (varchar 64) -- Huella de la revisión confirmada; única por tenant
   * `timestamps` (timestamp)
 * **Nota_Credito_Detalles**
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string)
-  * `nota_credito_id` (int, Foreign Key compuesta con `tenant_id` -> Notas_Credito_Devoluciones, On Delete: Cascade)
-  * `venta_detalle_id` (int, Foreign Key compuesta con `tenant_id` -> Venta_Detalles, Nullable) -- Obligatorio si `tipo_accion = 'devuelve_stock'`
+  * `nota_credito_id` (int, Foreign Key compuesta con `tenant_id` -> Notas_Credito_Devoluciones)
+  * `venta_detalle_id` (int, Foreign Key compuesta con `tenant_id` -> Venta_Detalles, Nullable) -- Nulo cuando la línea procede de una corrección
+  * `linea_indice` (entero no negativo) -- Posición de la línea vigente; única por tenant + nota. Tras una devolución no se permite alterar las líneas mediante correcciones
   * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
-  * `cantidad` (int)
-  * `precio_unitario` (decimal 10,2)
-  * `precio_costo_snapshot` (decimal 14,4) -- En una devolución se copia de la línea vendida
-  * `tipo_accion` (enum: 'devuelve_stock', 'entrega_stock')
+  * `cantidad`, `cantidad_base` (decimal 14,4)
+  * `importe` (decimal 10,2)
+  * `linea_snapshot` (json) -- Línea vigente: unidad y factor, cantidades, precio, descuentos, costo congelado, identificación e importe asignado
   * `timestamps` (timestamp)
-  * La suma devuelta de un `venta_detalle_id` no supera la cantidad vendida. Lo cierra la aplicación con la línea bloqueada. Si la venta era fiado, deja de sumar por cobrar. El reembolso es solo la plata ya aplicada.
+  * La suma devuelta por venta + linea_indice no supera la cantidad vigente vendida. Lo valida el servicio con la venta bloqueada. Si había deuda, se reduce primero. El reintegro solo corresponde a lo cobrado y aún no compensado. Las tablas implementadas son documentos internos; cambio por otro producto y enlace fiscal quedan pendientes de sus respectivos flujos.
 
 ### 7. Módulo de Caja y Sesiones de Turno
 * **Cajas_Sesiones**

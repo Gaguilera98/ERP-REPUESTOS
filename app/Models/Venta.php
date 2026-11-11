@@ -135,7 +135,16 @@ class Venta extends Model
 
     public function totalVigente(): string
     {
-        return $this->ultimaCorreccion?->total ?? $this->total;
+        $devuelto = array_key_exists('total_devuelto', $this->getAttributes())
+            ? ($this->getAttribute('total_devuelto') ?? '0')
+            : $this->devoluciones()->sum('total');
+
+        return bcsub($this->ultimaCorreccion?->total ?? $this->total, (string) $devuelto, 2);
+    }
+
+    public function devoluciones(): HasMany
+    {
+        return $this->hasMany(NotaCreditoDevolucion::class);
     }
 
     public function cobradoNeto(): string

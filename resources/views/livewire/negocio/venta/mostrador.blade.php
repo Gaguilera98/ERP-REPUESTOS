@@ -6,6 +6,8 @@
     <x-negocio.mostrador.banners
         :ultimo-codigo="$ultimoCodigo"
         :ultimo-total="$ultimoTotal"
+        :ultimo-vuelto="$ultimoVuelto"
+        :mostrar-detalle="$puedeVerUltimaVenta ?? false"
         :alertas-perdida="$alertasPerdida"
         :moneda="$moneda"
     />

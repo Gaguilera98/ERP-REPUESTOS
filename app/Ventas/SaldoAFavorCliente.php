@@ -22,7 +22,8 @@ class SaldoAFavorCliente
     /** @return Builder<PagoAplicacion> */
     private function consulta(int $clienteId): Builder
     {
-        return PagoAplicacion::query()->whereNull('venta_id')->whereNull('nota_credito_id')
+        return PagoAplicacion::query()->whereNull('venta_id')
+            ->where(fn (Builder $query): Builder => $query->whereNull('nota_credito_id')->orWhere('es_saldo_favor', true))
             ->whereHas('pago', fn (Builder $query): Builder => $query->where('cliente_id', $clienteId)
                 ->where('sentido', SentidoPago::Cobro)->where('estado_pago', EstadoPago::Aprobado));
     }

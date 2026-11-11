@@ -36,7 +36,7 @@ class AccionCorregirVenta
             ->label('Corregir productos o cantidades')
             ->color('gray')
             ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('corregir', $venta))
-            ->visible(fn (): bool => $venta->estaCompletada() && $venta->tipo_comprobante === TipoComprobante::NotaVenta)
+            ->visible(fn (): bool => $venta->estaCompletada() && $venta->tipo_comprobante === TipoComprobante::NotaVenta && ! $venta->devoluciones()->exists())
             ->modalHeading('Corregir venta · '.$venta->codigo)
             ->modalDescription('Usá esta acción para corregir lo que se registró en el mostrador. Para una devolución física corresponde el flujo de devoluciones.')
             ->modalWidth('4xl')

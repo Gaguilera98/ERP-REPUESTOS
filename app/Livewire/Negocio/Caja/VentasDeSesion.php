@@ -10,7 +10,6 @@ use App\Filament\Negocio\Pages\CajasDelDia;
 use App\Filament\Negocio\Pages\MostradorDelNegocio;
 use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
-use App\Models\PagoAplicacion;
 use App\Models\TenantUser;
 use App\Models\Venta;
 use App\Ventas\AnularVenta;
@@ -30,7 +29,6 @@ use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
-use Filament\Support\Colors\Color;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -41,7 +39,6 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -93,7 +90,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                         ->where('es_saldo_favor', false)->whereHas('pago.cajaSesion', $sesion));
                 }))
             ->defaultSort('created_at', 'desc')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('ultimaCorreccion'))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('ultimaCorreccion')->withSum('devoluciones as total_devuelto', 'total'))
             ->queryStringIdentifier($enMostrador ? 'misVentasMostrador' : 'ventasDeSesion')
             ->defaultPaginationPageOption(10)
             ->paginationPageOptions([10, 25, 50])
@@ -105,11 +102,11 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                 TextColumn::make('condicion')->label('Condición')->formatStateUsing(fn (CondicionVenta $state): string => $state->etiqueta())->visible($enMostrador)->extraCellAttributes(['data-label' => 'Condición']),
                 TextColumn::make('estado')->label('Estado')->badge()
                     ->formatStateUsing(fn (EstadoVenta $state): string => $state->etiqueta())
-                    ->color(fn (EstadoVenta $state): array => $this->colorEstado($state))
+                    ->color(fn (EstadoVenta $state): array => AccionVerDetalleVenta::colorEstado($state))
                     ->extraCellAttributes(['data-label' => 'Estado']),
                 TextColumn::make('total')->label('Total')->extraCellAttributes(['data-label' => 'Total'])
                     ->state(fn (Venta $record): string => $enMostrador ? $record->totalVigente() : $record->total)
-                    ->description(fn (Venta $record): ?string => $record->ultimaCorreccion ? 'Con corrección' : null)
+                    ->description(fn (Venta $record): ?string => bccomp((string) ($record->total_devuelto ?? '0'), '0', 2) > 0 ? 'Con devolución' : ($record->ultimaCorreccion ? 'Con corrección' : null))
                     ->money(NegocioConfiguracion::codigoMoneda()),
             ])
             ->filters($enMostrador ? [
@@ -140,68 +137,12 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
             ] : [], layout: FiltersLayout::AboveContent)
             ->deferFilters(false)
             ->recordActions([
-                Action::make('verDetalle')
-                    ->label('Ver detalle')
-                    ->icon(Heroicon::OutlinedEye)
-                    ->authorize(fn (Venta $record): bool => (bool) auth('tenant')->user()?->can('view', $record))
-                    ->modalHeading(fn (Venta $record): string => $record->tipo_comprobante->etiqueta().' · '.$record->codigo)
-                    ->modalWidth('5xl')
-                    ->extraModalWindowAttributes(['class' => 'caja-modal-window'])
-                    ->stickyModalHeader()
-                    ->stickyModalFooter()
-                    ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Cerrar')
+                app(AccionVerDetalleVenta::class)->crear()
                     ->extraModalFooterActions(fn (Venta $record): array => [
-                        ...$this->accionesAbono($record), $this->accionReembolsarSena($record), $this->accionEntregarReserva($record), $this->accionAmpliarReserva($record), $this->accionCancelarReserva($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
-                    ])
-                    ->modalContent(function (Venta $record): View {
-                        abort_unless(auth('tenant')->user()?->can('view', $record), 403);
-
-                        $record->loadMissing([
-                            'cliente',
-                            'usuario',
-                            'anuladaPor',
-                            'correcciones.usuario',
-                            'ultimaCorreccion',
-                            'sucursal',
-                            'almacen',
-                            'detalles.variante.productoMaestro.unidadBase',
-                            'detalles.unidad',
-                            'aplicacionesPago.pago.registradoPor',
-                            'aplicacionesPago.usos',
-                        ]);
-                        $reservaCancelada = $record->estado === EstadoVenta::Anulada && $record->aplicacionesPago->contains(
-                            fn (PagoAplicacion $aplicacion): bool => $aplicacion->usos->contains(
-                                fn (PagoAplicacion $uso): bool => $uso->venta_id === null && (int) $uso->reserva_saldo_origen_id === $record->id,
-                            ),
-                        );
-
-                        return view('filament.negocio.pages.caja.detalle-venta', [
-                            'venta' => $record,
-                            'ampliacionesReserva' => DB::table('ampliaciones_reserva as ampliacion')
-                                ->join('users as usuario', function ($join): void {
-                                    $join->on('usuario.id', '=', 'ampliacion.user_id')->on('usuario.tenant_id', '=', 'ampliacion.tenant_id');
-                                })->where('ampliacion.tenant_id', $record->tenant_id)->where('ampliacion.venta_id', $record->id)
-                                ->orderByDesc('ampliacion.id')->get(['ampliacion.*', 'usuario.name as usuario_nombre']),
-                            'moneda' => NegocioConfiguracion::codigoMoneda(),
-                            'saldoSenaDisponible' => $record->estado === EstadoVenta::Vencida || $reservaCancelada ? app(SaldoAFavorCliente::class)->disponibleDeReserva($record) : null,
-                            'saldoPendiente' => $record->condicion === CondicionVenta::Credito || $record->estado === EstadoVenta::Reserva ? $record->saldoPendiente() : null,
-                            'colorEstado' => $this->colorEstado($record->estado),
-                        ]);
-                    }),
+                        ...$this->accionesAbono($record), $this->accionReembolsarSena($record), $this->accionEntregarReserva($record), $this->accionAmpliarReserva($record), $this->accionCancelarReserva($record), app(AccionDevolverVenta::class)->para($record), app(AccionCorregirVenta::class)->para($record), $this->accionAnular($record),
+                    ]),
             ])
             ->emptyStateHeading($enMostrador ? 'No hay ventas para esta consulta' : 'Esta sesión no tiene ventas registradas');
-    }
-
-    /** @return array<int, string> */
-    private function colorEstado(EstadoVenta $estado): array
-    {
-        return match ($estado) {
-            EstadoVenta::Completada => Color::Emerald,
-            EstadoVenta::Anulada, EstadoVenta::Vencida => Color::Red,
-            EstadoVenta::Pendiente => Color::Amber,
-            EstadoVenta::Reserva => Color::Blue,
-        };
     }
 
     private function accionAnular(Venta $venta): Action
@@ -210,7 +151,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
             ->label('Anular venta')
             ->color('danger')
             ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('anular', $venta))
-            ->visible(fn (): bool => $venta->estaCompletada() && $venta->tipo_comprobante === TipoComprobante::NotaVenta)
+            ->visible(fn (): bool => $venta->estaCompletada() && $venta->tipo_comprobante === TipoComprobante::NotaVenta && ! $venta->devoluciones()->exists())
             ->modalHeading('Anular venta · '.$venta->codigo)
             ->modalDescription(function () use ($venta): string {
                 $moneda = NegocioConfiguracion::codigoMoneda();

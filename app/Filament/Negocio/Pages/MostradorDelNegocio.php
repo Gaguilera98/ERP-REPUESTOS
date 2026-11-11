@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Pages;
 
+use App\Livewire\Negocio\Caja\AccionVerDetalleVenta;
 use App\Livewire\Negocio\Venta\Concerns\ManejaMostrador;
 use App\Models\TenantUser;
 use App\Models\Venta;
@@ -73,6 +74,18 @@ class MostradorDelNegocio extends Page
             );
     }
 
+    public function detalleUltimaVentaAction(): Action
+    {
+        $venta = $this->ultimaVentaId === null ? null : Venta::query()
+            ->whereKey($this->ultimaVentaId)
+            ->where('user_id', $this->usuario()->id)
+            ->first();
+
+        return app(AccionVerDetalleVenta::class)->crear('detalleUltimaVenta')
+            ->record($venta)
+            ->disabled($venta === null);
+    }
+
     public function mount(): void
     {
         $usuario = auth('tenant')->user();
@@ -89,6 +102,9 @@ class MostradorDelNegocio extends Page
      */
     protected function getViewData(): array
     {
-        return $this->datosVistaMostrador();
+        return [
+            ...$this->datosVistaMostrador(),
+            'puedeVerUltimaVenta' => $this->ultimaVentaId !== null && $this->usuario()->can('View:Venta'),
+        ];
     }
 }

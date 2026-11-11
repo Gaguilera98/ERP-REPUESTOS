@@ -45,6 +45,7 @@ use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
 use App\Ventas\CorregirVenta;
 use App\Ventas\GestionarReservas;
+use App\Ventas\RegistrarDevolucion;
 use App\Ventas\SaldoAFavorCliente;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
@@ -520,7 +521,8 @@ it('amplía una reserva vigente con permiso individual y conserva el historial',
     expect(InventarioStock::query()->sole()->cantidad_reservada)->toBe('1.0000');
     expect(Pago::query()->count())->toBe(1);
     $detalle = $tabla()->mountAction(TestAction::make('verDetalle')->table($reserva));
-    expect($detalle->instance()->getMountedAction()->getModalContent()->render())->toContain('Historial de ampliaciones', 'Cliente solicita más tiempo');
+    expect($detalle->instance()->getMountedAction()->getModalContent()->render())
+        ->toContain('Lo que pasó', 'Reserva ampliada', 'Cliente solicita más tiempo');
     $this->travelTo($reserva->vence_en->copy()->addSecond());
     expect(fn () => $reservas->ampliar($reserva, now()->addDay()->toDateTimeString(), $nuevo, 'Tarde', $cajero))->toThrow(ValidationException::class);
     expect($reserva->refresh()->estado)->toBe(EstadoVenta::Vencida);
@@ -744,7 +746,8 @@ it('permite preparar una venta sin caja vigente y conserva el carrito al intenta
     expect(InventarioStock::query()->sole()->cantidad_actual)->toBe('3.0000');
     app(CongelarTurnosVencidos::class)->de($cajero);
     app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
-    $mostrador->call('$refresh')->assertSee('Caja abierta')->call('completar')->assertHasNoErrors();
+    $mostrador->call('$refresh')->assertSee('Caja abierta')->call('completar')->assertHasNoErrors()
+        ->assertSet('ultimoVuelto', '');
     expect(Venta::query()->count())->toBe(1);
 })->with(['sin sesión' => false, 'sesión anterior abierta' => true]);
 
@@ -767,6 +770,19 @@ it('registra el efectivo recibido y el vuelto sin aumentar cobros ni reembolsos'
     expect($pago->efectivo_recibido)->toBe('200.00');
     expect($pago->cambio_entregado)->toBe($combinado ? '130.00' : ($operacion === 'contado' ? '100.00' : '170.00'));
     expect(app(ArqueoCajaSesion::class)->de($caja)['total_cobros'])->toBe($operacion === 'contado' ? '100.00' : '30.00');
+    $mostrador->assertNotified('Venta '.$venta->codigo.' registrada')
+        ->assertSee('Vuelto')
+        ->assertSet('ultimoVuelto', $pago->cambio_entregado);
+    if ($operacion === 'contado' && ! $combinado) {
+        $mostrador->mountAction('detalleUltimaVenta')->assertActionMounted('detalleUltimaVenta');
+        expect($mostrador->instance()->getMountedAction()->getModalContent()->render())
+            ->toContain('Lo que pasó', 'Venta registrada', 'Cambio:');
+        $mostrador->unmountAction()
+            ->call('seleccionarResultado', $variante->id)
+            ->assertSet('ultimoVuelto', '')
+            ->assertSee('Ver detalle')
+            ->assertSee($venta->codigo);
+    }
     $detalle = Livewire::actingAs($cajero, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $caja->id])
         ->mountAction(TestAction::make('verDetalle')->table($venta));
     expect($detalle->instance()->getMountedAction()->getModalContent()->render())->toContain('Recibido:', 'Cambio:', '200.00');
@@ -787,6 +803,12 @@ it('registra el efectivo recibido y el vuelto sin aumentar cobros ni reembolsos'
     app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $supervisor);
     app(AnularVenta::class)->anular($venta, 'Comprobar reembolso del cobro aplicado', '100.00', $supervisor);
     expect(Pago::query()->where('sentido', SentidoPago::Reembolso)->sum('monto'))->toEqual(100);
+    if ($operacion === 'contado' && ! $combinado) {
+        $cajero->syncRoles([]);
+        $cajero->givePermissionTo('Create:Venta');
+        $mostrador->call('$refresh')->assertDontSee('Ver detalle')
+            ->mountAction('detalleUltimaVenta')->assertActionNotMounted();
+    }
 })->with([
     'contado' => ['contado', '100.00', false],
     'QR y efectivo' => ['contado', '70.00', true],
@@ -856,6 +878,254 @@ it('congela la política de devolución y registra la entrega sin cambiarla por 
     expect($nueva->politica_devolucion_snapshot['acepta_devoluciones'])->toBeFalse();
     expect($nueva->politica_devolucion_snapshot['dias_devolucion'])->toBe(1);
 })->with(['contado', 'credito', 'reserva']);
+
+it('registra una devolución parcial desde el detalle y conserva los cobros de la sesión original', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('devolucion-parcial');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '5');
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'dias_devolucion' => 7, 'devolucion_permite_reembolso' => true]);
+    $cajaOriginal = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '2']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '200', 'efectivo_recibido' => '300']],
+    ], $cajero)['venta'];
+    $variante->update(['precio_venta' => '999']);
+    $this->travel(1)->days();
+    $caja = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '100'], $supervisor);
+    $servicio = app(RegistrarDevolucion::class);
+    $lineas = [['indice' => 0, 'cantidad' => '1']];
+    expect(fn () => $servicio->revisar($venta, $lineas, 'reembolso', '', $cajero))->toThrow(HttpException::class);
+    $revision = $servicio->revisar($venta, $lineas, 'reembolso', '', $supervisor)['revision'];
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    Livewire::actingAs($supervisor, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $cajaOriginal->id, 'supervision' => true])
+        ->callAction([TestAction::make('verDetalle')->table($venta), TestAction::make('devolverVenta')], data: [
+            'lineas' => $lineas, 'motivo' => 'Medida incorrecta', 'resolucion' => 'reembolso', 'revision' => $revision, 'confirmado' => true,
+        ])->assertNotified('Devolución registrada');
+    expect($venta->refresh()->totalVigente())->toBe('100.00');
+    expect($venta->cobradoNeto())->toBe('100.00');
+    expect($venta->saldoPendiente())->toBe('0.00');
+    expect(InventarioStock::query()->sole()->cantidad_actual)->toBe('4.0000');
+    expect(MovimientoInventario::query()->where('tipo_movimiento', TipoMovimientoInventario::Devolucion)->sole()->costo_unitario)->toBe('40.0000');
+    expect(app(ArqueoCajaSesion::class)->de($cajaOriginal)['total_cobros'])->toBe('200.00');
+    expect(app(ArqueoCajaSesion::class)->de($caja)['total_reembolsos'])->toBe('100.00');
+    expect(fn () => $servicio->confirmar($venta, $lineas, 'reembolso', 'Reintento', '', $revision, $supervisor))->toThrow(ValidationException::class);
+    expect(fn () => $servicio->revisar($venta, [['indice' => 0, 'cantidad' => '2']], 'reembolso', '', $supervisor))->toThrow(ValidationException::class);
+    expect(fn () => app(AnularVenta::class)->anular($venta, 'Anular', '100.00', $supervisor))->toThrow(ValidationException::class);
+    expect(fn () => app(CorregirVenta::class)->revisar($venta, []))->toThrow(ValidationException::class);
+    $detalle = Livewire::actingAs($supervisor, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $cajaOriginal->id, 'supervision' => true])
+        ->mountAction(TestAction::make('verDetalle')->table($venta));
+    $html = $detalle->instance()->getMountedAction()->getModalContent()->render();
+    expect($html)->toContain('Productos después de las devoluciones', 'Lo que pasó', 'Devolución registrada', 'Reembolso de BOB 100.00', 'Medida incorrecta', 'Venta registrada');
+    expect(strpos($html, 'Devolución registrada'))->toBeLessThan(strpos($html, 'Venta registrada'));
+});
+
+it('resuelve devoluciones como saldo a favor o reducción de deuda sin duplicar dinero', function (bool $credito) {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('devolucion-saldo');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '5');
+    $cliente = Cliente::factory()->personaNatural()->create();
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'devolucion_permite_saldo_favor' => true]);
+    $caja = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $datos = [
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'cliente_id' => $cliente->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => $credito ? '30' : '100']],
+    ];
+    $ventas = app(CompletarVentaContado::class);
+    $venta = ($credito ? $ventas->venderFiado($datos, $cajero) : $ventas->completar($datos, $cajero))['venta'];
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => false]);
+    $devolver = app(RegistrarDevolucion::class);
+    $lineas = [['indice' => 0, 'cantidad' => '1']];
+    $resumen = $devolver->revisar($venta, $lineas, 'saldo_favor', '', $supervisor);
+    expect($resumen['deuda'])->toBe($credito ? '70.00' : '0.00');
+    $devolver->confirmar($venta, $lineas, 'saldo_favor', 'Cliente cambia de decisión', '', $resumen['revision'], $supervisor);
+    expect($venta->refresh()->totalVigente())->toBe('0.00');
+    expect($venta->saldoPendiente())->toBe('0.00');
+    expect(app(SaldoAFavorCliente::class)->disponible($cliente->id))->toBe($credito ? '30.00' : '100.00');
+    expect(Pago::query()->count())->toBe(1);
+    expect(app(ArqueoCajaSesion::class)->de($caja)['total_cobros'])->toBe($credito ? '30.00' : '100.00');
+    $nueva = $ventas->completar([...$datos, 'saldo_favor' => $credito ? '30' : '100', 'pagos' => $credito ? [['metodo_pago' => 'efectivo', 'monto' => '70']] : []], $cajero)['venta'];
+    expect($nueva->saldoPendiente())->toBe('0.00');
+    expect(app(SaldoAFavorCliente::class)->disponible($cliente->id))->toBe('0.00');
+})->with(['contado' => false, 'crédito' => true]);
+
+it('controla el plazo de devolución y permite una excepción autorizada con motivo', function () {
+    $this->travelTo(Carbon::parse('2026-11-10 10:00:00'));
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('devolucion-plazo');
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'devolucion_permite_reembolso' => true, 'devolucion_permite_excepcion' => true]);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '100']],
+    ], $cajero)['venta'];
+    $this->travelTo(Carbon::parse('2026-11-11 00:00:00'));
+    $cajero->givePermissionTo('Registrar:Devolucion');
+    $devolver = app(RegistrarDevolucion::class);
+    $lineas = [['indice' => 0, 'cantidad' => '1']];
+    expect(fn () => $devolver->revisar($venta, $lineas, 'reembolso', 'Un día tarde', $cajero))->toThrow(ValidationException::class);
+    expect(fn () => $devolver->revisar($venta, $lineas, 'reembolso', '', $supervisor))->toThrow(ValidationException::class);
+    expect(fn () => $devolver->revisar($venta, $lineas, 'reembolso', 'Un día tarde', $supervisor))->toThrow(ValidationException::class);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '100'], $supervisor);
+    $resumen = $devolver->revisar($venta, $lineas, 'reembolso', 'Cliente autorizado un día tarde', $supervisor);
+    $devolver->confirmar($venta, $lineas, 'reembolso', 'No le sirve', 'Cliente autorizado un día tarde', $resumen['revision'], $supervisor);
+    expect($venta->devoluciones()->sole()->motivo_excepcion)->toBe('Cliente autorizado un día tarde');
+    expect($venta->refresh()->saldoPendiente())->toBe('0.00');
+    $original = tenant();
+    tenancy()->initialize(Tenant::factory()->create());
+    $otro = TenantUser::factory()->create();
+    $otro->assignRole('supervisor');
+    expect(fn () => $devolver->revisar($venta, $lineas, 'reembolso', '', $otro))->toThrow(ModelNotFoundException::class);
+    tenancy()->initialize($original);
+});
+
+it('distribuye descuentos y centavos en devoluciones sucesivas sin exceder la venta', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('devolucion-redondeo');
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    $otra = ProductoVariante::factory()->create(['precio_venta' => '10.00']);
+    cargarStock($otra, $almacen, $cajero, $ocasional, '1');
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'devolucion_permite_reembolso' => true]);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '300'], $supervisor);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'tipo_descuento' => 'importe', 'valor_descuento' => '1', 'supervisor_descuento_id' => $supervisor->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '3'], ['producto_variante_id' => $otra->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '309']],
+    ], $cajero)['venta'];
+    $servicio = app(RegistrarDevolucion::class);
+    foreach (['99.68', '99.67', '99.68'] as $esperado) {
+        $lineas = [['indice' => 0, 'cantidad' => '1']];
+        $resumen = $servicio->revisar($venta, $lineas, 'reembolso', '', $supervisor);
+        expect($resumen['total'])->toBe($esperado);
+        $servicio->confirmar($venta, $lineas, 'reembolso', 'Devolución por partes', '', $resumen['revision'], $supervisor);
+    }
+    expect($venta->refresh()->totalVigente())->toBe('9.97');
+    $restante = [['indice' => 1, 'cantidad' => '1']];
+    $resumen = $servicio->revisar($venta, $restante, 'reembolso', '', $supervisor);
+    expect($resumen['total'])->toBe('9.97');
+    $servicio->confirmar($venta, $restante, 'reembolso', 'Última pieza devuelta', '', $resumen['revision'], $supervisor);
+    expect($venta->refresh()->totalVigente())->toBe('0.00');
+    expect($venta->cobradoNeto())->toBe('0.00');
+    expect(InventarioStock::query()->where('producto_variante_id', $variante->id)->sole()->cantidad_actual)->toBe('5.0000');
+    expect(InventarioStock::query()->where('producto_variante_id', $otra->id)->sole()->cantidad_actual)->toBe('1.0000');
+    $reembolsado = Pago::query()->where('sentido', SentidoPago::Reembolso)->get()
+        ->reduce(fn (string $total, Pago $pago): string => bcadd($total, $pago->monto, 2), '0.00');
+    expect($reembolsado)->toBe('309.00');
+    expect(fn () => $servicio->revisar($venta, [['indice' => 0, 'cantidad' => '1']], 'reembolso', '', $supervisor))->toThrow(ValidationException::class);
+});
+
+it('respeta las resoluciones guardadas y exige cliente para generar saldo por una devolución', function (bool $acepta, bool $reembolso, string $resolucion) {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('devolucion-condiciones');
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => $acepta, 'devolucion_permite_reembolso' => $reembolso, 'devolucion_permite_saldo_favor' => true]);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '100']],
+    ], $cajero)['venta'];
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'devolucion_permite_reembolso' => true]);
+    expect(fn () => app(RegistrarDevolucion::class)->revisar($venta, [['indice' => 0, 'cantidad' => '1']], $resolucion, '', $supervisor))->toThrow(ValidationException::class);
+    expect($venta->devoluciones()->count())->toBe(0);
+    expect(InventarioStock::query()->sole()->cantidad_actual)->toBe('4.0000');
+    expect(Pago::query()->count())->toBe(1);
+})->with([
+    'no aceptaba devoluciones' => [false, true, 'reembolso'],
+    'no permitía reembolso' => [true, false, 'reembolso'],
+    'consumidor final no recibe saldo' => [true, true, 'saldo_favor'],
+]);
+
+it('devuelve una venta corregida y restituye el saldo usado sin convertirlo en efectivo', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('devolucion-corregida');
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    $cliente = Cliente::factory()->personaNatural()->create();
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'devolucion_permite_reembolso' => true, 'devolucion_permite_saldo_favor' => true]);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    $caja = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '200'], $supervisor);
+    $ventas = app(CompletarVentaContado::class);
+    $datos = ['sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id, 'cliente_id' => $cliente->id];
+    $venta = $ventas->completar([...$datos,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '2']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '200']],
+    ], $cajero)['venta'];
+    $corregir = app(CorregirVenta::class);
+    $edicion = [['origen' => 0, 'producto_variante_id' => $variante->id, 'cantidad' => '1']];
+    $revision = $corregir->revision($venta, $corregir->revisar($venta, $edicion));
+    $corregir->confirmar($venta, $edicion, 'Error en la cantidad digitada', $revision, $supervisor);
+    $devolver = app(RegistrarDevolucion::class);
+    $lineas = [['indice' => 0, 'cantidad' => '1']];
+    $resumen = $devolver->revisar($venta, $lineas, 'saldo_favor', '', $supervisor);
+    $devolver->confirmar($venta, $lineas, 'saldo_favor', 'Pieza recibida sin uso', '', $resumen['revision'], $supervisor);
+    expect($venta->devoluciones()->sole()->detalles()->sole()->venta_detalle_id)->toBeNull();
+    expect($venta->refresh()->totalVigente())->toBe('0.00');
+    expect($venta->detalles()->sole()->cantidad)->toBe('2.0000');
+    expect($venta->cobradoNeto())->toBe('0.00');
+    expect(app(SaldoAFavorCliente::class)->disponible($cliente->id))->toBe('100.00');
+    $nueva = $ventas->completar([...$datos, 'saldo_favor' => '100',
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']], 'pagos' => [],
+    ], $cajero)['venta'];
+    $resumen = $devolver->revisar($nueva, $lineas, 'reembolso', '', $supervisor);
+    $devolver->confirmar($nueva, $lineas, 'reembolso', 'Restituir el saldo utilizado', '', $resumen['revision'], $supervisor);
+    expect($nueva->devoluciones()->sole()->caja_sesion_id)->toBeNull();
+    expect($nueva->refresh()->saldoPendiente())->toBe('0.00');
+    expect(app(SaldoAFavorCliente::class)->disponible($cliente->id))->toBe('100.00');
+    expect(app(ArqueoCajaSesion::class)->de($caja)['total_reembolsos'])->toBe('100.00');
+    expect(Pago::query()->count())->toBe(2);
+    expect(InventarioStock::query()->sole()->cantidad_actual)->toBe('5.0000');
+});
+
+it('reembolsa cada método original y rechaza pagos pendientes sin mover stock ni dinero', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('devolucion-mixta');
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'devolucion_permite_reembolso' => true]);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '100'], $supervisor);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'qr_externo', 'monto' => '40'], ['metodo_pago' => 'efectivo', 'monto' => '60']],
+    ], $cajero)['venta'];
+    $servicio = app(RegistrarDevolucion::class);
+    $lineas = [['indice' => 0, 'cantidad' => '1']];
+    $resumen = $servicio->revisar($venta, $lineas, 'reembolso', '', $supervisor);
+    $pago = $venta->aplicacionesPago()->first()->pago;
+    $pago->update(['estado_pago' => EstadoPago::Pendiente]);
+    expect(fn () => $servicio->confirmar($venta, $lineas, 'reembolso', 'Devolución mixta', '', $resumen['revision'], $supervisor))->toThrow(ValidationException::class);
+    expect($venta->devoluciones()->count())->toBe(0);
+    expect(InventarioStock::query()->sole()->cantidad_actual)->toBe('4.0000');
+    $pago->update(['estado_pago' => EstadoPago::Aprobado]);
+    $servicio->confirmar($venta, $lineas, 'reembolso', 'Devolución mixta', '', $resumen['revision'], $supervisor);
+    expect(Pago::query()->where('sentido', SentidoPago::Reembolso)->pluck('monto', 'metodo_pago')->all())->toBe(['efectivo' => '60.00', 'qr_externo' => '40.00']);
+    expect($venta->refresh()->saldoPendiente())->toBe('0.00');
+});
+
+it('repone la cantidad base exacta al devolver por partes una unidad convertida', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('devolucion-unidad');
+    $base = UnidadMedida::factory()->create(['nombre' => 'Bidón de tres litros', 'simbolo' => 'bid3', 'uso' => 'cantidad', 'magnitud' => 'volumen', 'factor_a_referencia' => '3', 'decimales' => 4]);
+    $litro = UnidadMedida::factory()->create(['nombre' => 'Litro de prueba', 'simbolo' => 'litro', 'uso' => 'cantidad', 'magnitud' => 'volumen', 'factor_a_referencia' => '1', 'decimales' => 4]);
+    $variante->productoMaestro->update(['unidad_base_id' => $base->id]);
+    cargarStock($variante, $almacen, $cajero, $ocasional);
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'devolucion_permite_reembolso' => true]);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '100'], $supervisor);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'unidad_medida_id' => $litro->id, 'cantidad' => '3']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '100']],
+    ], $cajero)['venta'];
+    expect($venta->detalles()->sole()->cantidad_base)->toBe('1.0000');
+    $servicio = app(RegistrarDevolucion::class);
+    expect(fn () => $servicio->revisar($venta, [['indice' => 0, 'cantidad' => '0.0001']], 'reembolso', '', $supervisor))->toThrow(ValidationException::class);
+    foreach (['0.3333', '0.3334', '0.3333'] as $esperado) {
+        $lineas = [['indice' => 0, 'cantidad' => '1']];
+        $resumen = $servicio->revisar($venta, $lineas, 'reembolso', '', $supervisor);
+        expect($resumen['lineas'][0]['base_devolver'])->toBe($esperado);
+        $servicio->confirmar($venta, $lineas, 'reembolso', 'Devolución por litros', '', $resumen['revision'], $supervisor);
+    }
+    expect(InventarioStock::query()->sole()->cantidad_actual)->toBe('5.0000');
+    expect($venta->refresh()->saldoPendiente())->toBe('0.00');
+});
 
 it('no vende sin caja abierta', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('sincaja');

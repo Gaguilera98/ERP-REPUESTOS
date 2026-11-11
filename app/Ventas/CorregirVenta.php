@@ -45,6 +45,9 @@ class CorregirVenta
     /** @return array{lineas: list<array<string,mixed>>, total: string, cobrado: string, saldo: string, cobrar: string, devolver: string, reembolsos: list<array{origen: int, metodo: string, monto: string}>, cambios: list<array{variante: int, sku: string, cantidad: string, costo: ?string}>} */
     public function revisar(Venta $venta, array $edicion): array
     {
+        if ($venta->devoluciones()->exists()) {
+            throw ValidationException::withMessages(['lineas' => 'Esta venta tiene devoluciones. Registrá otra devolución para los productos restantes.']);
+        }
         if (! $venta->estaCompletada() || $venta->tipo_comprobante !== TipoComprobante::NotaVenta) {
             throw ValidationException::withMessages(['lineas' => 'Solo se pueden corregir notas de venta completadas.']);
         }

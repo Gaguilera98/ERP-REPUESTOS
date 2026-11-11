@@ -32,6 +32,7 @@ use App\Ventas\SaldoAFavorCliente;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Locked;
 
 trait ManejaMostrador
 {
@@ -162,9 +163,14 @@ trait ManejaMostrador
 
     public string $flashPrecioVenta = '';
 
+    #[Locked]
+    public ?int $ultimaVentaId = null;
+
     public string $ultimoCodigo = '';
 
     public string $ultimoTotal = '';
+
+    public string $ultimoVuelto = '';
 
     /** @var list<array{sku: string, precio_neto: string, precio_costo: string}> */
     public array $alertasPerdida = [];
@@ -514,6 +520,7 @@ trait ManejaMostrador
             'unidad_simbolo' => (string) ($variante->productoMaestro?->unidadBase?->simbolo ?: 'pza'),
         ];
 
+        $this->ultimoVuelto = '';
         $this->recalcularTotalesUi();
     }
 
@@ -613,8 +620,10 @@ trait ManejaMostrador
 
     public function limpiarUltimaVenta(): void
     {
+        $this->ultimaVentaId = null;
         $this->ultimoCodigo = '';
         $this->ultimoTotal = '';
+        $this->ultimoVuelto = '';
         $this->alertasPerdida = [];
     }
 
@@ -769,8 +778,10 @@ trait ManejaMostrador
                 default => $completar->completar($datosVenta, $usuario),
             };
 
-            $this->ultimoCodigo = $resultado['venta']->codigo;
-            $this->ultimoTotal = Montos::dos((string) $resultado['venta']->total);
+            $venta = $resultado['venta'];
+            $this->ultimaVentaId = $venta->id;
+            $this->ultimoCodigo = $venta->codigo;
+            $this->ultimoTotal = Montos::dos($venta->total);
             $this->alertasPerdida = $resultado['alertas_perdida'];
             $this->lineas = [];
             $this->ventaFiada = false;
@@ -787,10 +798,10 @@ trait ManejaMostrador
             $this->quitarDescuentoVenta();
             $this->busqueda = '';
 
-            $cambio = Montos::dos((string) Pago::query()->whereHas('aplicaciones', fn ($query) => $query->where('venta_id', $resultado['venta']->id))->sum('cambio_entregado'));
+            $cambio = Montos::dos((string) Pago::query()->whereHas('aplicaciones', fn ($query) => $query->where('venta_id', $venta->id))->sum('cambio_entregado'));
+            $this->ultimoVuelto = bccomp($cambio, '0', 2) > 0 ? $cambio : '';
             Notification::make()
-                ->title('Venta '.$resultado['venta']->codigo)
-                ->body(bccomp($cambio, '0', 2) > 0 ? 'Cambio a entregar: '.NegocioConfiguracion::codigoMoneda().' '.$cambio : null)
+                ->title('Venta '.$venta->codigo.' registrada')
                 ->success()
                 ->send();
 
