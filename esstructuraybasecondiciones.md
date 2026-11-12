@@ -56,6 +56,7 @@ Este documento unificado contiene la arquitectura completa, las reglas de negoci
 * **Emisión Dual de Comprobantes (`nota_venta` vs `factura_manual`):** 
   * *Por qué:* En la práctica comercial, se requiere agilidad extrema en mostrador y cumplimiento fiscal ante Impuestos Nacionales (SIN) sin depender de integraciones electrónicas complejas desde el inicio.
   * *Para qué:* El sistema emite un ticket comercial rápido (`nota_venta`) con todo el detalle de los repuestos para entregar al cliente o grapar al papel. Si requiere factura formal, se registra como `factura_manual`, exigiendo el `cliente_id` (con razón social / nombres y un documento de identidad del catálogo, tipicamente NIT o CI) y el `numero_comprobante` físico del talonario, facilitando al contador un reporte limpio y libre de errores de tipeo.
+  * *Pospuesto el 11 de noviembre de 2026:* la venta vigente es solo `nota_venta`. El talonario de papel se lleva afuera del sistema y la nota se adjunta a la libreta. `factura_manual` queda en el diseño para cuando un local necesite anotar el número de la hoja en el ERP.
 * **Snapshot Fiscal Histórico:** 
   * *Por qué:* Las leyes tributarias o porcentajes impositivos pueden cambiar en el futuro.
   * *Para qué:* Congelar los valores de impuestos (`venta_impuestos`) como texto y número fijo durante la transacción para proteger las auditorías contables pasadas. El porcentaje vigente vive en `impuestos`. La venta copia nombre y porcentaje. Si la ley cambia, se edita el impuesto. Las ventas viejas no.
@@ -216,6 +217,8 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 * *Para qué:* `marcas` guarda solo el nombre, único por negocio sin distinguir mayúsculas ni espacios de más. El producto maestro apunta con `marca_id`. Todas sus variantes heredan esa marca. SKF y NSK del mismo rodamiento son dos productos. Para qué auto sirve la pieza no va en esta tabla. La marca no es un `categoria_atributos`.
 
 ### 19. El talonario físico tiene rango y hojas anuladas
+
+Pospuesto el 11 de noviembre de 2026 (fase 8). El diseño se conserva. Hoy la venta es una nota de venta y la libreta de papel se controla afuera del sistema.
 * *Por qué:* El único del número evita repetirlo, pero no sabe qué talonario está en uso ni qué hoja se anuló en papel. La regla de anulación de `factura_manual` exige esa observación para el contador.
 * *Para qué:* `talonarios` pertenece a una sucursal y a `factura_manual`. Guarda `numero_desde`, `numero_hasta` y estado. Solo puede haber uno `activo` por `(tenant_id, sucursal_id, tipo_comprobante)`. Los rangos de una sucursal no se solapan: lo comprueba la aplicación al crear el talonario. La venta con factura manual apunta a ese talonario y su número tiene que caer dentro del rango. `talonario_anulaciones` registra cada hoja muerta en papel, con motivo, usuario y supervisor. Si la anulación nace de una nota de crédito, también guarda `nota_credito_id` y `notas_credito_devoluciones.observacion_anulacion_fisica` es obligatoria.
 
@@ -268,6 +271,7 @@ Actualizado el 11 de noviembre de 2026. La fase 6 queda cerrada con el alcance a
 * Las correcciones de productos o cantidades se guardan en correcciones_venta, vinculadas a la venta original, con usuario, fecha y motivo. Requieren Corregir:Venta. El cierre original conserva sus movimientos y la caja actual registra únicamente las diferencias de dinero realizadas. Los productos que se conservan mantienen el precio guardado; los agregados usan la lista actual del cliente. El cobro adicional de contado está implementado en efectivo.
 * El detalle distingue productos actuales y originales, historial de correcciones, cobros y reembolsos. El bloque independiente para ingresar abonos por código fue retirado del Mostrador.
 * Las devoluciones físicas de productos quedaron en la fase 7, cerrada el 11 de noviembre de 2026. Las correcciones de esta sección atienden errores de registro.
+* Por decisión del 11 de noviembre de 2026, la fase 8 (talonario y factura manual) queda pospuesta. No bloquea las fases siguientes. La venta sigue como nota de venta y el talonario de papel se lleva afuera del sistema, adjuntando la nota a la libreta. El diseño de `talonarios` y `factura_manual` queda escrito para cuando un local necesite controlar esas hojas desde el ERP.
 
 ### Fase 7: política comercial de devoluciones
 
@@ -672,7 +676,7 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `porcentaje` (decimal 5,2)
   * `is_active` (boolean, Default: true)
   * `timestamps` (timestamp)
-* **Talonarios** (Solo factura manual física. Una tienda que solo emite nota de venta no lo usa)
+* **Talonarios** (Solo factura manual física. Pospuesto con la fase 8 el 11 de noviembre de 2026. Una tienda que solo emite nota de venta no lo usa)
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
   * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales)
@@ -864,6 +868,6 @@ Una venta sale de un solo almacén. Si el ticket necesita dos depósitos, son do
 * **Ajuste y conteo.** Motivo y supervisor. Cambia cuántas piezas hay, no el precio. El conteo compara contra el stock del cierre e incluye las señas. No mueve la caja.
 * **Traslado.** Solo si son dos montones distintos. Un almacén compartido por dos sucursales no se traslada: las dos venden de la misma fila.
 * **Devolución del mismo día.** Supervisor, la pieza vuelve al kardex con el costo de esa venta, y la plata sale de la caja abierta.
-* **Factura manual.** Cliente, número y talonario. Si se anula, queda la observación del papel. La tienda que no factura usa nota de venta y no necesita talonario.
+* **Factura manual.** Pospuesta el 11 de noviembre de 2026. La venta vigente es la nota de venta y el talonario de papel se lleva afuera, adjuntando la nota a la libreta. Cuando se retome: cliente, número y talonario; si se anula, queda la observación del papel.
 * **Caja.** Una sesión abierta por cajero y sucursal. No cierra si hay un vale sin comprobante. Si el efectivo no cuadra, el texto de la diferencia es obligatorio.
 * **Dos negocios.** El mismo SKU, el mismo NIT y el mismo número de factura pueden existir en los dos. Una venta no puede usar el producto del otro.

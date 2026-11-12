@@ -24,7 +24,7 @@ todos:
     content: "Fase 7: notas de crédito y devolución Livewire"
     status: completed
   - id: fase-8-factura
-    content: "Fase 8: talonario y factura manual"
+    content: "Fase 8: talonario y factura manual, pospuesta; la venta sigue en nota de venta"
     status: pending
   - id: fase-9-ajustes
     content: "Fase 9: ajustes, conteo, traslados y corrección de costo"
@@ -60,7 +60,7 @@ flowchart LR
 
 ## Dónde va cada pantalla
 
-- Recursos Filament en `app/Filament/Negocio/Resources`: sucursales, almacenes, categorías, productos, clientes, tipos de documento de identidad, proveedores, compras, talonarios, ajustes, traslados, categorías de gasto, impuestos, tipo de cambio.
+- Recursos Filament en `app/Filament/Negocio/Resources`: sucursales, almacenes, categorías, productos, clientes, tipos de documento de identidad, proveedores, compras, ajustes, traslados, categorías de gasto, impuestos, tipo de cambio. El resource de talonarios queda con la fase 8, pospuesta el 11 de noviembre de 2026.
 - Abrir/cerrar caja es una página Filament (`CajaDelNegocio`), no un resource de listado completo ni el mostrador.
 - El mostrador es `MostradorDelNegocio` + Livewire `app/Livewire/Negocio/Venta/Mostrador`: buscador, líneas, flash, cobros y adjuntos.
 - La devolución del mismo día usa el mismo estilo Livewire, no un formulario genérico.
@@ -171,7 +171,9 @@ Reglas: permiso de devolución obligatorio y permiso distinto para excepciones a
 
 Pantalla: devolución y cambio desde el detalle de la nota `VNT-`. El resumen **Cambio completado** muestra el importe aplicado, el valor del reemplazo y la diferencia. Ambas notas se pueden consultar entre sí y el listado identifica la nota de reemplazo. Una devolución parcial conserva los demás productos en la nota original completada. Ambos formularios muestran las líneas con unidades disponibles. Una línea excluida queda en cero y dice «No retornable». Las acciones quedan deshabilitadas cuando volvieron todas o cuando las que quedan no se pueden devolver; en ese segundo caso el aviso nombra el SKU y el motivo. La anulación completa se bloquea después de un cambio o devolución y en la nota del reemplazo.
 
-## Fase 8. Factura manual
+## Fase 8. Factura manual — pospuesta
+
+**Estado al 11 de noviembre de 2026:** pospuesta. No bloquea las fases 9, 10 ni 11. La venta sigue como nota de venta (`VNT-`), con el precio final de la pieza. El talonario de papel se lleva afuera del sistema: la nota se adjunta a la libreta. El número de la hoja queda para cuando un local necesite controlarlo desde el ERP. El diseño de abajo se conserva para ese momento.
 
 Tablas: `talonarios`, `talonario_anulaciones`.
 
