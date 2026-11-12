@@ -3,6 +3,7 @@
 namespace App\Filament\Negocio\Resources\ProductoMaestros\Schemas;
 
 use App\Catalogo\VariantesProducto;
+use App\Enums\DevolucionComercialProducto;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
 use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
@@ -77,6 +78,15 @@ class ProductoMaestroForm
                                     ->createOptionAction(fn (Action $action): Action => $action
                                         ->visible(fn (): bool => (bool) auth('tenant')->user()?->can('create', Marca::class))
                                         ->modalHeading('Nueva marca')),
+                                Select::make('devolucion_comercial')
+                                    ->label('Devolución comercial')
+                                    ->options(collect(DevolucionComercialProducto::cases())->mapWithKeys(
+                                        fn (DevolucionComercialProducto $marca): array => [$marca->value => $marca->etiqueta()],
+                                    )->all())
+                                    ->default(DevolucionComercialProducto::Hereda->value)
+                                    ->required()
+                                    ->native(false)
+                                    ->helperText('Hereda el rubro. «Sí se devuelve» reabre una categoría bloqueada. No afecta un reclamo por falla.'),
                                 Select::make('unidad_base_id')
                                     ->label('Unidad de stock')
                                     ->helperText('El estante, el costo y el precio se cuentan en esta unidad.')

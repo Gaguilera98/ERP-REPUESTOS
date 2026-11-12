@@ -46,7 +46,7 @@ class AccionCambiarProducto
         $permiteCambio = ($politica['acepta_devoluciones'] ?? false) && ($politica['permite_cambio'] ?? false);
         $motivoBloqueo = fn (): ?string => match (true) {
             ! $permiteCambio => 'La política guardada en esta venta no permite cambios.',
-            ! $this->devoluciones->tieneUnidadesDisponibles($venta) => 'Ya volvieron todas las piezas de esta nota.',
+            ! $this->devoluciones->tieneUnidadesDisponibles($venta) => $this->devoluciones->motivoSinPiezasDisponibles($venta),
             default => null,
         };
 
@@ -101,9 +101,12 @@ class AccionCambiarProducto
                 ->helperText('Dejá en 0 las piezas que el cliente conserva.')
                 ->schema([
                     Hidden::make('indice'),
+                    Hidden::make('bloqueada')->dehydrated(false),
                     TextInput::make('producto')->label('Producto')->disabled()->dehydrated(false),
                     TextInput::make('disponible')->label('Disponible para devolver')->disabled()->dehydrated(false),
-                    TextInput::make('cantidad')->label('Cantidad a devolver')->inputMode('decimal')->required()->rule('regex:/^\d{1,10}(\.\d{1,4})?$/'),
+                    TextInput::make('cantidad')->label('Cantidad a devolver')->inputMode('decimal')->required()->rule('regex:/^\d{1,10}(\.\d{1,4})?$/')
+                        ->disabled(fn (Get $get): bool => (bool) $get('bloqueada'))
+                        ->helperText(fn (Get $get): ?string => $get('bloqueada') ? 'No retornable' : null),
                 ])->columns(3),
             Section::make('Pieza de reemplazo')->columns(2)->schema([
                 Select::make('reemplazo.producto_variante_id')->label('Producto')->required()->searchable()

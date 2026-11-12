@@ -29,7 +29,7 @@ use Illuminate\Validation\ValidationException;
 
 class CorregirVenta
 {
-    public function __construct(private PrecioDeLista $precios) {}
+    public function __construct(private PrecioDeLista $precios, private DevolucionComercial $devolucionComercial) {}
 
     /** @return list<array<string, mixed>> */
     public function lineasVigentes(Venta $venta): array
@@ -38,7 +38,7 @@ class CorregirVenta
             ->orderBy('id')->get()->map(fn ($linea): array => $linea->only([
                 'producto_variante_id', 'unidad_medida_id', 'factor_a_base', 'cantidad', 'cantidad_base',
                 'precio_unitario', 'precio_costo_snapshot', 'tipo_descuento', 'valor_descuento',
-                'descuento_aplicado', 'total_linea',
+                'descuento_aplicado', 'total_linea', 'sin_devolucion_comercial', 'motivo_sin_devolucion',
             ]))->all();
     }
 
@@ -121,6 +121,13 @@ class CorregirVenta
                 $costo = Montos::dividir($valor, $base, 4);
             }
 
+            $marca = $anterior
+                ? [
+                    'sin_devolucion_comercial' => (bool) ($anterior['sin_devolucion_comercial'] ?? false),
+                    'motivo_sin_devolucion' => $anterior['motivo_sin_devolucion'] ?? null,
+                ]
+                : $this->devolucionComercial->de($variante);
+
             $lineas[] = [
                 'producto_variante_id' => $variante->id, 'unidad_medida_id' => $unidad->id,
                 'factor_a_base' => $factor, 'cantidad' => $cantidad, 'cantidad_base' => $base,
@@ -128,6 +135,8 @@ class CorregirVenta
                 'tipo_descuento' => $anterior['tipo_descuento'] ?? null,
                 'valor_descuento' => $anterior['valor_descuento'] ?? '0.00',
                 'descuento_aplicado' => $descuento, 'total_linea' => $neto,
+                'sin_devolucion_comercial' => $marca['sin_devolucion_comercial'],
+                'motivo_sin_devolucion' => $marca['motivo_sin_devolucion'],
                 'producto' => $variante->productoMaestro?->nombre ?? $variante->sku,
                 'sku' => $variante->sku, 'unidad' => $unidad->simbolo,
             ];

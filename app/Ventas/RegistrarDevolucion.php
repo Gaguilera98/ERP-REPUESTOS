@@ -34,9 +34,12 @@ class RegistrarDevolucion
             ->filter(fn (array $linea): bool => bccomp($linea['disponible'], '0', 4) > 0)
             ->map(fn (array $linea): array => [
                 'indice' => $linea['indice'],
-                'producto' => $linea['sku'].' · '.$linea['producto'],
+                'producto' => $linea['sku'].' · '.$linea['producto'].($linea['sin_devolucion_comercial'] ?? false
+                    ? ' · No retornable: '.($linea['motivo_sin_devolucion'] ?? '')
+                    : ''),
                 'disponible' => Montos::sinCeros($linea['disponible']).' '.$linea['unidad'],
                 'cantidad' => '0',
+                'bloqueada' => (bool) ($linea['sin_devolucion_comercial'] ?? false),
             ])->values()->all();
     }
 
@@ -49,12 +52,28 @@ class RegistrarDevolucion
         foreach ($lineas as $indice => $linea) {
             $cantidadDevuelta = ($devueltas->get($indice) ?? collect())
                 ->reduce(fn (string $total, $detalle): string => bcadd($total, $detalle->cantidad, 4), '0.0000');
+            if (($linea['sin_devolucion_comercial'] ?? false) === true) {
+                continue;
+            }
             if (bccomp($linea['cantidad'], $cantidadDevuelta, 4) > 0) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    public function motivoSinPiezasDisponibles(Venta $venta): string
+    {
+        foreach ($this->disponibles($venta) as $linea) {
+            if (($linea['sin_devolucion_comercial'] ?? false) && bccomp((string) $linea['disponible'], '0', 4) > 0) {
+                $motivo = $linea['motivo_sin_devolucion'] ?? '';
+
+                return 'No se puede devolver ni cambiar '.$linea['sku'].'. No retornable'.($motivo !== '' ? ': '.$motivo : '').'.';
+            }
+        }
+
+        return 'Ya volvieron todas las piezas de esta nota.';
     }
 
     /** @return list<array<string, mixed>> */
@@ -150,6 +169,10 @@ class RegistrarDevolucion
             $cantidad = Montos::cuatro($fila['cantidad']);
             if (bccomp($cantidad, '0', 4) === 0) {
                 continue;
+            }
+            if ($linea['sin_devolucion_comercial'] ?? false) {
+                $motivo = $linea['motivo_sin_devolucion'] ?? '';
+                $this->rechazar('No se puede devolver ni cambiar '.$linea['sku'].'. No retornable'.($motivo !== '' ? ': '.$motivo : '').'.');
             }
             if (bccomp($cantidad, $linea['disponible'], 4) > 0 || ! $unidades->get($linea['unidad_medida_id'])?->admiteCantidad($cantidad)) {
                 $this->rechazar('La cantidad no es válida o supera lo disponible de '.$linea['sku'].'.');

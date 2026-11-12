@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\DevolucionComercialProducto;
 use App\Inventario\AsegurarUnidadesDeCantidad;
 use App\Models\Concerns\BelongsToTenantPool;
 use Database\Factories\ProductoMaestroFactory;
@@ -12,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
-#[Fillable(['tenant_id', 'nombre', 'categoria_id', 'marca_id', 'unidad_base_id', 'imagenes', 'is_active'])]
+#[Fillable(['tenant_id', 'nombre', 'categoria_id', 'marca_id', 'unidad_base_id', 'imagenes', 'is_active', 'devolucion_comercial'])]
 class ProductoMaestro extends Model
 {
     /** @use HasFactory<ProductoMaestroFactory> */
@@ -22,6 +23,7 @@ class ProductoMaestro extends Model
 
     protected $attributes = [
         'is_active' => true,
+        'devolucion_comercial' => DevolucionComercialProducto::Hereda,
     ];
 
     /**
@@ -32,6 +34,7 @@ class ProductoMaestro extends Model
         return [
             'imagenes' => 'array',
             'is_active' => 'boolean',
+            'devolucion_comercial' => DevolucionComercialProducto::class,
         ];
     }
 

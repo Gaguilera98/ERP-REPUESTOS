@@ -41,6 +41,10 @@ class CategoriaForm
                             ->label('Activa')
                             ->default(true)
                             ->helperText('Apagada no sale al crear un producto. Los que ya la usan la conservan.'),
+                        Toggle::make('sin_devolucion_comercial')
+                            ->label('No se devuelve ni se cambia')
+                            ->default(false)
+                            ->helperText('Las piezas de este rubro no entran en una devolución o cambio comercial, salvo que el producto diga lo contrario. No bloquea un reclamo por falla.'),
                         Repeater::make('atributos')
                             ->label('Atributos de la ficha')
                             ->relationship()

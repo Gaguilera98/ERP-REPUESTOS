@@ -6,6 +6,7 @@ use App\Caja\CongelarTurnosVencidos;
 use App\Compras\GuardarOrdenCompra;
 use App\Compras\ReasignarProveedorFlash;
 use App\Compras\RecibirMercaderia;
+use App\Enums\DevolucionComercialProducto;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\EstadoPago;
 use App\Enums\EstadoVenta;
@@ -41,6 +42,7 @@ use App\Models\TenantUser;
 use App\Models\TipoDocumentoIdentidad;
 use App\Models\UnidadMedida;
 use App\Models\Venta;
+use App\Models\VentaDetalle;
 use App\Ventas\AnularVenta;
 use App\Ventas\CambiarProductoVenta;
 use App\Ventas\CompletarVentaContado;
@@ -919,6 +921,46 @@ it('registra una devolución parcial desde el detalle y conserva los cobros de l
     $html = $detalle->instance()->getMountedAction()->getModalContent()->render();
     expect($html)->toContain('Productos después de las devoluciones', 'Lo que pasó', 'Devolución registrada', 'Reembolso de BOB 100.00', 'Medida incorrecta', 'Venta registrada');
     expect(strpos($html, 'Devolución registrada'))->toBeLessThan(strpos($html, 'Venta registrada'));
+});
+
+it('copia la exclusión comercial y deja que el producto reabra la categoría', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('exclusion-devolucion');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '5');
+    NegocioConfiguracion::query()->first()->update(['acepta_devoluciones' => true, 'dias_devolucion' => 7, 'devolucion_permite_reembolso' => true]);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $supervisor);
+    $categoria = $variante->productoMaestro->categoria;
+    $categoria->update(['nombre' => 'Lubricantes', 'sin_devolucion_comercial' => true]);
+    $ventas = app(CompletarVentaContado::class);
+    $datos = [
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [['producto_variante_id' => $variante->id, 'cantidad' => '1']],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '100']],
+    ];
+    $bloqueada = $ventas->completar($datos, $cajero)['venta'];
+    $linea = [['indice' => 0, 'cantidad' => '1']];
+    $devolver = app(RegistrarDevolucion::class);
+
+    expect(VentaDetalle::query()->where('venta_id', $bloqueada->id)->first())
+        ->sin_devolucion_comercial->toBeTrue()
+        ->motivo_sin_devolucion->toBe('Lubricantes');
+    expect($devolver->lineasParaFormulario($bloqueada)[0]['bloqueada'])->toBeTrue();
+    expect(fn () => $devolver->revisar($bloqueada, $linea, 'reembolso', '', $supervisor))->toThrow(ValidationException::class);
+    expect(fn () => $devolver->revisarCambio($bloqueada, $linea, '', $supervisor))->toThrow(ValidationException::class);
+
+    $variante->productoMaestro->update(['devolucion_comercial' => DevolucionComercialProducto::Permite]);
+    $reabierta = $ventas->completar($datos, $cajero)['venta'];
+
+    expect(VentaDetalle::query()->where('venta_id', $reabierta->id)->first()->sin_devolucion_comercial)->toBeFalse();
+    expect($devolver->revisar($reabierta, $linea, 'reembolso', '', $supervisor))->toHaveKey('revision');
+    expect(fn () => $devolver->revisar($bloqueada->fresh(), $linea, 'reembolso', '', $supervisor))->toThrow(ValidationException::class);
+
+    $categoria->update(['sin_devolucion_comercial' => false]);
+    $variante->productoMaestro->update(['nombre' => 'Filtro especial', 'devolucion_comercial' => DevolucionComercialProducto::Bloquea]);
+    $producto = $ventas->completar($datos, $cajero)['venta'];
+
+    expect(VentaDetalle::query()->where('venta_id', $producto->id)->first()->motivo_sin_devolucion)->toBe('Filtro especial');
+    expect(fn () => $devolver->revisar($producto, $linea, 'reembolso', '', $supervisor))->toThrow(ValidationException::class);
 });
 
 it('resuelve devoluciones como saldo a favor o reducción de deuda sin duplicar dinero', function (bool $credito) {

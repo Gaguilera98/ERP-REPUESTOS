@@ -25,6 +25,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'descuento_aplicado',
     'supervisor_descuento_id',
     'total_linea',
+    'sin_devolucion_comercial',
+    'motivo_sin_devolucion',
 ])]
 class VentaDetalle extends Model
 {
@@ -36,6 +38,7 @@ class VentaDetalle extends Model
     protected $attributes = [
         'valor_descuento' => 0,
         'descuento_aplicado' => 0,
+        'sin_devolucion_comercial' => false,
     ];
 
     /**
@@ -53,6 +56,7 @@ class VentaDetalle extends Model
             'valor_descuento' => 'decimal:2',
             'descuento_aplicado' => 'decimal:2',
             'total_linea' => 'decimal:2',
+            'sin_devolucion_comercial' => 'boolean',
         ];
     }
 

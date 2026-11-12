@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['tenant_id', 'nombre', 'is_active'])]
+#[Fillable(['tenant_id', 'nombre', 'is_active', 'sin_devolucion_comercial'])]
 class Categoria extends Model
 {
     /** @use HasFactory<CategoriaFactory> */
@@ -19,6 +19,7 @@ class Categoria extends Model
 
     protected $attributes = [
         'is_active' => true,
+        'sin_devolucion_comercial' => false,
     ];
 
     /**
@@ -28,6 +29,7 @@ class Categoria extends Model
     {
         return [
             'is_active' => 'boolean',
+            'sin_devolucion_comercial' => 'boolean',
         ];
     }
 

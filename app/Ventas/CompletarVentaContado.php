@@ -40,6 +40,7 @@ class CompletarVentaContado
         private FactorUnidad $factores,
         private MetodoPagoFactory $metodosPago,
         private PrecioDeLista $precios,
+        private DevolucionComercial $devolucionComercial,
     ) {}
 
     /**
@@ -419,6 +420,8 @@ class CompletarVentaContado
                     ]);
                 }
 
+                $marca = $this->devolucionComercial->de($variante);
+
                 VentaDetalle::query()->create([
                     'venta_id' => $venta->id,
                     'producto_variante_id' => $variante->id,
@@ -433,6 +436,8 @@ class CompletarVentaContado
                     'descuento_aplicado' => $linea['descuento_aplicado'],
                     'supervisor_descuento_id' => $linea['supervisor_descuento_id'],
                     'total_linea' => $linea['total_linea'],
+                    'sin_devolucion_comercial' => $marca['sin_devolucion_comercial'],
+                    'motivo_sin_devolucion' => $marca['motivo_sin_devolucion'],
                 ]);
             }
 

@@ -32,7 +32,7 @@ class AccionDevolverVenta
         $motivoBloqueo = fn (): ?string => match (true) {
             ! ($venta->politica_devolucion_snapshot['acepta_devoluciones'] ?? false) => 'La política guardada en esta venta no acepta devoluciones comerciales.',
             ! ($venta->politica_devolucion_snapshot['permite_reembolso'] ?? false) && ! ($venta->politica_devolucion_snapshot['permite_saldo_favor'] ?? false) => 'Esta venta solo permite cambio por otro producto.',
-            ! $this->devoluciones->tieneUnidadesDisponibles($venta) => 'Ya volvieron todas las piezas de esta nota.',
+            ! $this->devoluciones->tieneUnidadesDisponibles($venta) => $this->devoluciones->motivoSinPiezasDisponibles($venta),
             default => null,
         };
 
@@ -50,9 +50,12 @@ class AccionDevolverVenta
                     Repeater::make('lineas')->label('Productos que devuelve')->addable(false)->deletable(false)->reorderable(false)
                         ->schema([
                             Hidden::make('indice'),
+                            Hidden::make('bloqueada')->dehydrated(false),
                             TextInput::make('producto')->label('Producto')->disabled()->dehydrated(false),
                             TextInput::make('disponible')->label('Disponible para devolver')->disabled()->dehydrated(false),
-                            TextInput::make('cantidad')->label('Cantidad a devolver')->inputMode('decimal')->required()->rule('regex:/^\d{1,10}(\.\d{1,4})?$/'),
+                            TextInput::make('cantidad')->label('Cantidad a devolver')->inputMode('decimal')->required()->rule('regex:/^\d{1,10}(\.\d{1,4})?$/')
+                                ->disabled(fn (Get $get): bool => (bool) $get('bloqueada'))
+                                ->helperText(fn (Get $get): ?string => $get('bloqueada') ? 'No retornable' : null),
                         ])->columns(3),
                     Select::make('resolucion')->label('Resolución')->required()->options(function () use ($venta): array {
                         $politica = $venta->politica_devolucion_snapshot ?? [];

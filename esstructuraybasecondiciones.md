@@ -297,7 +297,9 @@ Diseño y avance del flujo al 11 de noviembre de 2026:
 10. Presentación del cambio: la nota original muestra **Cambio completado**, el importe aplicado, el valor del reemplazo y la diferencia cobrada, reembolsada o guardada como saldo. Si volvieron todas las piezas, el detalle lo indica. **Ver reemplazo** abre la otra nota y **Ver venta original** permite consultarla desde el reemplazo. La lista identifica la nota nueva como **Reemplazo**.
 11. **Anular venta** revierte toda una nota completada y repone sus piezas. Requiere permiso de anulación, ausencia de pagos pendientes y caja abierta de hoy en la sucursal original si hay que devolver dinero. Se bloquea si la nota ya tiene una devolución o cambio, o si es la nota de reemplazo. Las piezas restantes de la original se gestionan desde esa nota. Si vuelve la pieza entregada como reemplazo, se revisa desde su propia nota, según su política.
 
-Fase 7 sigue en curso: quedan las exclusiones por producto/categoría y la revisión final del alcance. El flujo separado de piezas dañadas y garantía queda para más adelante (ítem 15 de «Cosas a tener en cuenta a futuro»).
+12. Exclusiones comerciales: `categorias.sin_devolucion_comercial` bloquea el rubro. `productos_maestros.devolucion_comercial` es `hereda`, `bloquea` o `permite`; el producto gana. Al vender, la línea copia `sin_devolucion_comercial` y `motivo_sin_devolucion`. Cambiar la ficha después no cambia esa venta. Una corrección conserva la marca de la línea original y resuelve la marca actual solo si la línea es un producto nuevo. Devolución y cambio rechazan esa línea y la muestran como «No retornable». No bloquea un reclamo por falla.
+
+Fase 7 sigue en curso: queda la revisión final del alcance. El flujo separado de piezas dañadas y garantía queda para más adelante (ítem 15 de «Cosas a tener en cuenta a futuro»).
 
 Verificación de este avance: 14 pruebas enfocadas y 118 comprobaciones aprobadas, incluyendo devolución parcial, crédito, saldo a favor reutilizado, venta corregida, métodos combinados, plazo/excepción, aislamiento entre tenants y redondeo acumulado de importes y stock. Build de assets y Pint correctos.
 
