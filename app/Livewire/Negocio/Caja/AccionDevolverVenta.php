@@ -29,23 +29,22 @@ class AccionDevolverVenta
 
     public function para(Venta $venta): Action
     {
+        $motivoBloqueo = fn (): ?string => match (true) {
+            ! ($venta->politica_devolucion_snapshot['acepta_devoluciones'] ?? false) => 'La política guardada en esta venta no acepta devoluciones comerciales.',
+            ! ($venta->politica_devolucion_snapshot['permite_reembolso'] ?? false) && ! ($venta->politica_devolucion_snapshot['permite_saldo_favor'] ?? false) => 'Esta venta solo permite cambio por otro producto.',
+            ! $this->devoluciones->tieneUnidadesDisponibles($venta) => 'Ya volvieron todas las piezas de esta nota.',
+            default => null,
+        };
+
         return Action::make('devolverVenta')->label('Registrar devolución')->color('warning')->icon('heroicon-o-arrow-uturn-left')
             ->authorize(fn (): bool => (bool) auth('tenant')->user()?->can('Registrar:Devolucion'))
             ->visible(fn (): bool => $venta->estaCompletada() && $venta->tipo_comprobante === TipoComprobante::NotaVenta && $venta->entregada_en !== null)
-            ->disabled(fn (): bool => ! ($venta->politica_devolucion_snapshot['acepta_devoluciones'] ?? false)
-                || (! ($venta->politica_devolucion_snapshot['permite_reembolso'] ?? false) && ! ($venta->politica_devolucion_snapshot['permite_saldo_favor'] ?? false)))
-            ->tooltip(fn (): ?string => ! ($venta->politica_devolucion_snapshot['acepta_devoluciones'] ?? false)
-                ? 'La política guardada en esta venta no acepta devoluciones comerciales.'
-                : ((! ($venta->politica_devolucion_snapshot['permite_reembolso'] ?? false) && ! ($venta->politica_devolucion_snapshot['permite_saldo_favor'] ?? false)) ? 'Esta venta solo permite cambio por otro producto.' : null))
+            ->disabled(fn (): bool => $motivoBloqueo() !== null)
+            ->tooltip($motivoBloqueo)
             ->modalHeading('Devolver productos · '.$venta->codigo)->modalWidth('4xl')
             ->modalDescription('Solo piezas recibidas en buen estado, que volverán al almacén original. Indicá 0 en los productos que no devuelve.')
             ->modalSubmitActionLabel('Confirmar devolución')
-            ->fillForm(function () use ($venta): array {
-                return ['lineas' => array_map(fn (array $linea): array => [
-                    'indice' => $linea['indice'], 'producto' => $linea['sku'].' · '.$linea['producto'],
-                    'disponible' => $linea['disponible'].' '.$linea['unidad'], 'cantidad' => '0',
-                ], $this->devoluciones->disponibles($venta))];
-            })
+            ->fillForm(fn (): array => ['lineas' => $this->devoluciones->lineasParaFormulario($venta)])
             ->steps([
                 Step::make('Productos')->schema([
                     Repeater::make('lineas')->label('Productos que devuelve')->addable(false)->deletable(false)->reorderable(false)

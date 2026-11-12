@@ -163,13 +163,13 @@ Pantalla: la misma venta Livewire gana estos modos. GestionarReservas::procesarV
 
 Estado al 11 de noviembre de 2026: en curso. Implementadas configuración por tenant, política guardada y fecha de entrega por venta, y devolución de piezas en buen estado desde el detalle compartido de Mis ventas, Caja y Cajas del día. La acción permite devolución parcial o total, reembolso por métodos originales o saldo a favor; respeta cantidades vigentes, descuentos, costo guardado y plazo de la venta. En crédito reduce primero la deuda. El reembolso de dinero se registra en la caja de hoy; restaurar saldo o reducir deuda no mueve dinero. Las reservas sin entregar conservan su flujo de cancelación.
 
-Diseño y campos detallados en esstructuraybasecondiciones.md, sección «Fase 7: política comercial de devoluciones». Permisos Registrar:Devolucion y Autorizar:ExcepcionDevolucion. Motivo obligatorio y excepción al plazo auditada. Tras una devolución se bloquean correcciones/anulación completa para evitar duplicaciones; se permiten devoluciones adicionales de las piezas restantes. El detalle muestra vendido/devuelto/conserva e historial. Los cambios de productos en buen estado se registran desde ventas de contado pagadas, con un reemplazo del mismo almacén y nota vinculada. La caja de hoy registra únicamente el cobro o reembolso de la diferencia. Quedan pendientes piezas dañadas/garantía y la revisión final de la fase.
+Diseño y campos detallados en esstructuraybasecondiciones.md, sección «Fase 7: política comercial de devoluciones». Permisos Registrar:Devolucion y Autorizar:ExcepcionDevolucion. Motivo obligatorio y excepción al plazo auditada. Tras una devolución se bloquean correcciones/anulación completa para evitar duplicaciones; se permiten devoluciones adicionales de las piezas restantes. El detalle muestra vendido/devuelto/conserva e historial. Los cambios de productos en buen estado se registran desde ventas de contado pagadas, con un reemplazo del mismo almacén y nota vinculada. La caja de hoy registra únicamente el cobro o reembolso de la diferencia. El flujo de piezas dañadas y garantías quedó anotado para más adelante; resta definir el alcance de las exclusiones por producto o categoría.
 
 Tablas: `notas_credito_devoluciones`, `nota_credito_detalles`.
 
 Reglas: permiso de devolución obligatorio y permiso distinto para excepciones al plazo; respetar la política guardada, sin depender del nombre de rol. Se devuelve la línea vigente vendida, no un producto suelto, y no más unidades de las disponibles tras correcciones/devoluciones previas. El reingreso vendible usa el costo congelado; lo dañado requiere un destino separado. La plata sale de la caja de hoy según resolución y método autorizados. Las reservas vigentes usan su cancelación existente para liberar lo apartado. En crédito se ajusta la deuda y solo se reembolsa lo que corresponda de lo cobrado.
 
-Pantalla: devolución y cambio desde el detalle de la nota `VNT-`. El resumen **Cambio completado** muestra el importe aplicado, el valor del reemplazo y la diferencia. Ambas notas se pueden consultar entre sí y el listado identifica la nota de reemplazo. Una devolución parcial conserva los demás productos en la nota original completada. La anulación completa se bloquea después de un cambio o devolución y en la nota del reemplazo.
+Pantalla: devolución y cambio desde el detalle de la nota `VNT-`. El resumen **Cambio completado** muestra el importe aplicado, el valor del reemplazo y la diferencia. Ambas notas se pueden consultar entre sí y el listado identifica la nota de reemplazo. Una devolución parcial conserva los demás productos en la nota original completada. Ambos formularios muestran las líneas con unidades disponibles y sus acciones quedan deshabilitadas cuando volvieron todas. La anulación completa se bloquea después de un cambio o devolución y en la nota del reemplazo.
 
 ## Fase 8. Factura manual
 
@@ -185,7 +185,7 @@ Tablas: `ajustes_inventario`, `ajuste_detalles`, `traslados`, `traslado_detalles
 
 Reglas: el ajuste cambia unidades, no el promedio, con motivo y supervisor; el conteo compara al cerrar e incluye las señas; no cierra si dejaría el stock bajo lo reservado; el traslado une salida y entrada y no se usa si el almacén es compartido; corregir un costo no edita la compra ni las ventas ya hechas, y el movimiento lleva cantidad cero.
 
-Pantalla: resources Filament. El kardex sigue siendo de solo inserción.
+Pantalla: recursos Filament. Ya está disponible **Ver kardex** desde la lista y la ficha de Productos. La consulta muestra movimientos de las variantes del producto, con cantidad que entró o salió y stock resultante por almacén. Se filtra por almacén, día y tipo, incluidas entradas por compra y entradas express. La consulta usa el permiso de ver el producto. Los ajustes, el conteo, los traslados y las correcciones de costo se implementan en esta fase.
 
 ## Fase 10. Caja chica
 

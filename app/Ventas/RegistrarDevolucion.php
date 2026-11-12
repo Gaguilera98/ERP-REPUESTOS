@@ -27,6 +27,36 @@ class RegistrarDevolucion
 {
     public function __construct(private CorregirVenta $correcciones, private CostoPromedio $costos) {}
 
+    /** @return list<array{indice: int, producto: string, disponible: string, cantidad: string}> */
+    public function lineasParaFormulario(Venta $venta): array
+    {
+        return collect($this->disponibles($venta))
+            ->filter(fn (array $linea): bool => bccomp($linea['disponible'], '0', 4) > 0)
+            ->map(fn (array $linea): array => [
+                'indice' => $linea['indice'],
+                'producto' => $linea['sku'].' · '.$linea['producto'],
+                'disponible' => Montos::sinCeros($linea['disponible']).' '.$linea['unidad'],
+                'cantidad' => '0',
+            ])->values()->all();
+    }
+
+    public function tieneUnidadesDisponibles(Venta $venta): bool
+    {
+        $venta->loadMissing(['devoluciones.detalles', 'ultimaCorreccion', 'detalles']);
+        $devueltas = $venta->devoluciones->flatMap->detalles->groupBy('linea_indice');
+        $lineas = $venta->ultimaCorreccion?->lineas ?? $venta->detalles->sortBy('id')->values()->all();
+
+        foreach ($lineas as $indice => $linea) {
+            $cantidadDevuelta = ($devueltas->get($indice) ?? collect())
+                ->reduce(fn (string $total, $detalle): string => bcadd($total, $detalle->cantidad, 4), '0.0000');
+            if (bccomp($linea['cantidad'], $cantidadDevuelta, 4) > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** @return list<array<string, mixed>> */
     public function disponibles(Venta $venta): array
     {

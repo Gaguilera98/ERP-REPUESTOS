@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 #[Fillable(['tenant_id', 'nombre', 'categoria_id', 'marca_id', 'unidad_base_id', 'imagenes', 'is_active'])]
 class ProductoMaestro extends Model
@@ -59,6 +60,12 @@ class ProductoMaestro extends Model
     public function variantes(): HasMany
     {
         return $this->hasMany(ProductoVariante::class);
+    }
+
+    /** @return HasManyThrough<InventarioStock, ProductoVariante, $this> */
+    public function stocks(): HasManyThrough
+    {
+        return $this->through('variantes')->has('stocks');
     }
 
     public function unidadBase(): BelongsTo

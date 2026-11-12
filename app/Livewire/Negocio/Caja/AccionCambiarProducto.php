@@ -44,6 +44,11 @@ class AccionCambiarProducto
     {
         $politica = $venta->politica_devolucion_snapshot;
         $permiteCambio = ($politica['acepta_devoluciones'] ?? false) && ($politica['permite_cambio'] ?? false);
+        $motivoBloqueo = fn (): ?string => match (true) {
+            ! $permiteCambio => 'La política guardada en esta venta no permite cambios.',
+            ! $this->devoluciones->tieneUnidadesDisponibles($venta) => 'Ya volvieron todas las piezas de esta nota.',
+            default => null,
+        };
 
         return Action::make('cambiarProducto')
             ->label('Cambiar producto')
@@ -53,8 +58,8 @@ class AccionCambiarProducto
                 && (bool) auth('tenant')->user()?->can('view', $venta)
                 && (bool) auth('tenant')->user()?->can('create', Venta::class))
             ->visible(fn (): bool => $this->cambios->admite($venta))
-            ->disabled(! $permiteCambio)
-            ->tooltip($permiteCambio ? null : 'La política guardada en esta venta no permite cambios.')
+            ->disabled(fn (): bool => $motivoBloqueo() !== null)
+            ->tooltip($motivoBloqueo)
             ->modalHeading('Cambiar producto · '.$venta->codigo)
             ->modalWidth('4xl')
             ->stickyModalHeader()
@@ -62,12 +67,7 @@ class AccionCambiarProducto
             ->modalDescription('Recibí la pieza en buen estado y elegí el reemplazo del mismo almacén.')
             ->modalSubmitActionLabel('Confirmar cambio')
             ->fillForm(fn (): array => [
-                'lineas' => collect($this->devoluciones->disponibles($venta))
-                    ->filter(fn (array $linea): bool => bccomp($linea['disponible'], '0', 4) > 0)
-                    ->map(fn (array $linea): array => [
-                        'indice' => $linea['indice'], 'producto' => $linea['sku'].' · '.$linea['producto'],
-                        'disponible' => Montos::sinCeros($linea['disponible']).' '.$linea['unidad'], 'cantidad' => '0',
-                    ])->values()->all(),
+                'lineas' => $this->devoluciones->lineasParaFormulario($venta),
                 'reemplazo' => ['cantidad' => '1'],
             ])
             ->steps([$this->productosDelCambio($venta), $this->confirmacion($venta)])

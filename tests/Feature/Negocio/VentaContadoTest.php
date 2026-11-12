@@ -1256,6 +1256,56 @@ it('confirma el cambio desde el detalle y muestra ambas piezas en el historial',
     expect($cajaNueva->instance()->getMountedAction()->getRecord()->is($venta))->toBeTrue();
 });
 
+it('mantiene disponibles solo las piezas conservadas tras una devolución parcial', function () {
+    $this->freezeTime();
+    ['supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $rodamiento, 'ocasional' => $ocasional] = negocioConMostrador('piezas-conservadas');
+    $filtro = ProductoVariante::factory()->create(['sku' => 'FILTRO-CONSERVADO', 'precio_venta' => '35.00']);
+    NegocioConfiguracion::query()->firstOrFail()->update([
+        'acepta_devoluciones' => true, 'devolucion_permite_cambio' => true, 'devolucion_permite_reembolso' => true,
+    ]);
+    cargarStock($rodamiento, $almacen, $supervisor, $ocasional);
+    cargarStock($filtro, $almacen, $supervisor, $ocasional);
+    $caja = app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $supervisor);
+    $venta = app(CompletarVentaContado::class)->completar([
+        'sucursal_id' => $sucursal->id, 'almacen_id' => $almacen->id,
+        'lineas' => [
+            ['producto_variante_id' => $rodamiento->id, 'cantidad' => '1'],
+            ['producto_variante_id' => $filtro->id, 'cantidad' => '1'],
+        ],
+        'pagos' => [['metodo_pago' => 'efectivo', 'monto' => '135.00']],
+    ], $supervisor)['venta'];
+    $devoluciones = app(RegistrarDevolucion::class);
+    $devolver = function (int $indice) use ($devoluciones, $venta, $supervisor): void {
+        $lineas = [['indice' => $indice, 'cantidad' => '1']];
+        $resumen = $devoluciones->revisar($venta, $lineas, 'reembolso', '', $supervisor);
+        $devoluciones->confirmar($venta, $lineas, 'reembolso', 'Pieza devuelta', '', $resumen['revision'], $supervisor);
+    };
+    $devolver(0);
+
+    expect($venta->refresh()->estado)->toBe(EstadoVenta::Completada);
+    expect($venta->totalVigente())->toBe('35.00');
+    expect(InventarioStock::query()->where('producto_variante_id', $filtro->id)->sole()->cantidad_actual)->toBe('4.0000');
+
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $pagina = Livewire::actingAs($supervisor, 'tenant')->test(VentasDeSesion::class, ['sesionId' => $caja->id]);
+    $detalle = TestAction::make('verDetalle')->table($venta);
+    foreach (['devolverVenta', 'cambiarProducto'] as $accion) {
+        $pagina->assertActionEnabled([$detalle, TestAction::make($accion)])
+            ->mountAction([$detalle, TestAction::make($accion)])
+            ->assertActionMounted($accion)
+            ->assertSchemaStateSet(function (array $estado): void {
+                expect(collect($estado['lineas'])->pluck('indice')->all())->toBe([1]);
+            })->unmountAction()->unmountAction();
+    }
+
+    $devolver(1);
+    $pagina->call('$refresh')
+        ->assertActionDisabled([$detalle, TestAction::make('devolverVenta')])
+        ->assertActionDisabled([$detalle, TestAction::make('cambiarProducto')]);
+    expect($venta->refresh()->totalVigente())->toBe('0.00');
+    expect($venta->estado)->toBe(EstadoVenta::Completada);
+});
+
 it('no vende sin caja abierta', function () {
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('sincaja');
 

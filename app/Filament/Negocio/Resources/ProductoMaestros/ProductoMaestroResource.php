@@ -4,6 +4,7 @@ namespace App\Filament\Negocio\Resources\ProductoMaestros;
 
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\CreateProductoMaestro;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\EditProductoMaestro;
+use App\Filament\Negocio\Resources\ProductoMaestros\Pages\KardexProductoMaestro;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\ListProductoMaestros;
 use App\Filament\Negocio\Resources\ProductoMaestros\Schemas\ProductoMaestroForm;
 use App\Filament\Negocio\Resources\ProductoMaestros\Tables\ProductoMaestrosTable;
@@ -57,6 +58,7 @@ class ProductoMaestroResource extends Resource
             'index' => ListProductoMaestros::route('/'),
             'create' => CreateProductoMaestro::route('/create'),
             'edit' => EditProductoMaestro::route('/{record}/edit'),
+            'kardex' => KardexProductoMaestro::route('/{record}/kardex'),
         ];
     }
 }

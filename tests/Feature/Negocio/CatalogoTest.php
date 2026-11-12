@@ -3,15 +3,19 @@
 use App\Catalogo\VariantesProducto;
 use App\Enums\MagnitudUnidad;
 use App\Enums\TipoAtributoCategoria;
+use App\Enums\TipoMovimientoInventario;
 use App\Filament\Negocio\Resources\Categorias\Pages\ManageCategorias;
 use App\Filament\Negocio\Resources\Categorias\Schemas\CategoriaForm;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\CreateProductoMaestro;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\EditProductoMaestro;
+use App\Filament\Negocio\Resources\ProductoMaestros\Pages\KardexProductoMaestro;
+use App\Filament\Negocio\Resources\ProductoMaestros\Pages\ListProductoMaestros;
 use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
 use App\Models\InventarioStock;
 use App\Models\Marca;
+use App\Models\MovimientoInventario;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
 use App\Models\Tenant;
@@ -37,6 +41,80 @@ beforeEach(function () {
         '--realpath' => true,
         '--force' => true,
     ]);
+});
+
+it('muestra el stock total del producto y separa las reservas por almacén y SKU en su ficha', function () {
+    $tenant = Tenant::factory()->create();
+    tenancy()->initialize($tenant);
+    $supervisor = TenantUser::factory()->create();
+    $supervisor->assignRole('supervisor');
+    $deposito = Almacen::factory()->create(['nombre' => 'Depósito Central']);
+    $tienda = Almacen::factory()->create(['nombre' => 'Tienda Norte']);
+    $producto = ProductoMaestro::factory()->create();
+    $variante = ProductoVariante::factory()->create(['producto_maestro_id' => $producto->id, 'sku' => 'STOCK-A']);
+    $otraVariante = ProductoVariante::factory()->create(['producto_maestro_id' => $producto->id, 'sku' => 'STOCK-B']);
+    $otroProducto = ProductoVariante::factory()->create();
+    $variante->stocks()->where('almacen_id', $deposito->id)->sole()
+        ->forceFill(['cantidad_actual' => '7.2500', 'cantidad_reservada' => '2.0000'])->save();
+    $otraVariante->stocks()->where('almacen_id', $tienda->id)->sole()
+        ->forceFill(['cantidad_actual' => '4.5000'])->save();
+    $otroProducto->stocks()->where('almacen_id', $deposito->id)->sole()
+        ->forceFill(['cantidad_actual' => '30.0000'])->save();
+
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($supervisor, 'tenant')->test(ListProductoMaestros::class)
+        ->assertTableColumnFormattedStateSet('stock_fisico', '11.75 pza', $producto)
+        ->assertSee('9.75 disponibles');
+
+    Livewire::actingAs($supervisor, 'tenant')->test(EditProductoMaestro::class, ['record' => $producto->getKey()])
+        ->assertSeeInOrder(['Stock por almacén', 'Depósito Central', 'STOCK-A', '7.25 pza', '2 pza', '5.25 pza'])
+        ->assertSeeInOrder(['Tienda Norte', 'STOCK-B', '4.5 pza'])
+        ->assertDontSee('30 pza');
+
+    tenancy()->end();
+});
+
+it('consulta el kardex del producto y filtra por almacén, tipo y día', function () {
+    $tenant = Tenant::factory()->create();
+    tenancy()->initialize($tenant);
+    $cajero = TenantUser::factory()->create();
+    $cajero->assignRole('cajero');
+    $producto = ProductoMaestro::factory()->create();
+    $variante = ProductoVariante::factory()->create(['producto_maestro_id' => $producto->id]);
+    $deposito = Almacen::factory()->create();
+    $tienda = Almacen::factory()->create();
+    $movimiento = fn (array $datos): MovimientoInventario => MovimientoInventario::factory()->create([
+        'producto_variante_id' => $variante->id, 'almacen_id' => $deposito->id, 'user_id' => $cajero->id,
+        'created_at' => '2026-11-11 10:00:00', ...$datos,
+    ]);
+    $compra = $movimiento([]);
+    $express = $movimiento(['tipo_movimiento' => TipoMovimientoInventario::EntradaFlashEmergencia]);
+    $salida = $movimiento(['tipo_movimiento' => TipoMovimientoInventario::SalidaVenta, 'stock_previo' => 2, 'stock_posterior' => 1]);
+    $otroDia = $movimiento(['created_at' => '2026-11-10 10:00:00']);
+    $otroAlmacen = $movimiento(['almacen_id' => $tienda->id]);
+    $otroProducto = $movimiento(['producto_variante_id' => ProductoVariante::factory()->create()->id]);
+
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    Livewire::actingAs($cajero, 'tenant')->test(KardexProductoMaestro::class, ['record' => $producto->id])
+        ->assertCanSeeTableRecords([$compra, $express, $salida, $otroDia, $otroAlmacen])
+        ->assertCanNotSeeTableRecords([$otroProducto])
+        ->filterTable('almacen_id', $deposito)
+        ->filterTable('tipo_movimiento', [TipoMovimientoInventario::EntradaCompra, TipoMovimientoInventario::EntradaFlashEmergencia])
+        ->filterTable('dia', ['fecha' => '2026-11-11'])
+        ->assertCanSeeTableRecords([$compra, $express])
+        ->assertCanNotSeeTableRecords([$salida, $otroDia, $otroAlmacen, $otroProducto]);
+
+    $usuarioSinAcceso = TenantUser::factory()->create();
+    Livewire::actingAs($usuarioSinAcceso, 'tenant')->test(KardexProductoMaestro::class, ['record' => $producto->id])->assertForbidden();
+
+    $otroTenant = Tenant::factory()->create();
+    tenancy()->initialize($otroTenant);
+    $otroCajero = TenantUser::factory()->create();
+    $otroCajero->assignRole('cajero');
+    Livewire::actingAs($otroCajero, 'tenant')->test(KardexProductoMaestro::class, ['record' => $producto->id])->assertNotFound();
+
+    tenancy()->end();
 });
 
 it('no tiene columnas fijas de dimensiones: los atributos viven en atributos_json', function () {
