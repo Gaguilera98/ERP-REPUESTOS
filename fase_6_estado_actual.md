@@ -68,7 +68,7 @@ El comando php artisan ventas:vencer-reservas queda disponible para mantenimient
 * Resumen simplificado del detalle, aviso de reembolso y movimientos con importe y sesión.
 * Retiro del formulario independiente de abonos por código en Mostrador.
 
-Estos cambios están relacionados con la operación de ventas. La fase 7 de devoluciones físicas sigue pendiente.
+Estos cambios están relacionados con la operación de ventas. Las devoluciones físicas quedaron en la fase 7, cerrada el 11 de noviembre de 2026. Su estado vigente, incluidas las exclusiones por categoría y producto, está en esstructuraybasecondiciones.md.
 
 ## Límites del alcance cerrado
 
