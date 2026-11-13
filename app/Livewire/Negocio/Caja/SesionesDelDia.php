@@ -71,6 +71,21 @@ class SesionesDelDia extends Component implements HasActions, HasSchemas, HasTab
                     ->formatStateUsing(fn (EstadoCajaSesion $state): string => $state->etiqueta())
                     ->color(fn (EstadoCajaSesion $state): array => $state->getColor()),
                 TextColumn::make('monto_apertura')->label('Fondo inicial')->extraCellAttributes(['data-label' => 'Fondo inicial'])->money(NegocioConfiguracion::codigoMoneda()),
+                TextColumn::make('caja_chica')
+                    ->label('Caja chica')
+                    ->extraCellAttributes(['data-label' => 'Caja chica'])
+                    ->state(function (CajaSesion $record): string {
+                        $arqueo = app(ArqueoCajaSesion::class)->de($record);
+
+                        if (! ($arqueo['tiene_caja_chica'] ?? false)) {
+                            return '—';
+                        }
+
+                        $pendientes = count($arqueo['vales_pendientes']);
+
+                        return 'Sale '.$arqueo['egresos_caja_chica'].' · entra '.$arqueo['ingresos_caja_chica']
+                            .($pendientes > 0 ? ' · '.$pendientes.' vale(s) pendiente(s)' : '');
+                    }),
             ])
             ->recordActions([
                 Action::make('verSesion')->label('Ver ventas')->icon(Heroicon::OutlinedEye)

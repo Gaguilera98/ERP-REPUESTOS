@@ -17,28 +17,41 @@
 
     <div class="w-full space-y-5">
         @if ($pendientes->isNotEmpty())
-            <section class="space-y-3">
-                @foreach ($pendientes as $pendiente)
-                    <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-400/30 dark:bg-amber-400/10">
-                        <div>
-                            <p class="text-sm font-semibold text-amber-950 dark:text-amber-100">Turno anterior pendiente de contar</p>
-                            <p class="text-xs text-amber-800 dark:text-amber-200">
-                                Sesión #{{ $pendiente->id }} · {{ $pendiente->sucursal?->nombre }} · Apertura {{ $pendiente->fecha_apertura->format('d/m/Y H:i') }}
-                            </p>
-                        </div>
-                        @if (auth('tenant')->user()?->can('update', $pendiente))
-                            <x-filament::button
-                                type="button"
-                                color="warning"
-                                icon="heroicon-o-clock"
-                                wire:click="contar({{ $pendiente->id }})"
-                            >
-                                Revisar turno anterior
-                            </x-filament::button>
-                        @endif
-                    </div>
-                @endforeach
-            </section>
+            <details wire:key="caja-turnos-pendientes" class="group rounded-xl border border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
+                <summary class="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-2 rounded-xl px-4 py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 [&::-webkit-details-marker]:hidden">
+                    <x-filament::icon icon="heroicon-o-clock" class="size-5 shrink-0" />
+                    <span class="min-w-0 flex-1 text-sm font-semibold">
+                        {{ $pendientes->count() === 1 ? '1 turno anterior pendiente de contar' : $pendientes->count().' turnos anteriores pendientes de contar' }}
+                    </span>
+                    <span class="flex items-center gap-1.5 text-sm font-medium">
+                        <span class="group-open:hidden">{{ $pendientes->count() === 1 ? 'Ver turno' : 'Ver turnos' }}</span>
+                        <span class="hidden group-open:inline">Ocultar</span>
+                        <x-filament::icon icon="heroicon-o-chevron-down" class="size-4 shrink-0 group-open:rotate-180" />
+                    </span>
+                </summary>
+
+                <ul class="max-h-64 divide-y divide-amber-200 overflow-y-auto border-t border-amber-200 px-4 dark:divide-amber-400/20 dark:border-amber-400/20">
+                    @foreach ($pendientes as $pendiente)
+                        <li wire:key="caja-turno-pendiente-{{ $pendiente->id }}" class="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                            <div class="min-w-0">
+                                <p class="text-sm font-medium">Sesión #{{ $pendiente->id }} · {{ $pendiente->sucursal?->nombre }}</p>
+                                <p class="text-xs text-amber-800 dark:text-amber-200">Apertura {{ $pendiente->fecha_apertura->format('d/m/Y H:i') }}</p>
+                            </div>
+                            @if (auth('tenant')->user()?->can('update', $pendiente))
+                                <x-filament::button
+                                    type="button"
+                                    color="gray"
+                                    size="sm"
+                                    aria-label="Revisar turno anterior #{{ $pendiente->id }}"
+                                    wire:click="contar({{ $pendiente->id }})"
+                                >
+                                    Revisar
+                                </x-filament::button>
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+            </details>
         @endif
 
         <form wire:submit="{{ $abierta ? 'cerrar' : 'abrir' }}" class="space-y-5">

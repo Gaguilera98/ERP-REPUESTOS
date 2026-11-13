@@ -9,6 +9,7 @@ use App\Caja\CongelarTurnosVencidos;
 use App\Compras\Montos;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\MetodoPago;
+use App\Filament\Negocio\CajaChica\AccionesCajaChica;
 use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
 use App\Models\Sucursal;
@@ -112,6 +113,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
                 ->action(function (): void {
                     $this->dispatch('open-modal', id: 'historial-sesiones-caja');
                 }),
+            ...AccionesCajaChica::delTurno(),
         ];
     }
 
@@ -150,7 +152,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
             ->statePath('data');
     }
 
-    /** @return list<TextInput|Textarea> */
+    /** @return list<TextInput|Textarea|Select> */
     private function camposConteo(string $moneda, Closure $arqueo): array
     {
         $camposMedios = [];
@@ -227,6 +229,17 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
                 ->required(fn (Get $get): bool => $this->hayDiferenciaEnMedios($arqueo(), $get('medios_declarados')))
                 ->helperText('La justificación es obligatoria para cerrar con descuadre.')
                 ->live(debounce: 300),
+            Textarea::make('cierre_vales_motivo')
+                ->label('Motivo para cerrar con vales pendientes')
+                ->rows(2)
+                ->visible(fn (): bool => ($arqueo()['vales_pendientes'] ?? []) !== [])
+                ->required(fn (): bool => ($arqueo()['vales_pendientes'] ?? []) !== []),
+            Select::make('seguimiento_user_id')
+                ->label('Responsable de seguimiento')
+                ->options(fn (): array => TenantUser::query()->orderBy('name')->pluck('name', 'id')->all())
+                ->native(false)
+                ->visible(fn (): bool => ($arqueo()['vales_pendientes'] ?? []) !== [])
+                ->required(fn (): bool => ($arqueo()['vales_pendientes'] ?? []) !== []),
         ];
     }
 
@@ -348,7 +361,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         Notification::make()
             ->title($anulada ? 'Turno anulado' : 'Caja cerrada')
             ->body($anulada
-                ? 'No tuvo ventas, así que no entra en el día.'
+                ? 'No tuvo ventas ni caja chica, así que no entra en el día.'
                 : 'El arqueo del turno se registró correctamente.')
             ->success()
             ->send();
@@ -492,7 +505,9 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
     /** @param array<string, mixed> $arqueo */
     private function sinMovimientos(array $arqueo): bool
     {
-        return $arqueo['total_cobros'] === '0.00' && $arqueo['total_reembolsos'] === '0.00';
+        return $arqueo['total_cobros'] === '0.00'
+            && $arqueo['total_reembolsos'] === '0.00'
+            && ! ($arqueo['tiene_caja_chica'] ?? false);
     }
 
     public function sesionActual(): ?CajaSesion

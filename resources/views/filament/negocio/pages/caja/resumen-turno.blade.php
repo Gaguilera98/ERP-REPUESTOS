@@ -98,4 +98,30 @@
             </tfoot>
         </table>
     </div>
+    @if ($arqueo['tiene_caja_chica'] ?? false)
+        <div class="border-t border-gray-200 px-5 py-4 dark:border-white/10">
+            <h3 class="text-sm font-semibold text-gray-950 dark:text-white">Caja chica de este turno</h3>
+            <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                <div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/5">
+                    <p class="text-xs text-gray-500">Gastos</p>
+                    <p class="font-semibold tabular-nums">{{ $moneda }} {{ $arqueo['gastos_caja_chica'] }}</p>
+                </div>
+                <div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/5">
+                    <p class="text-xs text-gray-500">Vales entregados</p>
+                    <p class="font-semibold tabular-nums">{{ $moneda }} {{ $arqueo['vales_entregados'] }}</p>
+                </div>
+                <div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-white/5">
+                    <p class="text-xs text-gray-500">Sobrantes devueltos</p>
+                    <p class="font-semibold tabular-nums">{{ $moneda }} {{ $arqueo['sobrantes_caja_chica'] }}</p>
+                </div>
+            </div>
+            @if (($arqueo['vales_pendientes'] ?? []) !== [])
+                <ul class="mt-3 space-y-1 text-sm text-amber-800 dark:text-amber-200">
+                    @foreach ($arqueo['vales_pendientes'] as $vale)
+                        <li>Vale pendiente {{ $moneda }} {{ $vale['monto'] }} · {{ $vale['persona'] }} · {{ $vale['concepto'] }}</li>
+                    @endforeach
+                </ul>
+            @endif
+        </div>
+    @endif
 </section>

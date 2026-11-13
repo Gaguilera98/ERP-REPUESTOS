@@ -29,6 +29,7 @@ use Illuminate\Database\Eloquent\Model;
     'comprobante_obligatorio_qr_externo',
     'comprobante_obligatorio_transferencia',
     'comprobante_obligatorio_voucher_tarjeta',
+    'permite_gastos_cajon_venta',
 ])]
 class NegocioConfiguracion extends Model
 {
@@ -63,6 +64,7 @@ class NegocioConfiguracion extends Model
             'comprobante_obligatorio_qr_externo' => 'boolean',
             'comprobante_obligatorio_transferencia' => 'boolean',
             'comprobante_obligatorio_voucher_tarjeta' => 'boolean',
+            'permite_gastos_cajon_venta' => 'boolean',
         ];
     }
 

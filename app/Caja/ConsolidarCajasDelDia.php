@@ -109,6 +109,7 @@ class ConsolidarCajasDelDia
             $arqueo = $this->arqueo->de($sesion);
             $vacio = Montos::comparar($arqueo['total_cobros'], '0', 2) === 0
                 && Montos::comparar($arqueo['total_reembolsos'], '0', 2) === 0
+                && ! ($arqueo['tiene_caja_chica'] ?? false)
                 && $sesion->estado_sesion === EstadoCajaSesion::Cerrada;
 
             if ($vacio) {
@@ -188,6 +189,9 @@ class ConsolidarCajasDelDia
                 'diferencia_efectivo' => $diferenciaEfectivo,
                 'sin_declaracion' => $cuentaComoCerrada && $sesion->medios->isEmpty(),
                 'total_cobros' => $arqueo['total_cobros'],
+                'egresos_caja_chica' => $arqueo['egresos_caja_chica'],
+                'ingresos_caja_chica' => $arqueo['ingresos_caja_chica'],
+                'vales_pendientes' => $arqueo['vales_pendientes'],
                 'justificacion' => $sesion->justificacion_diferencia,
                 'ventas' => $this->ventasDe($sesion),
             ];

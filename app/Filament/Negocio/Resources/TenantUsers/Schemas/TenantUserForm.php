@@ -2,7 +2,9 @@
 
 namespace App\Filament\Negocio\Resources\TenantUsers\Schemas;
 
+use App\CajaChica\Permisos;
 use App\Models\NegocioRole;
+use App\Models\Sucursal;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -46,6 +48,18 @@ class TenantUserForm
                 Toggle::make('is_active')
                     ->label('Activo')
                     ->default(true),
+                Select::make('sucursales')
+                    ->label('Sucursales de caja chica')
+                    ->helperText('Hacen falta para operar un cajón ajeno, reponer entre cajas o revisar otra sucursal.')
+                    ->multiple()
+                    ->options(fn (): array => Sucursal::query()->where('is_active', true)->orderBy('nombre')->pluck('nombre', 'id')->all())
+                    ->native(false),
+                Select::make('permisos_directos')
+                    ->label('Permisos directos de caja chica')
+                    ->helperText('Se suman al rol. No reemplazan los permisos del rol.')
+                    ->multiple()
+                    ->options(Permisos::etiquetas())
+                    ->native(false),
             ]);
     }
 }

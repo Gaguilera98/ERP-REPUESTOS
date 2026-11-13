@@ -263,6 +263,14 @@ return [
         'Ajustar:Inventario' => 'Registrar un ajuste de inventario',
         'Trasladar:Inventario' => 'Trasladar mercadería entre almacenes',
         'Corregir:Costo' => 'Corregir el costo de una compra recibida',
+        'Registrar:GastoCajaPropia' => 'Registrar gastos en mi caja',
+        'Registrar:GastoCajaAjena' => 'Registrar gastos en otras cajas',
+        'Operar:CajaChica' => 'Operar la caja chica independiente',
+        'Revisar:CajaChica' => 'Revisar y autorizar excepciones de caja chica',
+        'Cerrar:TurnoAjeno' => 'Cerrar el turno de otra persona',
+        'Administrar:CategoriaGasto' => 'Administrar categorías de gasto',
+        'Administrar:FondoCajaChica' => 'Administrar fondos de caja chica',
+        'View:CajaChica' => 'Ver la caja chica',
     ],
 
     /*

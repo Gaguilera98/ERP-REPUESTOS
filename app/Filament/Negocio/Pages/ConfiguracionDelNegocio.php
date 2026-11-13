@@ -79,6 +79,7 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
             'comprobante_obligatorio_qr_externo' => $configuracion->comprobante_obligatorio_qr_externo,
             'comprobante_obligatorio_transferencia' => $configuracion->comprobante_obligatorio_transferencia,
             'comprobante_obligatorio_voucher_tarjeta' => $configuracion->comprobante_obligatorio_voucher_tarjeta,
+            'permite_gastos_cajon_venta' => $configuracion->permite_gastos_cajon_venta,
         ]);
     }
 
@@ -138,6 +139,10 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
                         Toggle::make('comprobante_obligatorio_voucher_tarjeta')
                             ->label('Comprobante obligatorio en voucher')
                             ->helperText('PDF o imagen. El número del voucher sigue siendo obligatorio.')
+                            ->inline(false),
+                        Toggle::make('permite_gastos_cajon_venta')
+                            ->label('Permitir gastos desde el cajón de venta')
+                            ->helperText('Apagado, la caja chica independiente sigue operando. No salen gastos ni vales nuevos desde los turnos.')
                             ->inline(false),
                     ]),
                     Tab::make('Devoluciones')->icon(Heroicon::OutlinedArrowUturnLeft)->schema([

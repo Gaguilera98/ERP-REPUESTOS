@@ -25,6 +25,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'justificacion_diferencia',
     'supervisor_id',
     'caja_dia_id',
+    'cerrado_por_user_id',
+    'cierre_vales_autorizado_por_id',
+    'cierre_vales_motivo',
 ])]
 class CajaSesion extends Model
 {
@@ -82,6 +85,11 @@ class CajaSesion extends Model
     public function medios(): HasMany
     {
         return $this->hasMany(CajaSesionMedio::class, 'caja_sesion_id');
+    }
+
+    public function movimientosCajaChica(): HasMany
+    {
+        return $this->hasMany(CajaChicaMovimiento::class, 'caja_sesion_id');
     }
 
     public function estaAbierta(): bool

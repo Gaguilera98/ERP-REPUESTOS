@@ -113,7 +113,7 @@ Este documento unificado contiene la arquitectura completa, las reglas de negoci
   * *Para qué:* El sistema compara el efectivo físico contado con el teórico registrado, obligando al cajero a justificar por escrito cualquier diferencia.
 * **Control de Rendiciones y Vales de Caja Chica:** 
   * *Por qué:* Las salidas de efectivo para compras menores no pueden quedar volando sin respaldo.
-  * *Para qué:* El sistema bloquea preventivamente el cierre de caja si existen movimientos en `estado_rendicion = 'pendiente_comprobante'`.
+  * *Para qué:* El sistema bloquea el cierre si hay un vale pendiente de rendir, salvo un motivo y un responsable de seguimiento. Un gasto que solo espera comprobante no bloquea el cierre.
 
 ---
 
@@ -161,7 +161,7 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 * *Para qué:* `categorias` y `trabajadores` viven en el pool, con `tenant_id`. La plantilla JSON de atributos cuelga de la categoría. El trabajador puede tener `user_id` opcional hacia el usuario del pool, y ese usuario tiene que ser del mismo `tenant_id`.
 
 ### 9. Lo que no se mueve de las reglas de negocio
-* *Para qué:* El PPP se recalcula en cada entrada y se congela en `precio_costo_snapshot` al vender. Los impuestos de la venta se guardan como snapshot. La venta cerrada no se edita: se anula o se devuelve con supervisor. La caja no cierra si hay un vale pendiente de comprobante. Los archivos de comprobante siguen siendo una ruta; el disco ya separa los archivos por tenant.
+* *Para qué:* El PPP se recalcula en cada entrada y se congela en `precio_costo_snapshot` al vender. Los impuestos de la venta se guardan como snapshot. La venta cerrada no se edita: se anula o se devuelve con supervisor. La caja no cierra si hay un vale pendiente de rendir, salvo autorización con motivo y responsable de seguimiento. Un comprobante que todavía no llegó no bloquea el cierre. Los archivos de comprobante siguen siendo una ruta; el disco ya separa los archivos por tenant.
 
 ### 10. El código de barras no es el SKU
 * *Por qué:* La regla ya separa el código interno del número de la etiqueta. Sin columna, el lector de mostrador no tiene dónde caer.
@@ -173,7 +173,7 @@ Estas correcciones no cambian las reglas de mostrador, PPP, talonario ni caja. F
 
 ### 12. La devolución también mueve el dinero del turno
 * *Por qué:* El cambio del mismo día compensa el saldo con la caja abierta. Si el reembolso no tiene sesión, el arqueo no lo ve.
-* *Para qué:* `notas_credito_devoluciones.caja_sesion_id` apunta al turno de esa sucursal. El dinero que sale es un `pagos` con `sentido = 'reembolso'`. La aplicación de ese pago apunta a la nota, no a la venta. Un cobro es `sentido = 'cobro'` y sus aplicaciones apuntan a ventas o a saldo a favor. El monto sigue siendo positivo. El efectivo teórico del turno es la suma de cobros en efectivo menos reembolsos en efectivo menos los egresos de caja chica. Aplicar después un adelanto no crea otro pago y no cambia la caja del turno viejo.
+* *Para qué:* `notas_credito_devoluciones.caja_sesion_id` apunta al turno de esa sucursal. El dinero que sale es un `pagos` con `sentido = 'reembolso'`. La aplicación de ese pago apunta a la nota, no a la venta. Un cobro es `sentido = 'cobro'` y sus aplicaciones apuntan a ventas o a saldo a favor. El monto sigue siendo positivo. El efectivo teórico del turno es apertura más cobros en efectivo más entradas de caja chica, menos reembolsos en efectivo y menos salidas de caja chica. QR, tarjeta y transferencia no entran en ese efectivo. Aplicar después un adelanto no crea otro pago y no cambia la caja del turno viejo.
 
 ### 13. Se devuelve una línea vendida, no un producto suelto
 * *Por qué:* Sin la línea original, la base no sabe cuántas unidades salieron ni con qué costo congelado deben reingresar.
@@ -325,7 +325,7 @@ Implementado el 9 de noviembre de 2026 como ampliación posterior al cierre de f
 3. **Autorizar descuento con contraseña.** Hoy el tope se valida y, si se pasa, falta `supervisor_descuento_id`, pero el mostrador no pide clave. Pendiente: (a) dentro del tope, el cajero reingresa su contraseña para dejar huella; (b) pasado el tope, modal con usuario y contraseña de un `supervisor` del mismo negocio, y se guarda ese id. No usar un select de supervisor sin clave. El mismo modal puede reutilizarse en anulación y devolución. Ver nota en el punto 25.
 4. **Moneda ISO abierta.** Hoy el enum de moneda del negocio es BOB/PEN/BRL. Pendiente pasar a código ISO de 3 letras. Ver nota en el punto 26.
 5. **Documento de factura en la venta.** El cliente ya puede guardar varios documentos (CI, NIT, etc.) con atributos dinámicos. Al facturar habrá que elegir **un** tipo + número (y complemento si aplica) para ese comprobante, sin mezclar varios en la misma factura.
-6. **Listado y arqueo de cajas (ampliar).** Ya hay cierre multi-medio y **Cajas del día**. Un turno de otro día pasa a pendiente de contar y no recibe más ventas: se puede abrir el de hoy. Un turno sin ventas se anula. El faltante del día solo suma turnos cerrados. Falta: sucursales a cargo y caja chica (fase 10). Una abierta por cajero+sucursal.
+6. **Listado y arqueo de cajas (ampliar).** Ya hay cierre multi-medio, **Cajas del día** y **Caja chica**. Un turno de otro día pasa a pendiente de contar y se puede abrir el de hoy. Un turno con movimientos de caja chica pasa por arqueo aunque no haya ventas. La asignación de sucursales ya se usa para Caja chica y su aplicación general a otros módulos sigue pendiente. Hay una sesión abierta por cajero y sucursal.
 7. **Baja de usuarios / vendedores (no borrar a ciegas).** Ventas, cajas, compras, kardex, autorizaciones de supervisor, etc. apuntan a `users` del pool. Reglas a diseñar cuando exista administración de usuarios del negocio:
    * **Borrado físico bloqueado** si hay filas relacionadas (FK Restrict o chequeo en la app): no se pierde el historial ni se rompe la integridad.
    * **Preferir eliminación lógica** (`deleted_at` / `is_active` / baja): el usuario deja de aparecer en selects de asignación (vendedor, cajero, responsable) y no puede iniciar sesión, pero las ventas y cajas viejas siguen mostrando quién las hizo.
@@ -824,12 +824,26 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `monto_cierre_real` (decimal 10,2, Nullable)
   * `diferencia` (decimal 10,2, Default: 0.00)
   * `justificacion_diferencia` (text, Nullable)
-  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Rol Shield `supervisor` si autoriza el desfase
+  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Quien autoriza el desfase
+  * `cerrado_por_user_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable)
+  * `cierre_vales_autorizado_por_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable)
+  * `cierre_vales_motivo` (text, Nullable)
   * `timestamps` (timestamp)
   * Una sola fila `abierta` por `(tenant_id, sucursal_id, user_id)`
   * CHECK: si está `cerrada`, `fecha_cierre` no es nula. Si `diferencia` no es cero, `justificacion_diferencia` no es nula
 
 ### 8. Módulo de Caja Chica y Gastos Menores
+
+La fase 10 queda cerrada. El [plan de Caja chica](fase_10_caja_chica.plan.md) documenta la migración local, las pruebas y el historial paginado. Rendir un vale o adjuntar un comprobante requiere acceso a la caja de origen. Los arqueos de entrega conservan el saldo esperado, lo contado y los responsables.
+* **User_Sucursales**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales)
+  * `timestamps` (timestamp)
+  * Único `(tenant_id, user_id, sucursal_id)`. Solo limita caja chica: cajón ajeno, reposición cruzada y revisión de otra sucursal
+* **Negocio_Configuracion**
+  * `permite_gastos_cajon_venta` (boolean, Default: false)
 * **Categorias_Gastos**
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
@@ -837,23 +851,51 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `descripcion` (text, Nullable)
   * `is_active` (boolean, Default: true)
   * `timestamps` (timestamp)
+* **Caja_Chica_Fondos**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales) -- Uno por sucursal
+  * `responsable_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
+  * `monto_apertura` (decimal 10,2)
+  * `saldo_actual` (decimal 10,2)
+  * `estado` (varchar, Default: 'activo')
+  * `timestamps` (timestamp)
+* **Caja_Chica_Arqueos**
+  * `id` (int, Primary Key, Increment)
+  * `tenant_id` (string) -- Único junto con `id`
+  * `fondo_id` (int, Foreign Key compuesta con `tenant_id` -> Caja_Chica_Fondos)
+  * `tipo` (varchar: 'apertura', 'entrega')
+  * `teorico` (decimal 10,2)
+  * `contado` (decimal 10,2)
+  * `diferencia` (decimal 10,2, Default: 0.00)
+  * `justificacion` (text, Nullable)
+  * `user_id`, `entrega_user_id`, `recibe_user_id` (int, Foreign Keys compuestas con `tenant_id` -> Users)
+  * `timestamps` (timestamp)
 * **Caja_Chica_Movimientos**
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
   * `sucursal_id` (int, Foreign Key compuesta con `tenant_id` -> Sucursales)
-  * `caja_sesion_id` (int, Foreign Key compuesta con `tenant_id` -> Cajas_Sesiones)
-  * `categoria_gasto_id` (int, Foreign Key compuesta con `tenant_id` -> Categorias_Gastos, Nullable)
-  * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
-  * `solicitado_por_trabajador_id` (int, Foreign Key compuesta con `tenant_id` -> Trabajadores, Nullable)
-  * `tipo_movimiento` (enum: 'egreso_gasto', 'devolucion_sobrante')
-  * `movimiento_origen_id` (int, Foreign Key compuesta con `tenant_id` -> Caja_Chica_Movimientos, Nullable)
-  * `estado_rendicion` (enum: 'pendiente_comprobante', 'rendido_completo')
-  * `monto` (decimal 10,2)
+  * `caja_sesion_id` (int, Foreign Key compuesta con `tenant_id` -> Cajas_Sesiones, Nullable)
+  * `fondo_id` (int, Foreign Key compuesta con `tenant_id` -> Caja_Chica_Fondos, Nullable)
+  * Cada movimiento tiene un solo origen: turno o fondo, no los dos
+  * `categoria_gasto_id` (int, Foreign Key compuesta, Nullable)
+  * `registrado_por_user_id` (int, Foreign Key compuesta -> Users)
+  * `rendido_por_user_id`, `seguimiento_user_id`, `autorizado_por_user_id` (int, Foreign Keys compuestas, Nullable)
+  * `orden_compra_id` (int, Foreign Key compuesta -> Ordenes_Compra, Nullable)
+  * `movimiento_origen_id` (int, Foreign Key compuesta -> Caja_Chica_Movimientos, Nullable)
+  * `tipo` (varchar: 'egreso_gasto', 'egreso_vale', 'ingreso_sobrante', 'ingreso_reposicion', 'egreso_reposicion', 'correccion')
+  * `sentido` (varchar: 'entrada', 'salida')
+  * `estado` (varchar: 'pendiente_comprobante', 'pendiente_rendir', 'rendido_completo', 'sin_comprobante_autorizado', 'en_revision', 'corregido')
+  * `afecta_saldo` (boolean, Default: true)
+  * `monto`, `monto_gasto`, `monto_sobrante` (decimal 10,2)
   * `concepto` (varchar)
-  * `tipo_comprobante` (enum: 'recibo_interno', 'factura', 'sin_comprobante')
-  * `numero_comprobante` (varchar, Nullable)
-  * `comprobante_archivo_path` (varchar, Nullable)
+  * `persona_recibe`, `procedencia` (varchar, Nullable)
+  * `tipo_comprobante` (varchar: 'recibo_interno', 'factura', 'sin_comprobante', Nullable)
+  * `numero_comprobante`, `comprobante_archivo_path` (varchar, Nullable)
+  * `motivo_excepcion` (text, Nullable)
+  * `idempotency_key` (varchar, Nullable) -- Único `(tenant_id, idempotency_key)`
   * `timestamps` (timestamp)
+  * Un solo `ingreso_sobrante` por vale: índice único parcial `(tenant_id, movimiento_origen_id)` donde `tipo = 'ingreso_sobrante'`
 
 ---
 

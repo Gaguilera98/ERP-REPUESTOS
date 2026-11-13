@@ -99,6 +99,8 @@ class SeedNegocioRoles
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',
             'Cargar:Conteo',
+            'Registrar:GastoCajaPropia',
+            'View:CajaChica',
         ]);
 
         NegocioConfiguracion::query()->firstOrCreate([], [
@@ -135,6 +137,14 @@ class SeedNegocioRoles
             'Ajustar:Inventario',
             'Trasladar:Inventario',
             'Corregir:Costo',
+            'Registrar:GastoCajaPropia',
+            'Registrar:GastoCajaAjena',
+            'Operar:CajaChica',
+            'Revisar:CajaChica',
+            'Cerrar:TurnoAjeno',
+            'Administrar:CategoriaGasto',
+            'Administrar:FondoCajaChica',
+            'View:CajaChica',
             'View:ConfiguracionDelNegocio',
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',

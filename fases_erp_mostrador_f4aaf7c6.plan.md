@@ -30,8 +30,8 @@ todos:
     content: "Fase 9: ajustes, conteo, traslados y corrección de costo"
     status: completed
   - id: fase-10-cajachica
-    content: "Fase 10: categorías Filament, vale Livewire en la caja y candado de cierre"
-    status: pending
+    content: "Fase 10: fondo independiente, gastos y vales, permisos por caja y arqueo"
+    status: completed
   - id: fase-11-dolar
     content: "Fase 11: tipo de cambio y cola de precios en dólares"
     status: pending
@@ -195,11 +195,13 @@ Una corrección posterior toma como base el último costo corregido de la línea
 
 ## Fase 10. Caja chica
 
-Tablas: `categorias_gastos`, `caja_chica_movimientos`.
+**Estado:** fase cerrada. La migración está aplicada en el pool local del tenant `god`. Se verificó la rendición en el ERP local y la última ejecución de `CajaChicaTest` pasó con 11 pruebas y 73 aserciones. La suite completa queda pendiente antes de desplegar.
 
-Reglas: el cierre de caja se bloquea si hay un vale en `pendiente_comprobante`. El egreso y la devolución del sobrante quedan ligados a la sesión abierta.
+El [plan de Caja chica](fase_10_caja_chica.plan.md) sigue siendo el alcance. El fondo independiente es el camino normal: uno por sucursal, con responsable, saldo y arqueo propio. Los gastos desde el cajón de venta nacen apagados (`permite_gastos_cajon_venta`). `user_sucursales` solo limita la caja chica ajena, la reposición cruzada y la revisión de otra sucursal. No filtra el mostrador ni la caja propia.
 
-Pantalla: las categorías de gasto sí son un resource Filament, porque es un catálogo. El vale no. En la caja abierta, un bloque Livewire registra el monto, el concepto, quién lo pidió y el comprobante, y deja ver los vales pendientes de esa sesión. Un resource genérico de Filament sería un formulario largo, fuera del turno, y el cajero no vería el candado del cierre. El historial de vales ya rendidos puede listarse en tabla, sin formulario de alta.
+Permisos: `Registrar:GastoCajaPropia`, `Registrar:GastoCajaAjena`, `Operar:CajaChica`, `Revisar:CajaChica`, `Cerrar:TurnoAjeno`, `Administrar:CategoriaGasto`, `Administrar:FondoCajaChica` y `View:CajaChica`. Se pueden dar por rol o directo al usuario.
+
+Un vale pendiente de rendir bloquea el cierre salvo motivo y responsable de seguimiento. Un gasto que solo espera comprobante no lo bloquea, y el comprobante posterior no mueve el arqueo guardado. El efectivo esperado suma las entradas de caja chica y resta las salidas. QR, tarjeta y transferencia no alcanzan para un gasto.
 
 ## Fase 11. Dólar de referencia
 

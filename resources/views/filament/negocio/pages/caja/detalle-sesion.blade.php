@@ -13,13 +13,20 @@
     </div>
 
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        @foreach (['Fondo inicial' => $arqueo['apertura'], 'Cobros del turno' => $arqueo['total_cobros'], 'Reembolsos' => $arqueo['total_reembolsos']] as $etiqueta => $monto)
+        @foreach (['Fondo inicial' => $arqueo['apertura'], 'Cobros del turno' => $arqueo['total_cobros'], 'Reembolsos' => $arqueo['total_reembolsos'], 'Gastos' => $arqueo['gastos_caja_chica'] ?? '0.00', 'Vales' => $arqueo['vales_entregados'] ?? '0.00', 'Sobrantes' => $arqueo['sobrantes_caja_chica'] ?? '0.00'] as $etiqueta => $monto)
             <div class="rounded-xl bg-primary-50 p-3 first:col-span-2 sm:p-4 sm:first:col-span-1 dark:bg-primary-400/10">
                 <p class="text-xs text-gray-500 dark:text-gray-400">{{ $etiqueta }}</p>
                 <p class="text-lg font-semibold tabular-nums text-gray-950 dark:text-white">{{ $moneda }} {{ $monto }}</p>
             </div>
         @endforeach
     </div>
+    @if (($arqueo['vales_pendientes'] ?? []) !== [])
+        <ul class="space-y-1 text-sm text-amber-800 dark:text-amber-200">
+            @foreach ($arqueo['vales_pendientes'] as $vale)
+                <li>Vale pendiente {{ $moneda }} {{ $vale['monto'] }} · {{ $vale['persona'] }} · {{ $vale['concepto'] }}</li>
+            @endforeach
+        </ul>
+    @endif
 
     <div class="overflow-x-auto">
         <table class="caja-resumen-table w-full text-start text-sm">
