@@ -15,6 +15,7 @@ use App\Enums\TipoDescuento;
 use App\Enums\TipoMovimientoInventario;
 use App\Enums\TipoPrecioCliente;
 use App\Inventario\FactorUnidad;
+use App\Inventario\RegistrarMovimiento;
 use App\Models\CajaSesion;
 use App\Models\Cliente;
 use App\Models\InventarioStock;
@@ -41,6 +42,7 @@ class CompletarVentaContado
         private MetodoPagoFactory $metodosPago,
         private PrecioDeLista $precios,
         private DevolucionComercial $devolucionComercial,
+        private RegistrarMovimiento $movimientos,
     ) {}
 
     /**
@@ -394,25 +396,16 @@ class CompletarVentaContado
                 /** @var InventarioStock $stock */
                 $stock = $linea['stock'];
 
-                $previo = Montos::cuatro((string) $stock->cantidad_actual);
-                $posterior = Montos::sumar($previo, bcmul($linea['cantidad_base'], '-1', 4), 4);
-
                 if ($reserva) {
-                    $stock->cantidad_reservada = Montos::sumar($stock->cantidad_reservada, $linea['cantidad_base'], 4);
+                    $this->movimientos->reservar($stock, $linea['cantidad_base']);
                 } else {
-                    $stock->cantidad_actual = $posterior;
-                }
-                $stock->save();
-
-                if (! $reserva) {
-                    MovimientoInventario::query()->create([
-                        'producto_variante_id' => $variante->id,
+                    $this->movimientos->mover([
+                        'variante' => $variante,
                         'almacen_id' => $almacenId,
                         'user_id' => $usuario->id,
-                        'tipo_movimiento' => TipoMovimientoInventario::SalidaVenta,
+                        'tipo' => TipoMovimientoInventario::SalidaVenta,
                         'cantidad' => $linea['cantidad_base'],
-                        'stock_previo' => $previo,
-                        'stock_posterior' => $posterior,
+                        'sentido' => 'salida',
                         'costo_unitario' => $linea['precio_costo_snapshot'],
                         'costo_promedio_resultante' => $linea['precio_costo_snapshot'],
                         'referencia_tipo' => MovimientoInventario::REFERENCIA_VENTA,

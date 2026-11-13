@@ -46,11 +46,11 @@ Este documento unificado contiene la arquitectura completa, las reglas de negoci
   * *Para qué, en la conversión:* Solo dentro de la misma familia. El kilo vale 1000 gramos. No se pasa de kilos a litros. Una caja de 100 tornillos es un factor de ese producto (`producto_unidades`), no una unidad global. Una caja sellada con su propio código de barras es otro producto. Las unidades de un dato del rubro (mm, V, presión) siguen aparte y no se mezclan con las de cantidad.
 * **Ajuste de unidades y conteo físico:**
   * *Por qué:* Cambiar el número del estante sin motivo y sin supervisor hace desaparecer piezas y valor, y no queda por qué.
-  * *Para qué:* Un ajuste corrige cuántas hay. El precio de la pieza no cambia. Lleva motivo (`merma`, `rotura`, `hallazgo`, `uso_interno` o `diferencia_conteo`) y un texto. Lo autoriza un supervisor. El kardex inserta una línea `ajuste` con el stock previo, el posterior, quién lo cargó y quién autorizó. Si el ajuste estaba mal, se carga otro en sentido contrario. El primero no se edita.
-  * *Para qué, en el conteo:* Se cuenta el estante, incluidas las piezas de una seña, porque siguen ahí. Al cerrar se compara con el stock de ese momento. Si durante el conteo se vendió uno, ese uno ya salió por la venta. Cada diferencia es un ajuste `diferencia_conteo`. El cajero carga las cantidades. El supervisor cierra. Si la cantidad contada deja el stock por debajo de lo reservado, el cierre no pasa. La caja no se mueve.
+  * *Para qué:* Un ajuste corrige cuántas hay. El precio promedio no cambia. Lleva motivo (`merma`, `rotura`, `hallazgo`, `uso_interno` o `diferencia_conteo`) y un texto. `hallazgo` suma; los otros restan. `diferencia_conteo` solo sale de un conteo. Lo autoriza quien tiene el permiso, y `supervisor_id` guarda a quien cierra. El kardex inserta una línea `ajuste` con el stock previo, el posterior, quién lo cargó y quién autorizó. Si el ajuste estaba mal, se carga otro en sentido contrario. El primero no se edita. Una compra olvidada no es un ajuste: es una entrada de mercadería.
+  * *Para qué, en el conteo:* Se cuenta con el local quieto. Mientras el conteo de un almacén está abierto, ese almacén no vende, no reserva, no traslada y no recibe mercadería. El resto del sistema sigue. El número del sistema se copia al cargar la línea y no se mueve a mitad del conteo. El cero hay que escribirlo: una línea en blanco no cuenta como cero. Solo se guardan las piezas que alguien contó. Al cerrar, si el stock ya no coincide con el número copiado, hay que volver a contar. Cada diferencia es un ajuste `diferencia_conteo`. Quien tiene `Cargar:Conteo` carga las cantidades. Quien tiene `Cerrar:Conteo` cierra. Si la cantidad contada deja el stock por debajo de lo reservado, el cierre nombra las notas `VNT-` que apartan esas piezas y espera a que se entreguen o se cancelen. Un ajuste puntual se cierra en el acto y no traba el almacén. La caja no se mueve.
 * **Corrección de un costo ya cargado:**
-  * *Por qué:* Si la compra se tipeó a 200 y el costo real era 20, el precio promedio queda mal. Borrar esa línea del kardex, o cambiar el costo de las ventas ya cerradas, falsifica el pasado.
-  * *Para qué:* Un supervisor anota el costo real, ligado a la línea de la compra. Las ventas ya hechas conservan su `precio_costo_snapshot`. Lo que todavía está en el estante toma el costo nuevo de ahí en adelante. El kardex inserta una línea `correccion_costo` con cantidad cero: no entran ni salen piezas. La compra vieja no se edita. La caja no se mueve.
+  * *Por qué:* Si la compra se tipeó a 200 y el costo real era 20, el precio promedio queda mal. Borrar esa línea del kardex, o cambiar el costo de las ventas ya cerradas, falsifica el pasado. Reemplazar todo el promedio por el costo nuevo de una línea vieja también lo falsifica, porque mezcla lo que ya se vendió con lo que queda.
+  * *Para qué:* Quien tiene `Corregir:Costo` anota el costo real, ligado a la línea de la compra ya recibida. La línea de la compra no se edita. Las ventas ya hechas conservan su `precio_costo_snapshot`. La corrección cambia el valor de lo que queda hoy: `diferencia = (costo_nuevo - costo_anterior) * min(cantidad recibida en unidad base, stock actual)` y `promedio = (precio_costo * stock + diferencia) / stock`. Si no queda stock, no hay nada que corregir. Si el promedio quedaría negativo, se rechaza. El kardex inserta una línea `correccion_costo` con cantidad cero: no entran ni salen piezas. La caja no se mueve.
 
 ### 3. Ventas, Comprobantes y Control de Talonario Fiscal
 * **Emisión Dual de Comprobantes (`nota_venta` vs `factura_manual`):** 
@@ -231,12 +231,12 @@ Pospuesto el 11 de noviembre de 2026 (fase 8). El diseño se conserva. Hoy la ve
 * *Para qué:* `negocio_configuracion.horas_reserva` nace en 48. Cada negocio puede cambiar ese valor de partida. Al crear la reserva, el cajero puede poner menos horas o más, y eso se guarda en `ventas.vence_en`. Después de creada, quien tenga View:Venta y Ampliar:Reserva puede ampliar `vence_en` mientras siga vigente, con motivo e historial. Al cumplirse el plazo, la venta pasa a `vencida`, baja `cantidad_reservada` y no se escribe kardex. La aplicación de esa seña se convierte en saldo a favor con una fila nueva de `pago_aplicaciones` (`venta_id` nulo, `aplicacion_origen_id` apuntando a la aplicación de la reserva, el mismo `pago_id`). No nace un pago nuevo y la caja vieja no se mueve.
 
 ### 22. El ajuste cambia unidades, no el precio
-* *Por qué:* El tipo `ajuste` del kardex no tenía documento, motivo ni supervisor. Alcanzaba con escribir otro número.
-* *Para qué:* `ajustes_inventario` es el documento y `ajuste_detalles` son las piezas. Al cerrarlo, cada diferencia inserta un movimiento `ajuste` con `referencia_tipo = 'ajuste'`. `costo_unitario` y `costo_promedio_resultante` quedan en el PPP que la pieza ya tenía. `precio_costo` de la variante no se toca. `supervisor_id` es obligatorio al cerrar. Una fila cerrada no se edita.
+* *Por qué:* El tipo `ajuste` del kardex no tenía documento, motivo ni quién autorizó. Alcanzaba con escribir otro número. Si el conteo compara contra el stock del cierre, una venta hecha a mitad del conteo inventa una pieza.
+* *Para qué:* `ajustes_inventario` es el documento y `ajuste_detalles` son las piezas. Las cantidades son `decimal(14,4)`, igual que el stock. `cantidad_sistema` se copia al guardar la línea. Mientras un conteo está `en_curso`, ese almacén no vende, no reserva, no traslada y no recibe. El cierre solo escribe las líneas cuya diferencia no es cero, con `referencia_tipo = 'ajuste'`. `costo_unitario` y `costo_promedio_resultante` quedan en el PPP que la pieza ya tenía. `precio_costo` de la variante no se toca. `supervisor_id` guarda a quien cierra, por el permiso `Cerrar:Conteo`, no por el nombre del rol. Una fila cerrada no se edita. Si la cantidad contada baja de lo reservado, el mensaje nombra las notas que apartan esas piezas.
 
 ### 23. Un costo mal tipeado se corrige hacia adelante
-* *Por qué:* La compra y las ventas ya cerradas no se reescriben. El promedio mal cargado tampoco puede quedar para siempre en lo que sigue en el estante.
-* *Para qué:* `correcciones_costo` guarda el costo anterior, el nuevo, la línea de compra, el usuario y el supervisor. Actualiza `precio_costo` de la variante. Inserta un movimiento `correccion_costo` con cantidad cero y `referencia_tipo = 'correccion_costo'`. `stock_previo` y `stock_posterior` quedan iguales. Los `precio_costo_snapshot` de las ventas ya hechas no se tocan.
+* *Por qué:* La compra y las ventas ya cerradas no se reescriben. El promedio mal cargado tampoco puede quedar para siempre en lo que sigue en el estante. El costo nuevo de una línea vieja no reemplaza el promedio entero.
+* *Para qué:* `correcciones_costo` guarda el costo anterior y el nuevo de la línea, el promedio anterior y el nuevo, la línea de compra, el usuario y quien autoriza con `Corregir:Costo`. El promedio nuevo es `(precio_costo * stock + (costo_nuevo - costo_anterior) * min(cantidad recibida en unidad base, stock)) / stock`. Actualiza `precio_costo` de la variante con ese promedio. Inserta un movimiento `correccion_costo` con cantidad cero y `referencia_tipo = 'correccion_costo'`. `stock_previo` y `stock_posterior` quedan iguales. Los `precio_costo_snapshot` de las ventas ya hechas no se tocan. La línea de la compra queda con el costo tipeado.
 
 ### 24. El costo se confirma al guardar, y la venta avisa si queda por debajo
 * *Por qué:* La corrección hacia adelante no alcanza si el 200 entra sin que nadie lo vea, y tampoco si el mostrador vende a 50 sin notar que el promedio ya está en 200.
@@ -272,6 +272,7 @@ Actualizado el 11 de noviembre de 2026. La fase 6 queda cerrada con el alcance a
 * El detalle distingue productos actuales y originales, historial de correcciones, cobros y reembolsos. El bloque independiente para ingresar abonos por código fue retirado del Mostrador.
 * Las devoluciones físicas de productos quedaron en la fase 7, cerrada el 11 de noviembre de 2026. Las correcciones de esta sección atienden errores de registro.
 * Por decisión del 11 de noviembre de 2026, la fase 8 (talonario y factura manual) queda pospuesta. No bloquea las fases siguientes. La venta sigue como nota de venta y el talonario de papel se lleva afuera del sistema, adjuntando la nota a la libreta. El diseño de `talonarios` y `factura_manual` queda escrito para cuando un local necesite controlar esas hojas desde el ERP.
+* La fase 9 queda cerrada el 12 de noviembre de 2026 con pruebas de Inventario y una corrección de costo verificada en el ERP local. La suite completa queda pendiente. Inventario lista conteos y ajustes puntuales. Traslados mueve de un almacén a otro en el mismo paso. En Compras, Corregir costo revalúa el stock que queda. Las correcciones sucesivas y las recepciones posteriores de una línea usan su último costo corregido. Los permisos son `Cargar:Conteo`, `Cerrar:Conteo`, `Ajustar:Inventario`, `Trasladar:Inventario` y `Corregir:Costo`. El cajero recibe solo el primero. El registro de movimientos escribe el stock y el kardex y aplica el candado del conteo.
 
 ### Fase 7: política comercial de devoluciones
 
@@ -511,9 +512,9 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `tenant_id` (string) -- Único junto con `id`
   * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
   * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Quien carga las cantidades
-  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Obligatorio al cerrar. Rol Shield `supervisor`
+  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users, Nullable) -- Quien cierra. Permiso `Cerrar:Conteo` en el conteo, o `Ajustar:Inventario` en el puntual
   * `tipo` (enum: 'puntual', 'conteo')
-  * `estado` (enum: 'en_curso', 'cerrado') -- El puntual se cierra en el acto. El conteo lo cierra el supervisor
+  * `estado` (enum: 'en_curso', 'cerrado') -- El puntual se cierra en el acto y no traba el almacén. El conteo abierto traba ese almacén
   * `observacion` (text, Nullable) -- Obligatoria si `tipo = 'puntual'`
   * `timestamps` (timestamp)
 * **Ajuste_Detalles**
@@ -522,10 +523,11 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `ajuste_id` (int, Foreign Key compuesta con `tenant_id` -> Ajustes_Inventario, On Delete: Cascade)
   * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
   * `motivo` (enum: 'merma', 'rotura', 'hallazgo', 'uso_interno', 'diferencia_conteo')
-  * `cantidad_sistema` (int, Nullable) -- Se copia del stock al cerrar, no al empezar
-  * `cantidad_fisica` (int) -- Lo que hay en el estante, señas incluidas
+  * `cantidad_sistema` (decimal 14,4) -- Se copia del stock al guardar la línea
+  * `cantidad_fisica` (decimal 14,4) -- Lo que hay en el estante, señas incluidas. El cero hay que escribirlo
   * `timestamps` (timestamp)
-  * Al cerrar, la diferencia es `cantidad_fisica - cantidad_sistema`. Si no es cero, nace un movimiento `ajuste`. Si `cantidad_fisica` deja el stock bajo `cantidad_reservada`, el cierre no pasa. El PPP no cambia.
+  * Único `(tenant_id, ajuste_id, producto_variante_id)`
+  * Al cerrar, la diferencia es `cantidad_fisica - cantidad_sistema`. Si no es cero, nace un movimiento `ajuste`. Si el stock ya no coincide con `cantidad_sistema`, el cierre no pasa. Si `cantidad_fisica` deja el stock bajo `cantidad_reservada`, el cierre nombra las notas y no pasa. El PPP no cambia.
 * **Correcciones_Costo** (El costo tipeado en una compra estaba mal. No cambia cuántas piezas hay)
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string) -- Único junto con `id`
@@ -533,12 +535,14 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
   * `almacen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes) -- El almacén de esa compra, para la línea de kardex
   * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
-  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Rol Shield `supervisor`
-  * `costo_anterior` (decimal 14,4)
+  * `supervisor_id` (int, Foreign Key compuesta con `tenant_id` -> Users) -- Quien autoriza con `Corregir:Costo`
+  * `costo_anterior` (decimal 14,4) -- `costo_unitario` de la línea, en unidad base
   * `costo_nuevo` (decimal 14,4)
+  * `promedio_anterior` (decimal 14,4)
+  * `promedio_nuevo` (decimal 14,4) -- El promedio de lo que queda, no el costo nuevo de la línea
   * `observacion` (text)
   * `timestamps` (timestamp)
-  * Nace un movimiento `correccion_costo` con cantidad cero. `precio_costo` de la variante pasa a `costo_nuevo`. Las ventas ya cerradas conservan su snapshot. La compra no se edita.
+  * Nace un movimiento `correccion_costo` con cantidad cero. `precio_costo` de la variante pasa a `promedio_nuevo`. Las ventas ya cerradas conservan su snapshot. La compra no se edita. Si no queda stock, no se corrige.
 
 * **Traslados** (Dos saldos distintos. No se usa cuando el almacén es compartido)
   * `id` (int, Primary Key, Increment)
@@ -546,15 +550,15 @@ Convención de esta parte: todas las tablas viven en el pool. `tenant_id` es str
   * `almacen_origen_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
   * `almacen_destino_id` (int, Foreign Key compuesta con `tenant_id` -> Almacenes)
   * `user_id` (int, Foreign Key compuesta con `tenant_id` -> Users)
-  * `estado` (enum: 'pendiente', 'completado', 'anulado') -- Default: 'pendiente'
+  * `estado` (enum: 'completado') -- Sale de un almacén y entra al otro en el mismo paso. No queda mercadería a mitad de camino
   * `timestamps` (timestamp)
-  * CHECK `almacen_origen_id <> almacen_destino_id`
+  * La aplicación rechaza origen y destino iguales. Deshacer es otro traslado al revés. Un almacén compartido por dos sucursales no se traslada
 * **Traslado_Detalles**
   * `id` (int, Primary Key, Increment)
   * `tenant_id` (string)
   * `traslado_id` (int, Foreign Key compuesta con `tenant_id` -> Traslados, On Delete: Cascade)
   * `producto_variante_id` (int, Foreign Key compuesta con `tenant_id` -> Productos_Variantes)
-  * `cantidad` (int) -- CHECK `cantidad > 0`
+  * `cantidad` (decimal 14,4) -- Mayor a cero, en la unidad base. Solo lo que no está reservado
   * `timestamps` (timestamp)
 
 ### 3. Módulo de Clientes (Gestión Comercial y Fiscal)
@@ -863,10 +867,10 @@ Una venta sale de un solo almacén. Si el ticket necesita dos depósitos, son do
 * **Fiado.** El stock sale hoy y la caja no se mueve. Otro día paga, con la caja de ese día abierta, y el saldo baja. Si devuelve todo y no había pagado, vuelve el stock y no sale plata. Si ya había pagado una parte, se reembolsa esa parte y el resto de la deuda se cancela.
 * **Adelanto sin pieza, o un pago de varias deudas.** Un solo movimiento de caja. Se aplica después a una venta, o se reparte en varias, sin volver a sumar en la caja.
 * **Entrada de mercadería.** La compra guarda la unidad tipeada, la cantidad tipeada y el factor congelado. Al stock entra la cantidad en la unidad base. El costo que alimenta el promedio es el de una unidad base. Si fue en dólares, guarda también el tipo de cambio de ese día y convierte a la moneda de la tienda. Antes de guardar, la pantalla pide confirmar el costo por unidad base. El precio de venta no cambia solo.
-* **Costo mal tipeado.** Las ventas ya cerradas siguen con el costo que tenían. Un supervisor corrige el promedio de lo que queda en el estante.
+* **Costo mal tipeado.** Las ventas ya cerradas siguen con el costo que tenían. Quien tiene `Corregir:Costo` corrige el promedio de lo que queda en el estante, sin cambiar la línea de la compra. Si no queda nada, no hay corrección.
 * **Dólar.** La tienda que no importa no lo ve. La que importa pone el tipo de cambio. Los productos marcados en dólares pasan a la moneda de la tienda en un trabajo por lotes, con una sola confirmación. Lo ya vendido no se toca.
-* **Ajuste y conteo.** Motivo y supervisor. Cambia cuántas piezas hay, no el precio. El conteo compara contra el stock del cierre e incluye las señas. No mueve la caja.
-* **Traslado.** Solo si son dos montones distintos. Un almacén compartido por dos sucursales no se traslada: las dos venden de la misma fila.
+* **Ajuste y conteo.** Motivo y permiso. Cambia cuántas piezas hay, no el precio. El conteo se hace con ese almacén quieto: no vende, no reserva, no traslada y no recibe hasta cerrarlo. El cero se escribe. Si el conteo bajaría de lo apartado, el cierre nombra las notas. No mueve la caja.
+* **Traslado.** Solo si son dos montones distintos. Sale de uno y entra al otro en el mismo paso. Un almacén compartido por dos sucursales no se traslada: las dos venden de la misma fila.
 * **Devolución del mismo día.** Supervisor, la pieza vuelve al kardex con el costo de esa venta, y la plata sale de la caja abierta.
 * **Factura manual.** Pospuesta el 11 de noviembre de 2026. La venta vigente es la nota de venta y el talonario de papel se lleva afuera, adjuntando la nota a la libreta. Cuando se retome: cliente, número y talonario; si se anula, queda la observación del papel.
 * **Caja.** Una sesión abierta por cajero y sucursal. No cierra si hay un vale sin comprobante. Si el efectivo no cuadra, el texto de la diferencia es obligatorio.

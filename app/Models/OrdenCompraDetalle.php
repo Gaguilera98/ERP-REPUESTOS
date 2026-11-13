@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Validation\ValidationException;
 
 #[Fillable([
@@ -100,10 +101,20 @@ class OrdenCompraDetalle extends Model
         return $this->belongsTo(UnidadMedida::class, 'unidad_medida_id');
     }
 
+    public function ultimaCorreccionCosto(): HasOne
+    {
+        return $this->hasOne(CorreccionCosto::class, 'orden_compra_detalle_id')->latestOfMany();
+    }
+
+    public function costoVigente(): string
+    {
+        return (string) ($this->ultimaCorreccionCosto?->costo_nuevo ?? $this->costo_unitario);
+    }
+
     public function textoCostoPorUnidad(string $moneda): string
     {
         $simbolo = $this->variante?->productoMaestro?->unidadBase?->simbolo ?? 'pza';
 
-        return 'Costo por '.$simbolo.': '.MontoEnPalabras::numerosYLetras((string) $this->costo_unitario, $moneda).'.';
+        return 'Costo por '.$simbolo.': '.MontoEnPalabras::numerosYLetras($this->costoVigente(), $moneda).'.';
     }
 }

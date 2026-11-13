@@ -6,6 +6,15 @@
 @source '../../../../resources/views/livewire/**/*';
 @source '../../../../resources/views/components/negocio/**/*';
 
+.fi-badge-label .traslado-opcion-producto,
+.fi-badge-label .traslado-opcion-producto-encabezado {
+    display: contents;
+}
+
+.fi-badge-label .traslado-opcion-producto-detalle {
+    display: none;
+}
+
 .fi-fo-date-time-picker .fi-fo-date-time-picker-calendar .fi-fo-date-time-picker-calendar-day.fi-fo-date-time-picker-calendar-day-today:not(.fi-selected):not(.fi-disabled),
 .fi-fo-date-time-picker .fi-fo-date-time-picker-calendar .fi-fo-date-time-picker-calendar-day.fi-fo-date-time-picker-calendar-day-today.fi-selected:not(.fi-disabled) {
     @apply font-semibold text-emerald-700 dark:text-amber-300;

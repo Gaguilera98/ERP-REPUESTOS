@@ -41,7 +41,7 @@ class RecibirMercaderiaAction
                     && $usuario->can('update', $record);
             })
             ->schema(function (OrdenCompra $record): array {
-                $record->loadMissing('detalles.variante.productoMaestro.unidadBase', 'detalles.unidad');
+                $record->loadMissing('detalles.variante.productoMaestro.unidadBase', 'detalles.unidad', 'detalles.ultimaCorreccionCosto');
                 $moneda = NegocioConfiguracion::codigoMoneda();
                 $campos = [];
 

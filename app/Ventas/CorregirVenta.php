@@ -12,10 +12,10 @@ use App\Enums\TipoComprobante;
 use App\Enums\TipoDescuento;
 use App\Enums\TipoMovimientoInventario;
 use App\Enums\TipoPrecioCliente;
+use App\Inventario\RegistrarMovimiento;
 use App\Models\CajaSesion;
 use App\Models\CorreccionVenta;
 use App\Models\InventarioStock;
-use App\Models\MovimientoInventario;
 use App\Models\Pago;
 use App\Models\PagoAplicacion;
 use App\Models\ProductoVariante;
@@ -29,7 +29,11 @@ use Illuminate\Validation\ValidationException;
 
 class CorregirVenta
 {
-    public function __construct(private PrecioDeLista $precios, private DevolucionComercial $devolucionComercial) {}
+    public function __construct(
+        private PrecioDeLista $precios,
+        private DevolucionComercial $devolucionComercial,
+        private RegistrarMovimiento $movimientos,
+    ) {}
 
     /** @return list<array<string, mixed>> */
     public function lineasVigentes(Venta $venta): array
@@ -296,21 +300,16 @@ class CorregirVenta
                 throw ValidationException::withMessages(['lineas' => 'Un producto no tiene saldo en el almacén original.']);
             }
 
-            $previo = $stock->cantidad_actual;
-            $posterior = bcsub($previo, $cambio['cantidad'], 4);
-            if (! $devuelve && bccomp($posterior, $stock->cantidad_reservada, 4) < 0) {
-                throw ValidationException::withMessages(['lineas' => 'Stock disponible insuficiente para '.$variante->sku.'.']);
-            }
-
-            $stock->cantidad_actual = $posterior;
-            $stock->save();
-
-            MovimientoInventario::query()->create([
-                'producto_variante_id' => $variante->id, 'almacen_id' => $venta->almacen_id,
-                'user_id' => $usuario->id, 'tipo_movimiento' => $devuelve ? TipoMovimientoInventario::Devolucion : TipoMovimientoInventario::SalidaVenta,
-                'cantidad' => ltrim($cambio['cantidad'], '-'), 'stock_previo' => $previo, 'stock_posterior' => $posterior,
-                'costo_unitario' => $cambio['costo'] ?? $variante->precio_costo,
-                'costo_promedio_resultante' => $variante->precio_costo, 'referencia_tipo' => 'correccion_venta',
+            $this->movimientos->mover([
+                'variante' => $variante,
+                'almacen_id' => $venta->almacen_id,
+                'user_id' => $usuario->id,
+                'tipo' => $devuelve ? TipoMovimientoInventario::Devolucion : TipoMovimientoInventario::SalidaVenta,
+                'cantidad' => ltrim((string) $cambio['cantidad'], '-'),
+                'sentido' => $devuelve ? 'entrada' : 'salida',
+                'costo_unitario' => (string) ($cambio['costo'] ?? $variante->precio_costo),
+                'costo_promedio_resultante' => (string) $variante->precio_costo,
+                'referencia_tipo' => 'correccion_venta',
                 'referencia_id' => $correccion->id,
             ]);
         }

@@ -4,20 +4,19 @@ namespace App\Compras;
 
 use App\Enums\EstadoOrdenCompra;
 use App\Enums\TipoMovimientoInventario;
-use App\Models\InventarioStock;
+use App\Inventario\RegistrarMovimiento;
 use App\Models\MovimientoInventario;
 use App\Models\OrdenCompra;
 use App\Models\OrdenCompraDetalle;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class RecibirMercaderia
 {
-    public function __construct(private CostoPromedio $costoPromedio) {}
+    public function __construct(private RegistrarMovimiento $movimientos) {}
 
     /**
      * Escribe stock y kardex recién cuando el costo por unidad fue confirmado.
@@ -54,7 +53,7 @@ class RecibirMercaderia
             }
 
             $detalles = OrdenCompraDetalle::query()
-                ->with('unidad')
+                ->with(['unidad', 'ultimaCorreccionCosto'])
                 ->where('orden_compra_id', $orden->id)
                 ->orderBy('id')
                 ->lockForUpdate()
@@ -101,19 +100,6 @@ class RecibirMercaderia
                 ->get()
                 ->keyBy('id');
 
-            foreach ($variantes as $variante) {
-                InventarioStock::query()->firstOrCreate([
-                    'producto_variante_id' => $variante->id,
-                    'almacen_id' => $orden->almacen_destino_id,
-                ]);
-            }
-
-            $stocks = InventarioStock::query()
-                ->whereIn('producto_variante_id', $varianteIds)
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->get();
-
             foreach ($pedidas as $detalleId => $cantidad) {
                 $detalle = $detalles->get($detalleId);
                 $variante = $variantes->get($detalle->producto_variante_id);
@@ -124,42 +110,17 @@ class RecibirMercaderia
                     ]);
                 }
 
-                $destino = $stocks->first(fn (InventarioStock $stock): bool => $stock->producto_variante_id === $variante->id
-                    && $stock->almacen_id === $orden->almacen_destino_id);
-
-                if (! $destino instanceof InventarioStock) {
-                    throw ValidationException::withMessages([
-                        'cantidad_'.$detalleId => 'Ese almacén no tiene saldo para este producto.',
-                    ]);
-                }
-
-                $stockTotal = $this->sumarStock($stocks->where('producto_variante_id', $variante->id)->pluck('cantidad_actual'));
-                $previo = Montos::redondear((string) $destino->cantidad_actual, 4);
                 $enBase = Montos::multiplicar($cantidad, (string) $detalle->factor_a_base, 4);
-                $posterior = Montos::sumar($previo, $enBase, 4);
-                $promedio = $this->costoPromedio->resultante(
-                    (string) $variante->precio_costo,
-                    $stockTotal,
-                    (string) $detalle->costo_unitario,
-                    $enBase,
-                );
 
-                $destino->cantidad_actual = $posterior;
-                $destino->save();
-
-                $variante->precio_costo = $promedio;
-                $variante->save();
-
-                MovimientoInventario::query()->create([
-                    'producto_variante_id' => $variante->id,
+                $this->movimientos->mover([
+                    'variante' => $variante,
                     'almacen_id' => $orden->almacen_destino_id,
                     'user_id' => $usuario->id,
-                    'tipo_movimiento' => TipoMovimientoInventario::EntradaCompra,
+                    'tipo' => TipoMovimientoInventario::EntradaCompra,
                     'cantidad' => $enBase,
-                    'stock_previo' => $previo,
-                    'stock_posterior' => $posterior,
-                    'costo_unitario' => $detalle->costo_unitario,
-                    'costo_promedio_resultante' => $promedio,
+                    'sentido' => 'entrada',
+                    'costo_unitario' => $detalle->costoVigente(),
+                    'recalcular_promedio' => true,
                     'referencia_tipo' => MovimientoInventario::REFERENCIA_ORDEN_COMPRA,
                     'referencia_id' => $orden->id,
                 ]);
@@ -215,19 +176,5 @@ class RecibirMercaderia
         }
 
         return $pedidas;
-    }
-
-    /**
-     * @param  Collection<int, mixed>  $cantidades
-     */
-    private function sumarStock(Collection $cantidades): string
-    {
-        $total = '0.0000';
-
-        foreach ($cantidades as $cantidad) {
-            $total = Montos::sumar($total, (string) $cantidad, 4);
-        }
-
-        return $total;
     }
 }

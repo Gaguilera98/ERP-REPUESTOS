@@ -28,7 +28,7 @@ todos:
     status: pending
   - id: fase-9-ajustes
     content: "Fase 9: ajustes, conteo, traslados y corrección de costo"
-    status: pending
+    status: completed
   - id: fase-10-cajachica
     content: "Fase 10: categorías Filament, vale Livewire en la caja y candado de cierre"
     status: pending
@@ -183,11 +183,15 @@ Pantalla: resource de talonarios. El mostrador Livewire suma el tipo de comproba
 
 ## Fase 9. Ajustes, conteo, traslados y corrección de costo
 
-Tablas: `ajustes_inventario`, `ajuste_detalles`, `traslados`, `traslado_detalles`, `correcciones_costo`.
+**Estado al 12 de noviembre de 2026:** cerrada con 9 pruebas de Inventario aprobadas y una corrección de costo verificada en el ERP local. La suite completa queda pendiente.
 
-Reglas: el ajuste cambia unidades, no el promedio, con motivo y supervisor; el conteo compara al cerrar e incluye las señas; no cierra si dejaría el stock bajo lo reservado; el traslado une salida y entrada y no se usa si el almacén es compartido; corregir un costo no edita la compra ni las ventas ya hechas, y el movimiento lleva cantidad cero.
+Tablas: `ajustes_inventario`, `ajuste_detalles`, `traslados`, `traslado_detalles`, `correcciones_costo`. Cantidades en `decimal(14,4)`.
 
-Pantalla: recursos Filament. Ya está disponible **Ver kardex** desde la lista y la ficha de Productos. La consulta muestra movimientos de las variantes del producto, con cantidad que entró o salió y stock resultante por almacén. Se filtra por almacén, día y tipo, incluidas entradas por compra y entradas express. La consulta usa el permiso de ver el producto. Los ajustes, el conteo, los traslados y las correcciones de costo se implementan en esta fase.
+Reglas: el ajuste cambia unidades, no el promedio, con motivo y el permiso `Ajustar:Inventario`. `hallazgo` suma; merma, rotura y uso interno restan. Una compra olvidada es una entrada, no un ajuste. Mientras un conteo está abierto, ese almacén no vende, no reserva, no traslada y no recibe. El número del sistema se copia al cargar la línea. El cero hay que escribirlo. El cierre solo toca lo contado. Si el stock se movió, hay que volver a contar. Si la cantidad bajaría de lo reservado, el cierre nombra las notas `VNT-`. El traslado sale y entra en el mismo paso, con `Trasladar:Inventario`; no se usa si el almacén es compartido. Corregir un costo no edita la compra ni las ventas ya hechas. El promedio nuevo reparte `(costo_nuevo - costo_anterior)` solo sobre lo que queda hoy. El movimiento lleva cantidad cero. Quien cierra queda en `supervisor_id` por permiso, no por el nombre del rol. Un solo registro escribe el stock y el kardex.
+
+Pantalla: **Inventario** (`/inventario`) para el conteo y el ajuste puntual, **Traslados** (`/traslados`) y **Corregir costo** en la compra, al lado de Recibir. Ya está disponible **Ver kardex** desde la lista y la ficha de Productos. La consulta muestra movimientos de las variantes del producto, con cantidad que entró o salió y stock resultante por almacén. Se filtra por almacén, día y tipo, incluidas entradas por compra y entradas express. La consulta usa el permiso de ver el producto.
+
+Una corrección posterior toma como base el último costo corregido de la línea. Si la compra quedó recibida a medias, las unidades que lleguen después se valorizan con ese costo vigente. El costo original de la compra se conserva.
 
 ## Fase 10. Caja chica
 

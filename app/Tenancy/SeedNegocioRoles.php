@@ -98,6 +98,7 @@ class SeedNegocioRoles
             'Create:Venta',
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',
+            'Cargar:Conteo',
         ]);
 
         NegocioConfiguracion::query()->firstOrCreate([], [
@@ -129,6 +130,11 @@ class SeedNegocioRoles
             'Ampliar:Reserva',
             'Registrar:Devolucion',
             'Autorizar:ExcepcionDevolucion',
+            'Cargar:Conteo',
+            'Cerrar:Conteo',
+            'Ajustar:Inventario',
+            'Trasladar:Inventario',
+            'Corregir:Costo',
             'View:ConfiguracionDelNegocio',
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',

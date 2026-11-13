@@ -8,6 +8,7 @@ use App\Enums\EstadoVenta;
 use App\Enums\MetodoPago;
 use App\Enums\SentidoPago;
 use App\Enums\TipoMovimientoInventario;
+use App\Inventario\RegistrarMovimiento;
 use App\Models\CajaSesion;
 use App\Models\InventarioStock;
 use App\Models\MovimientoInventario;
@@ -23,6 +24,8 @@ use Illuminate\Validation\ValidationException;
 
 class GestionarReservas
 {
+    public function __construct(private RegistrarMovimiento $movimientos) {}
+
     public function procesarVencidas(?int $sucursalId = null): void
     {
         Venta::query()->where('estado', EstadoVenta::Reserva)->where('vence_en', '<=', now())
@@ -39,6 +42,9 @@ class GestionarReservas
         DB::transaction(function () use ($venta): void {
             $venta = Venta::query()->lockForUpdate()->findOrFail($venta->id);
             if ($venta->estado !== EstadoVenta::Reserva || $venta->vence_en->isFuture()) {
+                return;
+            }
+            if ($this->almacenEnConteo($venta)) {
                 return;
             }
             $this->liberar($venta);
@@ -144,20 +150,21 @@ class GestionarReservas
             $variantes = ProductoVariante::query()->whereKey($detalles->pluck('producto_variante_id')->unique()->values()->all())
                 ->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             foreach ($detalles as $detalle) {
-                $detalle->precio_costo_snapshot = $variantes->get($detalle->producto_variante_id)->precio_costo;
+                $variante = $variantes->get($detalle->producto_variante_id);
+                $detalle->precio_costo_snapshot = $variante->precio_costo;
                 $detalle->save();
-                $stock = InventarioStock::query()->where('producto_variante_id', $detalle->producto_variante_id)
-                    ->where('almacen_id', $venta->almacen_id)->lockForUpdate()->firstOrFail();
-                $previo = $stock->cantidad_actual;
-                $stock->cantidad_actual = bcsub($previo, $detalle->cantidad_base, 4);
-                $stock->cantidad_reservada = bcsub($stock->cantidad_reservada, $detalle->cantidad_base, 4);
-                $stock->save();
-                MovimientoInventario::query()->create([
-                    'producto_variante_id' => $detalle->producto_variante_id, 'almacen_id' => $venta->almacen_id, 'user_id' => $usuario->id,
-                    'tipo_movimiento' => TipoMovimientoInventario::SalidaVenta, 'cantidad' => $detalle->cantidad_base,
-                    'stock_previo' => $previo, 'stock_posterior' => $stock->cantidad_actual,
-                    'costo_unitario' => $detalle->precio_costo_snapshot, 'costo_promedio_resultante' => $detalle->precio_costo_snapshot,
-                    'referencia_tipo' => MovimientoInventario::REFERENCIA_VENTA, 'referencia_id' => $venta->id,
+                $this->movimientos->mover([
+                    'variante' => $variante,
+                    'almacen_id' => $venta->almacen_id,
+                    'user_id' => $usuario->id,
+                    'tipo' => TipoMovimientoInventario::SalidaVenta,
+                    'cantidad' => (string) $detalle->cantidad_base,
+                    'sentido' => 'salida',
+                    'costo_unitario' => (string) $detalle->precio_costo_snapshot,
+                    'costo_promedio_resultante' => (string) $detalle->precio_costo_snapshot,
+                    'delta_reservada' => bcmul((string) $detalle->cantidad_base, '-1', 4),
+                    'referencia_tipo' => MovimientoInventario::REFERENCIA_VENTA,
+                    'referencia_id' => $venta->id,
                 ]);
             }
             if (bccomp($saldo, '0', 2) > 0) {
@@ -180,8 +187,18 @@ class GestionarReservas
         foreach ($venta->detalles()->orderBy('producto_variante_id')->orderBy('id')->get() as $detalle) {
             $stock = InventarioStock::query()->where('producto_variante_id', $detalle->producto_variante_id)
                 ->where('almacen_id', $venta->almacen_id)->lockForUpdate()->firstOrFail();
-            $stock->cantidad_reservada = bcsub($stock->cantidad_reservada, $detalle->cantidad_base, 4);
-            $stock->save();
+            $this->movimientos->reservar($stock, bcmul((string) $detalle->cantidad_base, '-1', 4));
         }
+    }
+
+    private function almacenEnConteo(Venta $venta): bool
+    {
+        try {
+            $this->movimientos->exigirLibre($venta->almacen_id);
+        } catch (ValidationException) {
+            return true;
+        }
+
+        return false;
     }
 }

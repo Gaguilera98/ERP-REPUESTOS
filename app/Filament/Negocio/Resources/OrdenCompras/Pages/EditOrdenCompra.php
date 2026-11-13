@@ -5,6 +5,7 @@ namespace App\Filament\Negocio\Resources\OrdenCompras\Pages;
 use App\Compras\GuardarOrdenCompra;
 use App\Enums\EstadoOrdenCompra;
 use App\Filament\Negocio\Resources\OrdenCompras\Actions\AnularOrdenCompraAction;
+use App\Filament\Negocio\Resources\OrdenCompras\Actions\CorregirCostoAction;
 use App\Filament\Negocio\Resources\OrdenCompras\Actions\RecibirMercaderiaAction;
 use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
 use App\Filament\Negocio\Resources\OrdenCompras\Schemas\OrdenCompraForm;
@@ -33,6 +34,7 @@ class EditOrdenCompra extends EditRecord
     {
         return [
             RecibirMercaderiaAction::make(),
+            CorregirCostoAction::make(),
             AnularOrdenCompraAction::make(),
             DeleteAction::make()
                 ->visible(fn (): bool => $this->compraEstaPendiente()),

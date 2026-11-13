@@ -2,8 +2,6 @@
 
 namespace App\Ventas;
 
-use App\Compras\CostoPromedio;
-use App\Compras\Montos;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\EstadoPago;
 use App\Enums\EstadoVenta;
@@ -11,6 +9,7 @@ use App\Enums\MetodoPago;
 use App\Enums\SentidoPago;
 use App\Enums\TipoComprobante;
 use App\Enums\TipoMovimientoInventario;
+use App\Inventario\RegistrarMovimiento;
 use App\Models\CajaSesion;
 use App\Models\InventarioStock;
 use App\Models\MovimientoInventario;
@@ -22,7 +21,7 @@ use Illuminate\Validation\ValidationException;
 
 class AnularVenta
 {
-    public function __construct(private CostoPromedio $costoPromedio, private CorregirVenta $correcciones) {}
+    public function __construct(private RegistrarMovimiento $movimientos, private CorregirVenta $correcciones) {}
 
     public function anular(Venta $venta, string $motivo, string $cobradoConfirmado, TenantUser $usuario): void
     {
@@ -99,31 +98,15 @@ class AnularVenta
                 throw ValidationException::withMessages(['venta' => 'Falta el saldo de inventario de un producto en el almacén original.']);
             }
 
-            $stockTotal = $saldos->reduce(
-                fn (string $total, InventarioStock $stock): string => Montos::sumar($total, $stock->cantidad_actual, 4),
-                '0.0000',
-            );
-            $previo = $destino->cantidad_actual;
-            $posterior = Montos::sumar($previo, $detalle->cantidad_base, 4);
-            $promedio = $this->costoPromedio->resultante(
-                $variante->precio_costo, $stockTotal, $detalle->precio_costo_snapshot, $detalle->cantidad_base,
-            );
-
-            $destino->cantidad_actual = $posterior;
-            $destino->save();
-            $variante->precio_costo = $promedio;
-            $variante->save();
-
-            MovimientoInventario::query()->create([
-                'producto_variante_id' => $variante->id,
+            $this->movimientos->mover([
+                'variante' => $variante,
                 'almacen_id' => $venta->almacen_id,
                 'user_id' => $usuario->id,
-                'tipo_movimiento' => TipoMovimientoInventario::Devolucion,
-                'cantidad' => $detalle->cantidad_base,
-                'stock_previo' => $previo,
-                'stock_posterior' => $posterior,
-                'costo_unitario' => $detalle->precio_costo_snapshot,
-                'costo_promedio_resultante' => $promedio,
+                'tipo' => TipoMovimientoInventario::Devolucion,
+                'cantidad' => (string) $detalle->cantidad_base,
+                'sentido' => 'entrada',
+                'costo_unitario' => (string) $detalle->precio_costo_snapshot,
+                'recalcular_promedio' => true,
                 'referencia_tipo' => MovimientoInventario::REFERENCIA_VENTA,
                 'referencia_id' => $venta->id,
             ]);

@@ -258,6 +258,11 @@ return [
         'Ampliar:Reserva' => 'Ampliar el vencimiento de una reserva',
         'Registrar:Devolucion' => 'Registrar devoluciones de productos',
         'Autorizar:ExcepcionDevolucion' => 'Autorizar devoluciones fuera de plazo',
+        'Cargar:Conteo' => 'Cargar un conteo de inventario',
+        'Cerrar:Conteo' => 'Cerrar un conteo de inventario',
+        'Ajustar:Inventario' => 'Registrar un ajuste de inventario',
+        'Trasladar:Inventario' => 'Trasladar mercadería entre almacenes',
+        'Corregir:Costo' => 'Corregir el costo de una compra recibida',
     ],
 
     /*

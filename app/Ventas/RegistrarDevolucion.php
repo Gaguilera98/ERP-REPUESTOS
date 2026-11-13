@@ -2,17 +2,16 @@
 
 namespace App\Ventas;
 
-use App\Compras\CostoPromedio;
 use App\Compras\Montos;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\EstadoPago;
 use App\Enums\SentidoPago;
 use App\Enums\TipoComprobante;
 use App\Enums\TipoMovimientoInventario;
+use App\Inventario\RegistrarMovimiento;
 use App\Models\CajaSesion;
 use App\Models\Cliente;
 use App\Models\InventarioStock;
-use App\Models\MovimientoInventario;
 use App\Models\NotaCreditoDevolucion;
 use App\Models\Pago;
 use App\Models\PagoAplicacion;
@@ -25,7 +24,7 @@ use Illuminate\Validation\ValidationException;
 
 class RegistrarDevolucion
 {
-    public function __construct(private CorregirVenta $correcciones, private CostoPromedio $costos) {}
+    public function __construct(private CorregirVenta $correcciones, private RegistrarMovimiento $movimientos) {}
 
     /** @return list<array{indice: int, producto: string, disponible: string, cantidad: string}> */
     public function lineasParaFormulario(Venta $venta): array
@@ -284,24 +283,22 @@ class RegistrarDevolucion
             if (! $stock) {
                 $this->rechazar('Falta el saldo de inventario del almacén original.');
             }
-            $totalStock = $saldos->reduce(fn (string $suma, InventarioStock $fila): string => bcadd($suma, $fila->cantidad_actual, 4), '0.0000');
-            $previo = $stock->cantidad_actual;
-            $promedio = $this->costos->resultante($variante->precio_costo, $totalStock, $linea['precio_costo_snapshot'], $linea['base_devolver']);
-            $stock->cantidad_actual = bcadd($previo, $linea['base_devolver'], 4);
-            $stock->save();
-            $variante->precio_costo = $promedio;
-            $variante->save();
             $nota->detalles()->create([
                 'venta_detalle_id' => $linea['venta_detalle_id'], 'linea_indice' => $linea['indice'],
                 'producto_variante_id' => $variante->id, 'cantidad' => $linea['cantidad_devolver'],
                 'cantidad_base' => $linea['base_devolver'], 'importe' => $linea['importe'], 'linea_snapshot' => $linea,
             ]);
-            MovimientoInventario::query()->create([
-                'producto_variante_id' => $variante->id, 'almacen_id' => $venta->almacen_id, 'user_id' => $usuario->id,
-                'tipo_movimiento' => TipoMovimientoInventario::Devolucion, 'cantidad' => $linea['base_devolver'],
-                'stock_previo' => $previo, 'stock_posterior' => $stock->cantidad_actual,
-                'costo_unitario' => $linea['precio_costo_snapshot'], 'costo_promedio_resultante' => $promedio,
-                'referencia_tipo' => 'nota_credito_devolucion', 'referencia_id' => $nota->id,
+            $this->movimientos->mover([
+                'variante' => $variante,
+                'almacen_id' => $venta->almacen_id,
+                'user_id' => $usuario->id,
+                'tipo' => TipoMovimientoInventario::Devolucion,
+                'cantidad' => (string) $linea['base_devolver'],
+                'sentido' => 'entrada',
+                'costo_unitario' => (string) $linea['precio_costo_snapshot'],
+                'recalcular_promedio' => true,
+                'referencia_tipo' => 'nota_credito_devolucion',
+                'referencia_id' => $nota->id,
             ]);
         }
     }

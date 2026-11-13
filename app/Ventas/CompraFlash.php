@@ -2,14 +2,13 @@
 
 namespace App\Ventas;
 
-use App\Compras\CostoPromedio;
 use App\Compras\Montos;
 use App\Enums\EstadoOrdenCompra;
 use App\Enums\TipoMovimientoInventario;
 use App\Inventario\FactorUnidad;
+use App\Inventario\RegistrarMovimiento;
 use App\Models\Almacen;
 use App\Models\Categoria;
-use App\Models\InventarioStock;
 use App\Models\Marca;
 use App\Models\MovimientoInventario;
 use App\Models\OrdenCompra;
@@ -26,7 +25,7 @@ use Illuminate\Validation\ValidationException;
 class CompraFlash
 {
     public function __construct(
-        private CostoPromedio $costoPromedio,
+        private RegistrarMovimiento $movimientos,
         private FactorUnidad $factores,
     ) {}
 
@@ -131,54 +130,15 @@ class CompraFlash
                 'subtotal_linea' => $subtotal,
             ]);
 
-            InventarioStock::query()->firstOrCreate([
-                'producto_variante_id' => $variante->id,
-                'almacen_id' => $almacenId,
-            ]);
-
-            $stock = InventarioStock::query()
-                ->where('producto_variante_id', $variante->id)
-                ->where('almacen_id', $almacenId)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            $stocksVariante = InventarioStock::query()
-                ->where('producto_variante_id', $variante->id)
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->get();
-
-            $stockTotal = '0.0000';
-
-            foreach ($stocksVariante as $fila) {
-                $stockTotal = Montos::sumar($stockTotal, (string) $fila->cantidad_actual, 4);
-            }
-
-            $previo = Montos::cuatro((string) $stock->cantidad_actual);
-            $posterior = Montos::sumar($previo, $cantidadBase, 4);
-            $promedio = $this->costoPromedio->resultante(
-                (string) $variante->precio_costo,
-                $stockTotal,
-                $costoUnitario,
-                $cantidadBase,
-            );
-
-            $stock->cantidad_actual = $posterior;
-            $stock->save();
-
-            $variante->precio_costo = $promedio;
-            $variante->save();
-
-            MovimientoInventario::query()->create([
-                'producto_variante_id' => $variante->id,
+            $this->movimientos->mover([
+                'variante' => $variante,
                 'almacen_id' => $almacenId,
                 'user_id' => $usuario->id,
-                'tipo_movimiento' => TipoMovimientoInventario::EntradaFlashEmergencia,
+                'tipo' => TipoMovimientoInventario::EntradaFlashEmergencia,
                 'cantidad' => $cantidadBase,
-                'stock_previo' => $previo,
-                'stock_posterior' => $posterior,
+                'sentido' => 'entrada',
                 'costo_unitario' => $costoUnitario,
-                'costo_promedio_resultante' => $promedio,
+                'recalcular_promedio' => true,
                 'referencia_tipo' => MovimientoInventario::REFERENCIA_ORDEN_COMPRA,
                 'referencia_id' => $orden->id,
             ]);
