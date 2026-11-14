@@ -6,6 +6,34 @@
 @source '../../../../resources/views/livewire/**/*';
 @source '../../../../resources/views/components/negocio/**/*';
 
+.producto-stock {
+    @apply min-w-0 overflow-x-auto p-px;
+
+    & > table {
+        @apply table min-w-max;
+
+        & > thead {
+            @apply table-header-group;
+        }
+
+        & > tbody {
+            @apply table-row-group;
+
+            & > tr {
+                @apply table-row;
+
+                & > td {
+                    @apply table-cell px-3 py-2;
+
+                    & .fi-in-entry-label {
+                        @apply hidden;
+                    }
+                }
+            }
+        }
+    }
+}
+
 .compra-productos > .fi-fo-repeater-add {
     display: none;
 }

@@ -14,8 +14,10 @@ use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
 use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
+use App\Models\InventarioStock;
 use App\Models\Marca;
 use App\Models\NegocioConfiguracion;
+use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
 use App\Models\UnidadMedida;
 use Closure;
@@ -28,12 +30,17 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Infolists\Components\RepeatableEntry;
+use Filament\Infolists\Components\RepeatableEntry\TableColumn;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Collection as ModelCollection;
 use Illuminate\Support\Collection;
 
 class ProductoMaestroForm
@@ -47,122 +54,110 @@ class ProductoMaestroForm
         return $schema
             ->columns(1)
             ->components([
-                Grid::make(['default' => 1, 'lg' => 10])
+                Grid::make(['default' => 1, 'xl' => 12])
                     ->schema([
-                        Section::make('Datos del producto')
-                            ->description('Nombre, rubro y marca. El código y el precio van en este mismo producto.')
-                            ->columnSpan(['default' => 1, 'lg' => 6])
-                            ->schema([
-                                TextInput::make('nombre')
-                                    ->label('Nombre del producto')
-                                    ->placeholder('Ej: Rodamiento rígido de bolas, Polera de hombre...')
-                                    ->required()
-                                    ->maxLength(255),
-                                Select::make('categoria_id')
-                                    ->label('Categoría / Rubro')
-                                    ->options(fn (Get $get): array => self::catalogoActivo(Categoria::class, $get, 'categoria_id'))
-                                    ->required()
-                                    ->searchable()
-                                    ->preload()
-                                    ->native(false)
-                                    ->live()
-                                    ->afterStateUpdated(function (Set $set): void {
-                                        $set('con_variantes', false);
-                                        $set('opciones', []);
-                                        $set('variantes', []);
-                                        $set('ficha', []);
-                                    }),
-                                Select::make('marca_id')
-                                    ->label('Marca')
-                                    ->options(fn (Get $get): array => self::catalogoActivo(Marca::class, $get, 'marca_id'))
-                                    ->searchable()
-                                    ->preload()
-                                    ->native(false)
-                                    ->placeholder('Sin marca')
-                                    ->createOptionForm([
-                                        MarcaForm::nombre(),
-                                    ])
-                                    ->createOptionUsing(fn (array $data): int => Marca::query()->create($data)->getKey())
-                                    ->createOptionAction(fn (Action $action): Action => $action
-                                        ->visible(fn (): bool => (bool) auth('tenant')->user()?->can('create', Marca::class))
-                                        ->modalHeading('Nueva marca')),
-                                Select::make('devolucion_comercial')
-                                    ->label('Devolución comercial')
-                                    ->options(collect(DevolucionComercialProducto::cases())->mapWithKeys(
-                                        fn (DevolucionComercialProducto $marca): array => [$marca->value => $marca->etiqueta()],
-                                    )->all())
-                                    ->default(DevolucionComercialProducto::Hereda->value)
-                                    ->required()
-                                    ->native(false)
-                                    ->helperText('Hereda el rubro. «Sí se devuelve» reabre una categoría bloqueada. No afecta un reclamo por falla.'),
-                                Select::make('unidad_base_id')
-                                    ->label('Unidad de stock')
-                                    ->helperText('El estante, el costo y el precio se cuentan en esta unidad.')
-                                    ->options(fn (): array => self::unidadesDeCantidad())
-                                    ->default(fn (): mixed => UnidadMedida::query()->where('simbolo', 'pza')->value('id'))
-                                    ->required()
-                                    ->searchable()
-                                    ->preload()
-                                    ->native(false),
-                                Repeater::make('empaques')
-                                    ->label('Empaques')
-                                    ->helperText('Una caja u otro bulto de este producto. 1 caja = tantas unidades de stock.')
-                                    ->relationship()
-                                    ->defaultItems(0)
-                                    ->addActionLabel('Agregar empaque')
-                                    ->schema([
-                                        Select::make('unidad_medida_id')
-                                            ->label('Unidad')
-                                            ->options(fn (): array => self::unidadesDeCantidad())
-                                            ->required()
-                                            ->searchable()
-                                            ->preload()
-                                            ->native(false),
-                                        TextInput::make('factor_a_base')
-                                            ->label('Cuántas de stock entran')
-                                            ->numeric()
-                                            ->minValue(0.000001)
-                                            ->required(),
-                                    ])
-                                    ->columns(2),
-                                Toggle::make('is_active')
-                                    ->label('Activo')
-                                    ->default(true)
-                                    ->helperText('Apagado no se ofrece. Cada variante se apaga sola en su fila.'),
-                            ]),
-                        Section::make('Galería')
-                            ->description('Fotos del producto. La foto de una variante también entra acá.')
-                            ->columnSpan(['default' => 1, 'lg' => 4])
-                            ->schema([
-                                FileUpload::make('imagenes')
-                                    ->hiddenLabel()
-                                    ->multiple()
-                                    ->panelLayout('grid')
-                                    ->reorderable()
-                                    ->appendFiles()
-                                    ->image()
-                                    ->maxFiles(5)
-                                    ->directory(fn (): string => app(ArchivosNegocio::class)->directorio(TipoArchivoNegocio::GaleriaProducto))
-                                    ->disk('public')
-                                    ->helperText('Hasta 5 imágenes. Arrastrá para ordenar.'),
-                            ]),
-                    ]),
-
-                Section::make('Precio')
-                    ->description('Un solo código. Si más adelante tiene color, talla u otra lista, agregá variantes.')
-                    ->visible(fn (Get $get): bool => ! self::conVariantes($get))
-                    ->schema([
-                        Hidden::make('variante_id'),
-                        Grid::make(2)
-                            ->schema([
-                                self::campoSku('sku', 'variante_id'),
-                                self::campoCodigoBarras('codigo_barras', 'variante_id'),
-                                self::campoPrecio('precio_venta', 'Precio al por menor', true, $moneda, $conDolar),
-                                self::campoPrecio('precio_mayor', 'Precio al por mayor', false, $moneda, $conDolar),
-                                self::referencia('precio_venta_dolar', 'Referencia Menor en USD', $conDolar, $moneda, $cotizacion),
-                                self::referencia('precio_mayor_dolar', 'Referencia Mayor en USD', $conDolar, $moneda, $cotizacion),
-                            ]),
-                        self::ubicaciones(),
+                        Group::make([
+                            Section::make('Datos del producto')
+                                ->columns(['default' => 1, 'md' => 2])
+                                ->schema([
+                                    TextInput::make('nombre')
+                                        ->label('Nombre del producto')
+                                        ->placeholder('Ej. Rodamiento rígido de bolas')
+                                        ->required()
+                                        ->maxLength(255)
+                                        ->columnSpanFull(),
+                                    Select::make('categoria_id')
+                                        ->label('Categoría / Rubro')
+                                        ->options(fn (Get $get): array => self::catalogoActivo(Categoria::class, $get, 'categoria_id'))
+                                        ->required()
+                                        ->searchable()
+                                        ->preload()
+                                        ->native(false)
+                                        ->live()
+                                        ->afterStateUpdated(function (Set $set): void {
+                                            $set('con_variantes', false);
+                                            $set('opciones', []);
+                                            $set('variantes', []);
+                                            $set('ficha', []);
+                                        }),
+                                    Select::make('marca_id')
+                                        ->label('Marca')
+                                        ->options(fn (Get $get): array => self::catalogoActivo(Marca::class, $get, 'marca_id'))
+                                        ->searchable()
+                                        ->preload()
+                                        ->native(false)
+                                        ->placeholder('Sin marca')
+                                        ->createOptionForm([
+                                            MarcaForm::nombre(),
+                                        ])
+                                        ->createOptionUsing(fn (array $data): int => Marca::query()->create($data)->getKey())
+                                        ->createOptionAction(fn (Action $action): Action => $action
+                                            ->visible(fn (): bool => (bool) auth('tenant')->user()?->can('create', Marca::class))
+                                            ->modalHeading('Nueva marca')),
+                                    Select::make('devolucion_comercial')
+                                        ->label('Devolución comercial')
+                                        ->options(collect(DevolucionComercialProducto::cases())->mapWithKeys(
+                                            fn (DevolucionComercialProducto $marca): array => [$marca->value => $marca->etiqueta()],
+                                        )->all())
+                                        ->default(DevolucionComercialProducto::Hereda->value)
+                                        ->required()
+                                        ->native(false)
+                                        ->hintIcon(Heroicon::OutlinedQuestionMarkCircle, tooltip: 'La opción «Hereda la categoría» usa la política del rubro. Esta política es para devoluciones comerciales.'),
+                                    Select::make('unidad_base_id')
+                                        ->label('Unidad de stock')
+                                        ->hintIcon(Heroicon::OutlinedQuestionMarkCircle, tooltip: 'Unidad utilizada para existencias, costos y precios.')
+                                        ->options(fn (): array => self::unidadesDeCantidad())
+                                        ->default(fn (): mixed => UnidadMedida::query()->where('simbolo', 'pza')->value('id'))
+                                        ->required()
+                                        ->searchable()
+                                        ->preload()
+                                        ->native(false),
+                                    Toggle::make('is_active')
+                                        ->label('Disponible para la venta')
+                                        ->default(true)
+                                        ->columnSpanFull(),
+                                ]),
+                            Section::make('Códigos y precios')
+                                ->visible(fn (Get $get): bool => ! self::conVariantes($get))
+                                ->columns(['default' => 1, 'md' => 2])
+                                ->schema([
+                                    Hidden::make('variante_id'),
+                                    self::campoSku('sku', 'variante_id'),
+                                    self::campoCodigoBarras('codigo_barras', 'variante_id'),
+                                    self::campoPrecio('precio_venta', 'Precio al por menor', true, $moneda, $conDolar),
+                                    self::campoPrecio('precio_mayor', 'Precio al por mayor', false, $moneda, $conDolar),
+                                    self::referencia('precio_venta_dolar', 'Referencia Menor en USD', $conDolar, $moneda, $cotizacion),
+                                    self::referencia('precio_mayor_dolar', 'Referencia Mayor en USD', $conDolar, $moneda, $cotizacion),
+                                ]),
+                            Section::make('Ficha técnica')
+                                ->columns(['default' => 1, 'md' => 2])
+                                ->schema(fn (Get $get): array => self::camposFicha($get)),
+                            Section::make('Empaques')
+                                ->collapsed()
+                                ->schema([self::empaques()]),
+                            Section::make('Ubicación en almacenes')
+                                ->hiddenOn('create')
+                                ->visible(fn (Get $get): bool => ! self::conVariantes($get))
+                                ->collapsed()
+                                ->schema([self::ubicaciones()->hiddenLabel()]),
+                        ])->columnSpan(['default' => 1, 'xl' => 7]),
+                        Group::make([
+                            self::stockPorAlmacen(),
+                            Section::make('Galería')
+                                ->schema([
+                                    FileUpload::make('imagenes')
+                                        ->hiddenLabel()
+                                        ->multiple()
+                                        ->panelLayout('grid')
+                                        ->reorderable()
+                                        ->appendFiles()
+                                        ->image()
+                                        ->maxFiles(5)
+                                        ->directory(fn (): string => app(ArchivosNegocio::class)->directorio(TipoArchivoNegocio::GaleriaProducto))
+                                        ->disk('public')
+                                        ->helperText('Hasta 5 fotos. Arrastrá para ordenar. La primera es la principal.'),
+                                ]),
+                        ])->columnSpan(['default' => 1, 'xl' => 5]),
                     ]),
 
                 Section::make('Variantes')
@@ -327,10 +322,68 @@ class ProductoMaestroForm
                             ]),
                     ]),
 
-                Section::make('Ficha')
-                    ->description('Datos del rubro. En una lista podés marcar uno o varios. Si hay variantes, estos valen para todas.')
-                    ->schema(fn (Get $get): array => self::camposFicha($get)),
             ]);
+    }
+
+    private static function stockPorAlmacen(): Section
+    {
+        $cantidad = fn (string $state, InventarioStock $record): string => trim(
+            Montos::sinCeros($state).' '.$record->variante?->productoMaestro?->unidadBase?->simbolo,
+        );
+
+        return Section::make('Stock por almacén')
+            ->visibleOn('edit')
+            ->schema([
+                RepeatableEntry::make('stock_por_almacen')
+                    ->hiddenLabel()
+                    ->extraAttributes(['class' => 'producto-stock'])
+                    ->placeholder('No hay existencias registradas.')
+                    ->state(fn (?ProductoMaestro $record): ?ModelCollection => $record
+                        ?->loadMissing('stocks.almacen', 'stocks.variante.productoMaestro.unidadBase')->stocks
+                        ->sortBy(['almacen.nombre', 'variante.sku']))
+                    ->table([
+                        TableColumn::make('Almacén'),
+                        TableColumn::make('SKU'),
+                        TableColumn::make('Físico'),
+                        TableColumn::make('Reservado'),
+                        TableColumn::make('Disponible'),
+                    ])
+                    ->schema([
+                        TextEntry::make('almacen.nombre')->label('Almacén'),
+                        TextEntry::make('variante.sku')->label('SKU'),
+                        TextEntry::make('cantidad_actual')->label('Físico')->formatStateUsing($cantidad),
+                        TextEntry::make('cantidad_reservada')->label('Reservado')->formatStateUsing($cantidad),
+                        TextEntry::make('cantidad_disponible')
+                            ->label('Disponible')
+                            ->state(fn (InventarioStock $record): string => bcsub($record->cantidad_actual, $record->cantidad_reservada, 4))
+                            ->formatStateUsing($cantidad),
+                    ]),
+            ]);
+    }
+
+    private static function empaques(): Repeater
+    {
+        return Repeater::make('empaques')
+            ->hiddenLabel()
+            ->helperText('Indicá cuántas unidades de stock contiene cada empaque.')
+            ->relationship()
+            ->defaultItems(0)
+            ->addActionLabel('Agregar empaque')
+            ->schema([
+                Select::make('unidad_medida_id')
+                    ->label('Unidad de empaque')
+                    ->options(fn (): array => self::unidadesDeCantidad())
+                    ->required()
+                    ->searchable()
+                    ->preload()
+                    ->native(false),
+                TextInput::make('factor_a_base')
+                    ->label('Unidades de stock por empaque')
+                    ->numeric()
+                    ->minValue(0.000001)
+                    ->required(),
+            ])
+            ->columns(2);
     }
 
     /**
