@@ -6,6 +6,7 @@ use App\Enums\TipoAtributoCategoria;
 use App\Enums\TipoMovimientoInventario;
 use App\Filament\Negocio\Resources\Categorias\Pages\ManageCategorias;
 use App\Filament\Negocio\Resources\Categorias\Schemas\CategoriaForm;
+use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\CreateProductoMaestro;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\EditProductoMaestro;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\KardexProductoMaestro;
@@ -16,6 +17,7 @@ use App\Models\CategoriaAtributo;
 use App\Models\InventarioStock;
 use App\Models\Marca;
 use App\Models\MovimientoInventario;
+use App\Models\OrdenCompra;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
 use App\Models\Tenant;
@@ -88,9 +90,16 @@ it('consulta el kardex del producto y filtra por almacén, tipo y día', functio
         'producto_variante_id' => $variante->id, 'almacen_id' => $deposito->id, 'user_id' => $cajero->id,
         'created_at' => '2026-11-11 10:00:00', ...$datos,
     ]);
-    $compra = $movimiento([]);
-    $express = $movimiento(['tipo_movimiento' => TipoMovimientoInventario::EntradaFlashEmergencia]);
-    $salida = $movimiento(['tipo_movimiento' => TipoMovimientoInventario::SalidaVenta, 'stock_previo' => 2, 'stock_posterior' => 1]);
+    $orden = OrdenCompra::factory()->create(['almacen_destino_id' => $deposito->id, 'user_id' => $cajero->id]);
+    $compra = $movimiento(['referencia_id' => $orden->id, 'cantidad' => 2, 'stock_posterior' => 2, 'costo_unitario' => '157.5000']);
+    $express = $movimiento(['tipo_movimiento' => TipoMovimientoInventario::EntradaFlashEmergencia, 'costo_unitario' => '10.1250']);
+    $salida = $movimiento([
+        'tipo_movimiento' => TipoMovimientoInventario::SalidaVenta,
+        'stock_previo' => 2,
+        'stock_posterior' => 1,
+        'referencia_tipo' => MovimientoInventario::REFERENCIA_VENTA,
+        'referencia_id' => $orden->id,
+    ]);
     $otroDia = $movimiento(['created_at' => '2026-11-10 10:00:00']);
     $otroAlmacen = $movimiento(['almacen_id' => $tienda->id]);
     $otroProducto = $movimiento(['producto_variante_id' => ProductoVariante::factory()->create()->id]);
@@ -99,11 +108,26 @@ it('consulta el kardex del producto y filtra por almacén, tipo y día', functio
     Livewire::actingAs($cajero, 'tenant')->test(KardexProductoMaestro::class, ['record' => $producto->id])
         ->assertCanSeeTableRecords([$compra, $express, $salida, $otroDia, $otroAlmacen])
         ->assertCanNotSeeTableRecords([$otroProducto])
+        ->assertTableColumnFormattedStateSet('costo_unitario_entrada', 'BOB 157.50 / pza', $compra)
+        ->assertTableColumnStateSet('costo_total_entrada', 'BOB 315.00', $compra)
+        ->assertTableColumnFormattedStateSet('costo_unitario_entrada', 'BOB 10.125 / pza', $express)
+        ->assertTableColumnStateSet('costo_total_entrada', 'BOB 10.13', $express)
+        ->assertTableColumnStateSet('costo_total_entrada', null, $salida)
+        ->assertTableActionHasUrl('verCompra', OrdenCompraResource::getUrl('view', ['record' => $orden]), $compra)
+        ->assertTableActionHidden('verCompra', $salida)
         ->filterTable('almacen_id', $deposito)
         ->filterTable('tipo_movimiento', [TipoMovimientoInventario::EntradaCompra, TipoMovimientoInventario::EntradaFlashEmergencia])
         ->filterTable('dia', ['fecha' => '2026-11-11'])
         ->assertCanSeeTableRecords([$compra, $express])
         ->assertCanNotSeeTableRecords([$salida, $otroDia, $otroAlmacen, $otroProducto]);
+
+    $usuarioSinCompras = TenantUser::factory()->create();
+    $usuarioSinCompras->givePermissionTo('ViewAny:ProductoMaestro', 'View:ProductoMaestro');
+    Livewire::actingAs($usuarioSinCompras, 'tenant')->test(KardexProductoMaestro::class, ['record' => $producto->id])
+        ->assertCanSeeTableRecords([$compra])
+        ->assertTableColumnHidden('costo_unitario_entrada')
+        ->assertTableColumnHidden('costo_total_entrada')
+        ->assertTableActionHidden('verCompra', $compra);
 
     $usuarioSinAcceso = TenantUser::factory()->create();
     Livewire::actingAs($usuarioSinAcceso, 'tenant')->test(KardexProductoMaestro::class, ['record' => $producto->id])->assertForbidden();

@@ -72,6 +72,11 @@ class MovimientoInventario extends Model
         return $this->belongsTo(Almacen::class);
     }
 
+    public function ordenCompraReferenciada(): BelongsTo
+    {
+        return $this->belongsTo(OrdenCompra::class, 'referencia_id');
+    }
+
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(TenantUser::class, 'user_id');
