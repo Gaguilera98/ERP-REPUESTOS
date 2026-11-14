@@ -8,6 +8,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 
 class TenantForm
@@ -24,7 +25,17 @@ class TenantForm
                     ->label('Subdominio')
                     ->required()
                     ->maxLength(255)
-                    ->helperText('Solo el nombre, por ejemplo god. La dirección queda god.localhost.')
+                    ->live(onBlur: true)
+                    ->suffix(fn (): string => '.'.NegocioDomainRule::centralHost())
+                    ->helperText(function (Get $get): string {
+                        $host = NegocioDomainRule::hostCompleto(
+                            is_string($get('domain') ?? null) ? $get('domain') : null,
+                        );
+
+                        return $host !== null
+                            ? 'Dirección del negocio: https://'.$host.'/negocio'
+                            : 'Solo el nombre. Queda nombre.'.NegocioDomainRule::centralHost().'/negocio';
+                    })
                     ->rules(fn (?Tenant $record): array => [
                         new NegocioDomainRule($record?->domains()->value('id')),
                     ]),

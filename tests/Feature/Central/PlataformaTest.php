@@ -8,6 +8,7 @@ use App\Models\NegocioRole;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
+use App\Rules\NegocioDomainRule;
 use App\Tenancy\PlatformTeam;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -72,6 +73,14 @@ it('grants store management only to the platform admin role', function () {
         ->and($plain->can('viewAny', Tenant::class))->toBeFalse()
         ->and($plain->can('viewAny', User::class))->toBeFalse()
         ->and($plain->can('viewAny', NegocioRole::class))->toBeFalse();
+});
+
+it('arma el host completo del negocio con el dominio central', function () {
+    config(['tenancy.central_domains' => ['app.taboraparts.online']]);
+
+    expect(NegocioDomainRule::centralHost())->toBe('app.taboraparts.online')
+        ->and(NegocioDomainRule::hostCompleto('Prueba'))->toBe('prueba.app.taboraparts.online')
+        ->and(NegocioDomainRule::hostCompleto(''))->toBeNull();
 });
 
 it('creates a store with a lowercase domain and its first supervisor', function () {

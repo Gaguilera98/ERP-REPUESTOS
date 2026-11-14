@@ -15,6 +15,30 @@ class NegocioDomainRule implements ValidationRule
         return strtolower(trim($domain));
     }
 
+    public static function centralHost(): string
+    {
+        $domains = config('tenancy.central_domains', []);
+
+        if (! is_array($domains) || $domains === []) {
+            return 'localhost';
+        }
+
+        $first = $domains[0] ?? null;
+
+        return is_string($first) && $first !== '' ? $first : 'localhost';
+    }
+
+    public static function hostCompleto(?string $subdomain): ?string
+    {
+        $subdomain = self::normalize((string) $subdomain);
+
+        if ($subdomain === '') {
+            return null;
+        }
+
+        return $subdomain.'.'.self::centralHost();
+    }
+
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
         $domain = self::normalize(is_string($value) ? $value : '');

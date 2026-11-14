@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Tenants\Tables;
 
 use App\Filament\Tables\OrdenRegistro;
+use App\Rules\NegocioDomainRule;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -21,7 +22,9 @@ class TenantsTable
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('domains.domain')
-                    ->label('Subdominio')
+                    ->label('Dominio')
+                    ->formatStateUsing(fn (?string $state): string => NegocioDomainRule::hostCompleto($state) ?? '')
+                    ->copyable()
                     ->searchable(),
                 TextColumn::make('db_pool')
                     ->label('Base')
