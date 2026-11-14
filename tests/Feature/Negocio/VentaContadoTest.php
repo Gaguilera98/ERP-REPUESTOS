@@ -3,6 +3,7 @@
 use App\Caja\AbrirCajaSesion;
 use App\Caja\ArqueoCajaSesion;
 use App\Caja\CongelarTurnosVencidos;
+use App\Catalogo\PublicarTipoCambio;
 use App\Compras\GuardarOrdenCompra;
 use App\Compras\ReasignarProveedorFlash;
 use App\Compras\RecibirMercaderia;
@@ -11,6 +12,7 @@ use App\Enums\EstadoCajaSesion;
 use App\Enums\EstadoPago;
 use App\Enums\EstadoVenta;
 use App\Enums\MetodoPago;
+use App\Enums\ModoMoneda;
 use App\Enums\SentidoPago;
 use App\Enums\TipoCliente;
 use App\Enums\TipoDescuento;
@@ -754,6 +756,27 @@ it('permite preparar una venta sin caja vigente y conserva el carrito al intenta
         ->assertSet('ultimoVuelto', '');
     expect(Venta::query()->count())->toBe(1);
 })->with(['sin sesión' => false, 'sesión anterior abierta' => true]);
+
+it('pide revisar el carrito si se publicó un precio nuevo mientras estaba abierto', function () {
+    ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('revisar-precio');
+    cargarStock($variante, $almacen, $cajero, $ocasional, '3');
+    app(AbrirCajaSesion::class)->abrir(['sucursal_id' => $sucursal->id, 'monto_apertura' => '0'], $cajero);
+    NegocioConfiguracion::query()->firstOrFail()->update(['modo_moneda' => ModoMoneda::ConDolar]);
+    $variante->update(['precio_venta_dolar' => '10']);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $mostrador = Livewire::actingAs($cajero, 'tenant')->test(MostradorDelNegocio::class)
+        ->call('seleccionarResultado', $variante->id)
+        ->set('pagos.0.monto', '100');
+
+    $publicacion = app(PublicarTipoCambio::class);
+    $publicacion->publicar('12', $publicacion->previsualizar('12')['firma'], $supervisor);
+
+    $mostrador->call('completar')->assertHasErrors(['precios_carrito'])->assertSet('lineas.0.precio_unitario', '120.00');
+    expect(Venta::query()->count())->toBe(0);
+
+    $mostrador->set('pagos.0.monto', '120')->call('completar')->assertHasNoErrors();
+    expect(Venta::query()->sole()->total)->toBe('120.00');
+});
 
 it('registra el efectivo recibido y el vuelto sin aumentar cobros ni reembolsos', function (string $operacion, string $aplicado, bool $combinado) {
     ['cajero' => $cajero, 'supervisor' => $supervisor, 'sucursal' => $sucursal, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConMostrador('vuelto');

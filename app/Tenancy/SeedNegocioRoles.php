@@ -146,6 +146,7 @@ class SeedNegocioRoles
             'Administrar:FondoCajaChica',
             'View:CajaChica',
             'View:ConfiguracionDelNegocio',
+            'Publicar:TipoCambio',
             'View:MostradorDelNegocio',
             'View:CajaDelNegocio',
             'View:CajasDelDia',

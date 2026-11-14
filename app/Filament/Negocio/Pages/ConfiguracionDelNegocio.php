@@ -5,6 +5,7 @@ namespace App\Filament\Negocio\Pages;
 use App\Enums\ModoMoneda;
 use App\Enums\Moneda;
 use App\Models\NegocioConfiguracion;
+use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use BackedEnum;
 use Filament\Forms\Components\Select;
@@ -21,6 +22,7 @@ use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use UnitEnum;
 
@@ -122,7 +124,7 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
                             ->native(false),
                         Select::make('modo_moneda')
                             ->label('Dólar')
-                            ->helperText('El dólar es referencia. No se cobra en dólares.')
+                            ->helperText('Habilita precios de referencia y costos de proveedor en USD. El mostrador cobra en la moneda de la tienda.')
                             ->options(collect(ModoMoneda::cases())->mapWithKeys(
                                 fn (ModoMoneda $modo): array => [$modo->value => $modo->etiqueta()],
                             )->all())
@@ -202,7 +204,16 @@ class ConfiguracionDelNegocio extends Page implements HasSchemas
         if ($datos['acepta_devoluciones'] && ! $datos['devolucion_permite_cambio'] && ! $datos['devolucion_permite_saldo_favor'] && ! $datos['devolucion_permite_reembolso']) {
             throw ValidationException::withMessages(['data.devolucion_permite_cambio' => 'Elegí al menos una resolución para aceptar devoluciones.']);
         }
-        $configuracion->update($datos);
+        DB::transaction(function () use ($datos): void {
+            $configuracion = NegocioConfiguracion::query()->lockForUpdate()->firstOrFail();
+            if (($datos['modo_moneda'] === ModoMoneda::SoloMoneda->value || $datos['moneda'] !== $configuracion->moneda->value)
+                && ProductoVariante::query()->where(fn ($query) => $query->whereNotNull('precio_venta_dolar')->orWhereNotNull('precio_mayor_dolar'))->exists()) {
+                throw ValidationException::withMessages([
+                    'data.modo_moneda' => 'Pasá los precios referenciados a valores fijos antes de desactivar el dólar o cambiar la moneda de la tienda.',
+                ]);
+            }
+            $configuracion->update($datos);
+        });
 
         Notification::make()
             ->title('Configuración guardada')

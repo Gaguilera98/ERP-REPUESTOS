@@ -1,10 +1,12 @@
 <?php
 
+use App\Catalogo\PublicarTipoCambio;
 use App\Compras\AnularOrdenCompra;
 use App\Compras\GuardarOrdenCompra;
 use App\Compras\RecibirMercaderia;
 use App\Enums\EstadoOrdenCompra;
 use App\Enums\MagnitudUnidad;
+use App\Enums\ModoMoneda;
 use App\Enums\UsoUnidad;
 use App\Exceptions\Compras\KardexInmutableException;
 use App\Exceptions\Compras\ProveedorOcasionalProtegidoException;
@@ -16,6 +18,7 @@ use App\Filament\Negocio\Resources\OrdenCompras\Pages\ViewOrdenCompra;
 use App\Models\Almacen;
 use App\Models\InventarioStock;
 use App\Models\MovimientoInventario;
+use App\Models\NegocioConfiguracion;
 use App\Models\OrdenCompra;
 use App\Models\ProductoUnidad;
 use App\Models\ProductoVariante;
@@ -543,6 +546,49 @@ it('muestra y guarda el total de los productos en el formulario de compra', func
     ], $supervisor, true);
 
     expect($variante->fresh()->precio_costo)->toBe('200.0000');
+});
+
+it('guarda el costo en USD y usa la cotización de la compra para cada recepción', function () {
+    ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConPieza();
+    NegocioConfiguracion::query()->firstOrFail()->update(['modo_moneda' => ModoMoneda::ConDolar]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    $publicacion = app(PublicarTipoCambio::class);
+    $cambioOriginal = $publicacion->publicar('10.5', $publicacion->previsualizar('10.5')['firma'], $supervisor);
+
+    Livewire::actingAs($supervisor, 'tenant')->test(CreateOrdenCompra::class)
+        ->fillForm([
+            'proveedor_id' => $ocasional->id, 'almacen_destino_id' => $almacen->id,
+            'lineas' => [[
+                'producto_variante_id' => $variante->id,
+                'cantidad_pedida' => 4, 'moneda' => 'USD', 'costo_unitario' => '15',
+            ]],
+        ])
+        ->assertSee('Equivale a BOB 157.50 por unidad.')
+        ->assertSee('BOB 630.00')
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $orden = OrdenCompra::query()->sole();
+    $detalle = $orden->detalles()->sole();
+    $recibir = app(RecibirMercaderia::class);
+    $recibir->recibir($orden, [['detalle_id' => $detalle->id, 'cantidad' => 2]], $supervisor, true);
+    $publicacion->publicar('12', $publicacion->previsualizar('12')['firma'], $supervisor);
+    $recibir->recibir($orden, [['detalle_id' => $detalle->id, 'cantidad' => 2]], $supervisor, true);
+
+    expect($detalle->refresh()->costo_unitario_origen)->toBe('15.0000')
+        ->and($detalle->tipo_cambio_valor)->toBe('10.5000')
+        ->and((int) $detalle->tipo_cambio_id)->toBe($cambioOriginal->id)
+        ->and($detalle->costo_unitario)->toBe('157.5000')
+        ->and($detalle->cantidad_recibida)->toBe('4.0000');
+    expect($orden->refresh()->total)->toBe('630.00');
+    expect($variante->refresh()->precio_costo)->toBe('157.5000')
+        ->and($variante->precio_venta)->toBe('25.50');
+
+    Livewire::actingAs($supervisor, 'tenant')->test(ViewOrdenCompra::class, ['record' => $orden->getRouteKey()])
+        ->assertSee('BOB 157.50')
+        ->assertSee('USD 15 por pza')
+        ->assertSee('Cambio de la compra · 1 USD = BOB 10.50')
+        ->assertSee('BOB 630.00');
 });
 
 it('al recibir una parte oculta anular y eliminar en la ficha', function () {

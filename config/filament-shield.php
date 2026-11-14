@@ -271,6 +271,7 @@ return [
         'Administrar:CategoriaGasto' => 'Administrar categorías de gasto',
         'Administrar:FondoCajaChica' => 'Administrar fondos de caja chica',
         'View:CajaChica' => 'Ver la caja chica',
+        'Publicar:TipoCambio' => 'Publicar el tipo de cambio comercial',
     ],
 
     /*

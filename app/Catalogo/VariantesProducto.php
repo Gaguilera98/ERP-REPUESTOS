@@ -2,11 +2,15 @@
 
 namespace App\Catalogo;
 
+use App\Compras\Montos;
+use App\Enums\ModoMoneda;
 use App\Enums\TipoAtributoCategoria;
 use App\Models\InventarioStock;
+use App\Models\NegocioConfiguracion;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
 use Illuminate\Support\Arr;
+use Illuminate\Validation\ValidationException;
 
 class VariantesProducto
 {
@@ -52,6 +56,8 @@ class VariantesProducto
                 'codigo_barras' => $unica?->codigo_barras,
                 'precio_venta' => $unica?->precio_venta,
                 'precio_mayor' => $unica?->precio_mayor,
+                'precio_venta_dolar' => $unica?->precio_venta_dolar,
+                'precio_mayor_dolar' => $unica?->precio_mayor_dolar,
                 'ficha' => $this->fichaParaFormulario($unica?->atributos_json ?? [], $producto),
                 'ubicaciones' => $this->ubicaciones($unica),
             ];
@@ -116,6 +122,8 @@ class VariantesProducto
                     'imagen' => $variante->imagen,
                     'precio_venta' => $variante->precio_venta,
                     'precio_mayor' => $variante->precio_mayor,
+                    'precio_venta_dolar' => $variante->precio_venta_dolar,
+                    'precio_mayor_dolar' => $variante->precio_mayor_dolar,
                     'is_active' => $variante->is_active,
                     'ubicaciones' => $this->ubicaciones($variante),
                 ];
@@ -135,6 +143,8 @@ class VariantesProducto
         mixed $precioSimple = null,
         mixed $precioMayorSimple = null,
         mixed $codigoBarrasSimple = null,
+        mixed $menorUsdSimple = null,
+        mixed $mayorUsdSimple = null,
     ): array {
         $ejes = collect($opciones)
             ->filter(fn (mixed $opcion): bool => is_array($opcion) && filled($opcion['clave'] ?? null))
@@ -176,7 +186,7 @@ class VariantesProducto
 
         $habia = $porClave->isNotEmpty();
 
-        return array_map(function (array $ejes, int $indice) use ($porClave, $habia, $skuSimple, $precioSimple, $precioMayorSimple, $codigoBarrasSimple): array {
+        return array_map(function (array $ejes, int $indice) use ($porClave, $habia, $skuSimple, $precioSimple, $precioMayorSimple, $codigoBarrasSimple, $menorUsdSimple, $mayorUsdSimple): array {
             $previa = $porClave->get($this->claveEjes($ejes), []);
 
             return [
@@ -187,6 +197,8 @@ class VariantesProducto
                 'imagen' => $previa['imagen'] ?? null,
                 'precio_venta' => $previa['precio_venta'] ?? $precioSimple,
                 'precio_mayor' => $previa['precio_mayor'] ?? $precioMayorSimple,
+                'precio_venta_dolar' => $previa === [] ? $menorUsdSimple : ($previa['precio_venta_dolar'] ?? null),
+                'precio_mayor_dolar' => $previa === [] ? $mayorUsdSimple : ($previa['precio_mayor_dolar'] ?? null),
                 'is_active' => $previa['is_active'] ?? true,
                 'ubicaciones' => $previa['ubicaciones'] ?? [],
             ];
@@ -219,6 +231,7 @@ class VariantesProducto
                 'imagen' => null,
                 'precio_venta' => $estado['precio_venta'] ?? null,
                 'precio_mayor' => $this->texto($estado['precio_mayor'] ?? null),
+                ...Arr::only($estado, ['precio_venta_dolar', 'precio_mayor_dolar']),
                 'atributos_json' => $ficha,
                 'ubicaciones' => array_values(is_array($estado['ubicaciones'] ?? null) ? $estado['ubicaciones'] : []),
             ]];
@@ -238,6 +251,7 @@ class VariantesProducto
                 'imagen' => $this->archivo($fila['imagen'] ?? null),
                 'precio_venta' => $fila['precio_venta'] ?? null,
                 'precio_mayor' => $this->texto($fila['precio_mayor'] ?? null),
+                ...Arr::only($fila, ['precio_venta_dolar', 'precio_mayor_dolar']),
                 'atributos_json' => array_merge($ficha, $this->ejes($fila)),
                 'ubicaciones' => array_values(is_array($fila['ubicaciones'] ?? null) ? $fila['ubicaciones'] : []),
             ];
@@ -294,6 +308,64 @@ class VariantesProducto
         if ($imagenes !== ($producto->imagenes ?? [])) {
             $producto->update(['imagenes' => $imagenes === [] ? null : $imagenes]);
         }
+    }
+
+    /** @param array<string, mixed> $estado
+     * @return array<string, mixed>
+     */
+    public function prepararPrecios(array $estado, PreciosDeReferencia $precios): array
+    {
+        $configuracion = NegocioConfiguracion::query()->lockForUpdate()->first();
+        $habilitado = $configuracion?->modo_moneda === ModoMoneda::ConDolar;
+        $cotizacion = $habilitado ? $precios->vigente($configuracion->moneda->value)?->valor : null;
+
+        if (! filter_var($estado['con_variantes'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+            return $this->prepararPreciosDeFila($estado, 'data', $precios, $habilitado, $cotizacion);
+        }
+
+        foreach ($estado['variantes'] ?? [] as $clave => $fila) {
+            $estado['variantes'][$clave] = $this->prepararPreciosDeFila($fila, "data.variantes.{$clave}", $precios, $habilitado, $cotizacion);
+        }
+
+        return $estado;
+    }
+
+    /** @param array<string, mixed> $fila
+     * @return array<string, mixed>
+     */
+    private function prepararPreciosDeFila(array $fila, string $ruta, PreciosDeReferencia $precios, bool $habilitado, ?string $cotizacion): array
+    {
+        $menorUsd = $precios->referencia($fila['precio_venta_dolar'] ?? null, "{$ruta}.precio_venta_dolar");
+        $mayorUsd = $precios->referencia($fila['precio_mayor_dolar'] ?? null, "{$ruta}.precio_mayor_dolar");
+        $menor = $this->texto($fila['precio_venta'] ?? null);
+        $mayor = $this->texto($fila['precio_mayor'] ?? null);
+        if ($menorUsd === null && $mayorUsd === null) {
+            if ($menor !== null && $mayor !== null && Montos::comparar($mayor, $menor, 2) > 0) {
+                throw ValidationException::withMessages(["{$ruta}.precio_mayor" => 'El precio Mayor supera al Menor.']);
+            }
+
+            return $fila;
+        }
+
+        if (! $habilitado || $cotizacion === null) {
+            $campo = $menorUsd !== null ? 'precio_venta_dolar' : 'precio_mayor_dolar';
+            throw ValidationException::withMessages(["{$ruta}.{$campo}" => 'Activá el dólar de referencia y publicá un tipo de cambio comercial.']);
+        }
+
+        $convertidos = $precios->convertir(
+            $menor,
+            $mayor,
+            $menorUsd,
+            $mayorUsd,
+            $cotizacion,
+        );
+        $problema = $precios->problema($convertidos['precio_venta'], $convertidos['precio_mayor']);
+        if ($problema !== null) {
+            $campo = $mayorUsd !== null ? 'precio_mayor_dolar' : 'precio_venta_dolar';
+            throw ValidationException::withMessages(["{$ruta}.{$campo}" => $problema]);
+        }
+
+        return array_replace($fila, $convertidos, ['precio_venta_dolar' => $menorUsd, 'precio_mayor_dolar' => $mayorUsd]);
     }
 
     /**

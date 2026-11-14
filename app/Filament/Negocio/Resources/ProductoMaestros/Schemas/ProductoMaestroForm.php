@@ -2,7 +2,9 @@
 
 namespace App\Filament\Negocio\Resources\ProductoMaestros\Schemas;
 
+use App\Catalogo\PreciosDeReferencia;
 use App\Catalogo\VariantesProducto;
+use App\Compras\Montos;
 use App\Enums\DevolucionComercialProducto;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
@@ -36,6 +38,10 @@ class ProductoMaestroForm
 {
     public static function configure(Schema $schema): Schema
     {
+        $conDolar = app(PreciosDeReferencia::class)->habilitado();
+        $moneda = NegocioConfiguracion::codigoMoneda();
+        $cotizacion = $conDolar ? app(PreciosDeReferencia::class)->vigente($moneda)?->valor : null;
+
         return $schema
             ->columns(1)
             ->components([
@@ -150,8 +156,10 @@ class ProductoMaestroForm
                             ->schema([
                                 self::campoSku('sku', 'variante_id'),
                                 self::campoCodigoBarras('codigo_barras', 'variante_id'),
-                                self::campoPrecio('precio_venta', 'Precio al por menor', true),
-                                self::campoPrecio('precio_mayor', 'Precio al por mayor', false),
+                                self::campoPrecio('precio_venta', 'Precio al por menor', true, $moneda, $conDolar),
+                                self::campoPrecio('precio_mayor', 'Precio al por mayor', false, $moneda, $conDolar),
+                                self::referencia('precio_venta_dolar', 'Referencia Menor en USD', $conDolar, $moneda, $cotizacion),
+                                self::referencia('precio_mayor_dolar', 'Referencia Mayor en USD', $conDolar, $moneda, $cotizacion),
                             ]),
                         self::ubicaciones(),
                     ]),
@@ -187,6 +195,10 @@ class ProductoMaestroForm
                                 $set('codigo_barras', $primera['codigo_barras'] ?? $get('codigo_barras'));
                                 $set('precio_venta', $primera['precio_venta'] ?? $get('precio_venta'));
                                 $set('precio_mayor', $primera['precio_mayor'] ?? $get('precio_mayor'));
+                                if ($primera !== []) {
+                                    $set('precio_venta_dolar', $primera['precio_venta_dolar'] ?? null);
+                                    $set('precio_mayor_dolar', $primera['precio_mayor_dolar'] ?? null);
+                                }
 
                                 $ficha = is_array($get('ficha')) ? $get('ficha') : [];
                                 $ejes = $variantes->ejes($primera);
@@ -229,6 +241,8 @@ class ProductoMaestroForm
                                     $get('precio_venta'),
                                     $get('precio_mayor'),
                                     $get('codigo_barras'),
+                                    $get('precio_venta_dolar'),
+                                    $get('precio_mayor_dolar'),
                                 ));
                             })
                             ->schema([
@@ -299,8 +313,10 @@ class ProductoMaestroForm
                                             ->schema([
                                                 self::campoSku('sku', 'id'),
                                                 self::campoCodigoBarras('codigo_barras', 'id'),
-                                                self::campoPrecio('precio_venta', 'Precio al por menor', true),
-                                                self::campoPrecio('precio_mayor', 'Precio al por mayor', false),
+                                                self::campoPrecio('precio_venta', 'Precio al por menor', true, $moneda, $conDolar),
+                                                self::campoPrecio('precio_mayor', 'Precio al por mayor', false, $moneda, $conDolar),
+                                                self::referencia('precio_venta_dolar', 'Referencia Menor en USD', $conDolar, $moneda, $cotizacion),
+                                                self::referencia('precio_mayor_dolar', 'Referencia Mayor en USD', $conDolar, $moneda, $cotizacion),
                                                 Toggle::make('is_active')
                                                     ->label('Se vende')
                                                     ->default(true)
@@ -380,21 +396,52 @@ class ProductoMaestroForm
             ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? $state : null);
     }
 
-    private static function campoPrecio(string $nombre, string $etiqueta, bool $obligatorio): TextInput
+    private static function campoPrecio(string $nombre, string $etiqueta, bool $obligatorio, string $moneda, bool $conDolar): TextInput
     {
         $campo = TextInput::make($nombre)
             ->label($etiqueta)
             ->numeric()
             ->minValue(0)
-            ->prefix(NegocioConfiguracion::codigoMoneda());
+            ->prefix($moneda)
+            ->maxValue(99999999.99)
+            ->rule('regex:/^\d{1,8}(\.\d{1,2})?$/')
+            ->disabled(fn (Get $get): bool => $conDolar && filled($get($nombre.'_dolar')))
+            ->saved()
+            ->helperText(fn (Get $get): ?string => $conDolar && filled($get($nombre.'_dolar'))
+                ? 'Se calcula al guardar con el tipo de cambio publicado.'
+                : null);
 
         if ($obligatorio) {
-            $campo->required();
+            $campo->required(fn (Get $get): bool => ! $conDolar || blank($get($nombre.'_dolar')));
         } else {
             $campo->nullable();
         }
 
         return $campo;
+    }
+
+    private static function referencia(string $nombre, string $etiqueta, bool $conDolar, string $moneda, ?string $cotizacion): TextInput
+    {
+        return TextInput::make($nombre)
+            ->label($etiqueta)
+            ->prefix('USD')
+            ->numeric()
+            ->minValue(0.01)
+            ->maxValue(99999999.99)
+            ->rule('regex:/^\d{1,8}(\.\d{1,2})?$/')
+            ->live(onBlur: true)
+            ->helperText(function (mixed $state) use ($moneda, $cotizacion): string {
+                if ($cotizacion === null) {
+                    return 'Publicá un tipo de cambio comercial para usar una referencia.';
+                }
+
+                if (is_scalar($state) && preg_match('/^\d{1,8}(\.\d{1,2})?$/', (string) $state) === 1) {
+                    return 'Precio del mostrador a la cotización vigente · '.$moneda.' '.Montos::multiplicar((string) $state, $cotizacion, 2);
+                }
+
+                return 'Dejalo vacío para usar el precio fijo en '.$moneda.'.';
+            })
+            ->visible($conDolar);
     }
 
     private static function ubicaciones(): Repeater

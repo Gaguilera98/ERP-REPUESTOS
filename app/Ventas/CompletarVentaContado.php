@@ -175,7 +175,7 @@ class CompletarVentaContado
                 $cliente = Cliente::query()->whereKey($clienteId)->lockForUpdate()->firstOrFail();
             }
 
-            $config = NegocioConfiguracion::query()->firstOrFail();
+            $config = NegocioConfiguracion::query()->lockForUpdate()->firstOrFail();
             $topePorcentaje = Montos::dos($config?->descuento_max_porcentaje ?? '10');
             $topeImporte = Montos::dos($config?->descuento_max_importe ?? '0');
 
@@ -588,6 +588,12 @@ class CompletarVentaContado
         $cantidadBase = Montos::multiplicar($cantidad, $factor, 4);
 
         $precioUnitario = $this->precioDeLista($variante, $lista);
+        if (isset($linea['precio_visto']) && $this->montoDos($linea['precio_visto'], 'precios_carrito') !== $precioUnitario) {
+            throw ValidationException::withMessages([
+                'precios_carrito' => 'Cambió el precio de '.$variante->sku.'. Actualizamos el carrito. Revisá el total y los pagos antes de confirmar.',
+            ]);
+        }
+
         $bruto = Montos::multiplicar($cantidadBase, $precioUnitario, 2);
 
         $descuento = $this->resolverDescuento(

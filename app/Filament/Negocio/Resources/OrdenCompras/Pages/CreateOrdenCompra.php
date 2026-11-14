@@ -6,13 +6,32 @@ use App\Compras\GuardarOrdenCompra;
 use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
 use App\Models\OrdenCompra;
 use App\Models\TenantUser;
+use Filament\Actions\Action;
 use Filament\Resources\Pages\CreateRecord;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 
 class CreateOrdenCompra extends CreateRecord
 {
     protected static string $resource = OrdenCompraResource::class;
+
+    protected function getFormActions(): array
+    {
+        return [
+            $this->getCancelFormAction(),
+            ...($this->canCreateAnother() ? [$this->getCreateAnotherFormAction()] : []),
+            $this->getCreateFormAction(),
+        ];
+    }
+
+    protected function getCreateFormAction(): Action
+    {
+        return parent::getCreateFormAction()
+            ->label('Crear compra')
+            ->icon(Heroicon::OutlinedCheck)
+            ->extraAttributes(['class' => 'sm:ms-auto']);
+    }
 
     /**
      * @param  array<string, mixed>  $data

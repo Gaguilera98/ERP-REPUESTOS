@@ -6,6 +6,14 @@
 @source '../../../../resources/views/livewire/**/*';
 @source '../../../../resources/views/components/negocio/**/*';
 
+.compra-productos > .fi-fo-repeater-add {
+    display: none;
+}
+
+.fi-sc.fi-inline > :has(.compra-total) {
+    margin-inline-start: auto;
+}
+
 .fi-badge-label .traslado-opcion-producto,
 .fi-badge-label .traslado-opcion-producto-encabezado {
     display: contents;

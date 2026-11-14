@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Resources\ProductoMaestros\Concerns;
 
+use App\Catalogo\PreciosDeReferencia;
 use App\Catalogo\VariantesProducto;
 use App\Models\ProductoMaestro;
 
@@ -10,13 +11,18 @@ trait GuardaVariantesDelProducto
     /** @var array<string, mixed> */
     protected array $estadoVariantes = [];
 
+    public function hasDatabaseTransactions(): bool
+    {
+        return true;
+    }
+
     /**
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        $this->estadoVariantes = $data;
+        $this->estadoVariantes = app(VariantesProducto::class)->prepararPrecios($data, app(PreciosDeReferencia::class));
 
         return $this->datosDelProducto($data);
     }
@@ -27,7 +33,7 @@ trait GuardaVariantesDelProducto
      */
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        $this->estadoVariantes = $data;
+        $this->estadoVariantes = app(VariantesProducto::class)->prepararPrecios($data, app(PreciosDeReferencia::class));
 
         return $this->datosDelProducto($data);
     }
@@ -66,6 +72,8 @@ trait GuardaVariantesDelProducto
             $data['codigo_barras'],
             $data['precio_venta'],
             $data['precio_mayor'],
+            $data['precio_venta_dolar'],
+            $data['precio_mayor_dolar'],
             $data['ficha'],
             $data['opciones'],
             $data['variantes'],

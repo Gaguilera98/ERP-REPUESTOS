@@ -4,6 +4,7 @@ namespace App\Filament\Negocio\Resources\OrdenCompras\Actions;
 
 use App\Compras\Montos;
 use App\Inventario\CorregirCostoCompra;
+use App\Models\NegocioConfiguracion;
 use App\Models\OrdenCompra;
 use App\Models\OrdenCompraDetalle;
 use App\Models\TenantUser;
@@ -43,7 +44,7 @@ class CorregirCostoAction
                         ->required()
                         ->native(false)
                         ->live(),
-                    TextInput::make('costo_nuevo')->label('Costo real por unidad base')->required()->numeric()->minValue(0)->live(),
+                    TextInput::make('costo_nuevo')->label('Costo real por unidad base')->prefix(NegocioConfiguracion::codigoMoneda())->required()->numeric()->minValue(0)->live(),
                     Placeholder::make('promedio')
                         ->label('Promedio de lo que queda')
                         ->content(function (Get $get) use ($record): string {

@@ -50,6 +50,7 @@ return [
         'correcciones_costo',
         'movimientos_inventario',
         'orden_compra_detalles',
+        'tipos_cambio',
         'ordenes_compra',
         'proveedor_contactos',
         'proveedores',

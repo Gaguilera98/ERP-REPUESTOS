@@ -2,9 +2,13 @@
 
 namespace App\Compras;
 
+use App\Catalogo\PreciosDeReferencia;
 use App\Enums\EstadoOrdenCompra;
+use App\Enums\ModoMoneda;
+use App\Enums\MonedaLineaCompra;
 use App\Inventario\FactorUnidad;
 use App\Models\Almacen;
+use App\Models\NegocioConfiguracion;
 use App\Models\OrdenCompra;
 use App\Models\OrdenCompraDetalle;
 use App\Models\ProductoMaestro;
@@ -19,6 +23,8 @@ use Illuminate\Validation\ValidationException;
 
 class GuardarOrdenCompra
 {
+    public function __construct(private PreciosDeReferencia $precios) {}
+
     /**
      * @param  array<string, mixed>  $data
      */
@@ -65,7 +71,7 @@ class GuardarOrdenCompra
                 ]);
             }
 
-            $lineas = $this->lineas($data['lineas'] ?? null);
+            $lineas = $this->lineas($data['lineas'] ?? null, $orden);
             $cabecera = $this->cabecera($data, $orden);
 
             $orden->fill([
@@ -142,9 +148,9 @@ class GuardarOrdenCompra
     }
 
     /**
-     * @return list<array{producto_variante_id: int, unidad_medida_id: int, factor_a_base: string, cantidad_pedida: string, costo_anotado: string, costo_unitario: string}>
+     * @return list<array<string, mixed>>
      */
-    private function lineas(mixed $lineas): array
+    private function lineas(mixed $lineas, ?OrdenCompra $orden = null): array
     {
         if (! is_array($lineas) || $lineas === []) {
             throw ValidationException::withMessages([
@@ -154,6 +160,10 @@ class GuardarOrdenCompra
 
         $normalizadas = [];
         $vistos = [];
+        $configuracion = NegocioConfiguracion::query()->first();
+        $anteriores = $orden?->detalles()->get()->keyBy('producto_variante_id');
+        $cotizacionComercial = null;
+        $subtotal = '0.00';
 
         foreach (array_values($lineas) as $indice => $linea) {
             if (! is_array($linea)) {
@@ -190,6 +200,39 @@ class GuardarOrdenCompra
             $this->rechazarFraccion($cantidad, $unidad, "lineas.{$indice}.cantidad_pedida");
             $factor = app(FactorUnidad::class)->haciaBase($variante->productoMaestro, $unidadId);
             $costo = $this->costo($linea['costo_unitario'] ?? null, "lineas.{$indice}.costo_unitario");
+            $valorMoneda = $linea['moneda'] ?? MonedaLineaCompra::Local->value;
+            $moneda = is_string($valorMoneda) ? MonedaLineaCompra::tryFrom($valorMoneda) : null;
+            $anterior = $anteriores?->get($varianteId);
+            if ($moneda === null || ($moneda === MonedaLineaCompra::Usd
+                && $configuracion?->modo_moneda !== ModoMoneda::ConDolar
+                && $anterior?->moneda !== MonedaLineaCompra::Usd)) {
+                throw ValidationException::withMessages(["lineas.{$indice}.moneda" => 'Elegí una moneda habilitada para esta compra.']);
+            }
+
+            $cambio = null;
+            $tipoCambioId = null;
+            if ($moneda === MonedaLineaCompra::Usd) {
+                if ($anterior?->moneda === MonedaLineaCompra::Usd) {
+                    $cambio = $anterior->tipo_cambio_valor;
+                    $tipoCambioId = $anterior->tipo_cambio_id;
+                } else {
+                    $cotizacionComercial ??= $this->precios->vigente($configuracion->moneda->value);
+                    $cambio = $cotizacionComercial?->valor;
+                    $tipoCambioId = $cotizacionComercial?->id;
+                }
+
+                if ($cambio === null) {
+                    throw ValidationException::withMessages(['data.lineas' => 'Publicá un tipo de cambio antes de registrar un costo en USD.']);
+                }
+            }
+            $costoLocal = $cambio === null ? $costo : Montos::multiplicar($costo, $cambio, 4);
+            $subtotalLinea = Montos::multiplicar($cantidad, $costoLocal, 2);
+            if (Montos::comparar($costo, '9999999999.9999') > 0
+                || Montos::comparar(Montos::dividir($costoLocal, $factor, 4), '9999999999.9999') > 0
+                || Montos::comparar($subtotalLinea, '99999999.99', 2) > 0) {
+                throw ValidationException::withMessages(["lineas.{$indice}.costo_unitario" => 'El costo o el subtotal convertido supera el máximo de la compra.']);
+            }
+            $subtotal = Montos::sumar($subtotal, $subtotalLinea, 2);
 
             $normalizadas[] = [
                 'producto_variante_id' => $varianteId,
@@ -197,29 +240,29 @@ class GuardarOrdenCompra
                 'factor_a_base' => $factor,
                 'cantidad_pedida' => $cantidad,
                 'costo_anotado' => $costo,
-                'costo_unitario' => $costo,
+                'moneda' => $moneda,
+                'tipo_cambio_valor' => $cambio,
+                'tipo_cambio_id' => $tipoCambioId,
             ];
+        }
+
+        if (Montos::comparar($subtotal, '99999999.99', 2) > 0) {
+            throw ValidationException::withMessages(['lineas' => 'El total convertido supera el máximo de la compra.']);
         }
 
         return $normalizadas;
     }
 
     /**
-     * @param  list<array{producto_variante_id: int, unidad_medida_id: int, factor_a_base: string, cantidad_pedida: string, costo_anotado: string, costo_unitario: string}>  $lineas
+     * @param  list<array<string, mixed>>  $lineas
      */
     private function crearLineas(OrdenCompra $orden, array $lineas): void
     {
         foreach ($lineas as $linea) {
             OrdenCompraDetalle::query()->create([
+                ...$linea,
                 'orden_compra_id' => $orden->id,
-                'producto_variante_id' => $linea['producto_variante_id'],
-                'unidad_medida_id' => $linea['unidad_medida_id'],
-                'factor_a_base' => $linea['factor_a_base'],
-                'cantidad_pedida' => $linea['cantidad_pedida'],
                 'cantidad_recibida' => 0,
-                'costo_anotado' => $linea['costo_anotado'],
-                'costo_unitario' => $linea['costo_unitario'],
-                'costo_unitario_origen' => $linea['costo_anotado'],
             ]);
         }
     }

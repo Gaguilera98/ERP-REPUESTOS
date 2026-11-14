@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Catalogo\PreciosDeReferencia;
 use App\Compras\MontoEnPalabras;
 use App\Compras\Montos;
 use App\Enums\MonedaLineaCompra;
@@ -12,7 +13,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Validation\ValidationException;
 
 #[Fillable([
     'tenant_id',
@@ -66,23 +66,24 @@ class OrdenCompraDetalle extends Model
     protected static function booted(): void
     {
         static::saving(function (OrdenCompraDetalle $detalle): void {
+            $cambio = null;
             if ($detalle->moneda === MonedaLineaCompra::Usd) {
-                throw ValidationException::withMessages([
-                    'moneda' => 'La compra en dólares entra cuando el negocio usa dólar de referencia.',
-                ]);
+                $cambio = app(PreciosDeReferencia::class)->validarCotizacion($detalle->tipo_cambio_valor, 'tipo_cambio_valor');
+            } else {
+                $detalle->moneda = MonedaLineaCompra::Local;
+                $detalle->tipo_cambio_id = null;
             }
 
-            $detalle->moneda = MonedaLineaCompra::Local;
             $factor = (string) ($detalle->factor_a_base ?: '1');
             $anotado = Montos::cuatro($detalle->costo_anotado ?? $detalle->costo_unitario);
             $detalle->costo_anotado = $anotado;
             $detalle->factor_a_base = $factor;
             $detalle->costo_unitario_origen = $anotado;
-            $detalle->costo_unitario = Montos::dividir($anotado, $factor, 4);
+            $local = $cambio === null ? $anotado : Montos::multiplicar($anotado, $cambio, 4);
+            $detalle->costo_unitario = Montos::dividir($local, $factor, 4);
             $detalle->cantidad_base = Montos::multiplicar((string) $detalle->cantidad_pedida, $factor, 4);
-            $detalle->tipo_cambio_id = null;
-            $detalle->tipo_cambio_valor = null;
-            $detalle->subtotal_linea = Montos::multiplicar((string) $detalle->cantidad_pedida, $anotado, 2);
+            $detalle->tipo_cambio_valor = $cambio;
+            $detalle->subtotal_linea = Montos::multiplicar((string) $detalle->cantidad_pedida, $local, 2);
         });
     }
 

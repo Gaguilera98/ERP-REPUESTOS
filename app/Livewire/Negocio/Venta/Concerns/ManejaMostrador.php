@@ -730,6 +730,17 @@ trait ManejaMostrador
         }
 
         try {
+            $variantes = ProductoVariante::query()->whereKey(array_column($this->lineas, 'producto_variante_id'))->get()->keyBy('id');
+            foreach ($this->lineas as $linea) {
+                $variante = $variantes->get($linea['producto_variante_id']);
+
+                if ($variante && $this->preciosDe($variante)['precio_unitario'] !== $linea['precio_unitario']) {
+                    throw ValidationException::withMessages([
+                        'precios_carrito' => 'Cambió el precio de '.$variante->sku.'. Actualizamos el carrito. Revisá el total y los pagos antes de confirmar.',
+                    ]);
+                }
+            }
+
             $this->validarComprobantesDePago();
 
             $pagos = [];
@@ -765,6 +776,7 @@ trait ManejaMostrador
                 'lineas' => collect($this->lineas)->map(fn (array $linea): array => [
                     'producto_variante_id' => $linea['producto_variante_id'],
                     'cantidad' => $linea['cantidad'],
+                    'precio_visto' => $linea['precio_unitario'],
                     'tipo_descuento' => $linea['tipo_descuento'] !== '' ? $linea['tipo_descuento'] : null,
                     'valor_descuento' => $linea['valor_descuento'] !== '' ? $linea['valor_descuento'] : null,
                 ])->all(),
@@ -820,6 +832,10 @@ trait ManejaMostrador
                     ->send();
             }
         } catch (ValidationException $e) {
+            if (isset($e->errors()['precios_carrito'])) {
+                $this->aplicarListaPrecio();
+            }
+
             foreach ($e->errors() as $campo => $mensajes) {
                 foreach ($mensajes as $mensaje) {
                     $this->addError($campo, $mensaje);

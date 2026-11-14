@@ -9,6 +9,7 @@ use App\Enums\TipoComprobante;
 use App\Models\CajaSesion;
 use App\Models\Cliente;
 use App\Models\InventarioStock;
+use App\Models\NegocioConfiguracion;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Venta;
@@ -131,6 +132,7 @@ class CambiarProductoVenta
             $clienteId = $venta->cliente_id ?? ($datos['cliente_saldo_id'] ?? null);
             $cliente = $clienteId === null ? null : Cliente::query()->lockForUpdate()->find($clienteId);
 
+            NegocioConfiguracion::query()->lockForUpdate()->firstOrFail();
             $resumen = $this->revisar($venta, $datos['lineas'], $datos['reemplazo'], $excepcion, $usuario);
             $variantes = [...array_column($resumen['devolucion']['lineas'], 'producto_variante_id'), $resumen['reemplazo']['producto_variante_id']];
             ProductoVariante::query()->whereKey($variantes)->orderBy('id')->lockForUpdate()->get(['id']);

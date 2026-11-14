@@ -33,8 +33,8 @@ todos:
     content: "Fase 10: fondo independiente, gastos y vales, permisos por caja y arqueo"
     status: completed
   - id: fase-11-dolar
-    content: "Fase 11: tipo de cambio y cola de precios en dólares"
-    status: pending
+    content: "Fase 11: tipo de cambio y precios de referencia en dólares"
+    status: completed
 isProject: false
 ---
 
@@ -207,9 +207,11 @@ Un vale pendiente de rendir bloquea el cierre salvo motivo y responsable de segu
 
 Tablas: `tipos_cambio`. Se usan `precio_venta_dolar` y `precio_mayor_dolar`.
 
-Reglas: no se cobra en dólares; el tipo de cambio lo carga un supervisor y el anterior no se borra; la compra en dólares guarda el cambio de ese día y el promedio queda en la moneda de la tienda; al confirmar un cambio nuevo, un job en cola actualiza por lotes solo los productos con precio en dólares; reintentar el mismo dólar no duplica; el costo promedio no se mueve.
+Menor y Mayor se configuran por separado. Cada precio puede quedar fijo en la moneda del negocio o tener una referencia en USD. El mostrador muestra y cobra en la moneda de la tienda. Una venta, crédito o reserva registrados conservan sus importes. Si un precio cambia mientras el carrito sigue abierto, el mostrador lo actualiza y pide revisar el cobro antes de confirmar.
 
-Pantalla: página Filament del tipo de cambio, visible solo si `modo_moneda` es `con_dolar`.
+En Administración → Configuración se habilita el dólar de referencia. Quien tenga el permiso `Publicar:TipoCambio` puede cargar la cotización manualmente, revisar los precios anteriores y los nuevos y publicarla. La publicación valida el catálogo revisado, señala los casos en que Mayor superaría a Menor y guarda el cambio y los precios juntos en una transacción. Repetir el cambio vigente conserva un único registro vigente.
+
+En Compras, una línea nueva en USD guarda el costo original y la cotización comercial vigente al registrarla. El formulario muestra la cotización y la equivalencia por unidad. Las líneas guardadas conservan su cotización, también al editar o recibir por partes.
 
 ## Qué no entra en estas fases
 
