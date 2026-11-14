@@ -926,11 +926,7 @@ it('muestra el nombre de la unidad y no un objeto', function () {
 
     tenancy()->initialize($tenant);
 
-    $milimetro = UnidadMedida::factory()->create([
-        'nombre' => 'Milímetro',
-        'simbolo' => 'mm',
-        'magnitud' => MagnitudUnidad::Longitud,
-    ]);
+    $milimetro = UnidadMedida::query()->where('simbolo', 'mm')->firstOrFail();
 
     $opciones = CategoriaForm::opcionesDeUnidad();
     $longitud = $opciones['Longitud'];
@@ -965,8 +961,13 @@ it('siembra unidades y la categoría de rodamientos una sola vez por negocio', f
 
     tenancy()->initialize($sur);
 
-    expect(UnidadMedida::query()->count())->toBe(7)
-        ->and(Categoria::query()->count())->toBe(0);
+    $longitud = collect(CategoriaForm::opcionesDeUnidad()['Longitud'] ?? []);
+
+    expect(UnidadMedida::query()->count())->toBe(12)
+        ->and(Categoria::query()->count())->toBe(0)
+        ->and($longitud->contains('Milímetro (mm)'))->toBeTrue()
+        ->and($longitud->contains('Centímetro (cm)'))->toBeTrue()
+        ->and($longitud->contains('Metro (m)'))->toBeTrue();
 
     tenancy()->end();
 });

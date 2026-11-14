@@ -1,0 +1,16 @@
+<x-filament-panels::page>
+    @if ($this->puedeConfigurar())
+        <form wire:submit="guardar">
+            {{ $this->form }}
+
+            <x-filament::button type="submit" icon="heroicon-m-check">
+                Guardar y continuar
+            </x-filament::button>
+        </form>
+    @else
+        <x-filament::section icon="heroicon-o-information-circle">
+            <x-slot name="heading">El negocio aún necesita una sucursal y un almacén</x-slot>
+            <x-slot name="description">Pedile a la persona encargada que complete la configuración inicial para poder operar.</x-slot>
+        </x-filament::section>
+    @endif
+</x-filament-panels::page>

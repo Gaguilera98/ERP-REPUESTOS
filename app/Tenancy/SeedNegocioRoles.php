@@ -5,6 +5,7 @@ namespace App\Tenancy;
 use App\Enums\ModoMoneda;
 use App\Enums\Moneda;
 use App\Exceptions\Tenancy\TenantPoolNotConfiguredException;
+use App\Inventario\AsegurarUnidadesDeAtributo;
 use App\Inventario\AsegurarUnidadesDeCantidad;
 use App\Models\NegocioConfiguracion;
 use App\Models\NegocioRole;
@@ -118,6 +119,7 @@ class SeedNegocioRoles
         );
 
         app(AsegurarUnidadesDeCantidad::class)->handle();
+        app(AsegurarUnidadesDeAtributo::class)->handle();
         app(AsegurarTiposDocumentoIdentidad::class)->handle();
     }
 

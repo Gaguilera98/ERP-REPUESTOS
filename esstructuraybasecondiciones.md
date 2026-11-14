@@ -349,6 +349,8 @@ Implementado el 9 de noviembre de 2026 como ampliación posterior al cierre de f
     - **Alcance posterior.** Definir cómo registrar la baja de piezas dañadas, las órdenes de reparación y el seguimiento con proveedores cuando el negocio necesite esos pasos.
     - **Referencias.** Shopify permite decidir si una pieza devuelta vuelve al stock. Dynamics 365 separa recepción, inspección y resolución. Odoo lleva las reparaciones en una orden propia. [Shopify POS](https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/complete-refund-orders) · [Dynamics 365](https://learn.microsoft.com/en-us/dynamics365/supply-chain/sales-marketing/sales-returns) · [Odoo](https://www.odoo.com/documentation/master/applications/inventory_and_mrp/repairs/repair_orders.html).
 
+16. **Trazabilidad y existencias por lote.** Hoy la ficha muestra el stock físico, reservado y disponible por SKU y almacén. El Kardex muestra la cantidad recibida, el costo unitario y el costo total de cada entrada de compra, con acceso al documento de origen. El stock que figura tras cada movimiento corresponde al SKU completo en ese almacén. A futuro, registrar el lote identificado al recibir mercadería y consultar su origen, costo de ingreso, cantidad recibida y saldo por almacén. Para rastrear de qué lote salió cada pieza hay que definir cómo se asigna en ventas y reservas, cómo se conserva su identidad en traslados y cómo se registra en devoluciones y ajustes. Las existencias anteriores sin lote comprobable deben conservar ese estado. La trazabilidad física puede convivir con el costo promedio ponderado (PPP) vigente.
+
 ---
 
 ## PARTE 2: ESTRUCTURA RELACIONAL DE LA BASE DE DATOS

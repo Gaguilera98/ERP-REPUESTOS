@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Resources\Categorias\Schemas;
 
+use App\Enums\MagnitudUnidad;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
 use App\Models\UnidadMedida;
@@ -122,6 +123,9 @@ class CategoriaForm
     }
 
     /**
+     * Unidades de la ficha: las de atributo y también las de stock que miden algo
+     * (cm, m, kg…). Pieza y otras de conteo no entran.
+     *
      * Cada grupo es un arreglo de textos. Si queda una colección, el select muestra "[object Object]".
      *
      * @return array<string, array<int, string>>
@@ -129,7 +133,13 @@ class CategoriaForm
     public static function opcionesDeUnidad(): array
     {
         return UnidadMedida::query()
-            ->where('uso', UsoUnidad::Atributo)
+            ->where(function ($query): void {
+                $query->where('uso', UsoUnidad::Atributo)
+                    ->orWhere(function ($query): void {
+                        $query->where('uso', UsoUnidad::Cantidad)
+                            ->where('magnitud', '!=', MagnitudUnidad::Conteo);
+                    });
+            })
             ->orderBy('nombre')
             ->get()
             ->groupBy(fn (UnidadMedida $unidad): string => $unidad->magnitud->etiqueta())

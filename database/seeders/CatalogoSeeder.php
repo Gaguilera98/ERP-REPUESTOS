@@ -2,8 +2,9 @@
 
 namespace Database\Seeders;
 
-use App\Enums\MagnitudUnidad;
 use App\Enums\TipoAtributoCategoria;
+use App\Enums\UsoUnidad;
+use App\Inventario\AsegurarUnidadesDeAtributo;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
 use App\Models\UnidadMedida;
@@ -13,13 +14,12 @@ class CatalogoSeeder extends Seeder
 {
     public function run(): void
     {
-        $milimetro = $this->unidad('Milímetro', 'mm', MagnitudUnidad::Longitud);
-        $this->unidad('Centímetro', 'cm', MagnitudUnidad::Longitud);
-        $this->unidad('Metro', 'm', MagnitudUnidad::Longitud);
-        $this->unidad('Pulgada', 'in', MagnitudUnidad::Longitud);
-        $this->unidad('Voltio', 'V', MagnitudUnidad::Electrico);
-        $this->unidad('Amperio', 'A', MagnitudUnidad::Electrico);
-        $this->unidad('Bar', 'bar', MagnitudUnidad::Presion);
+        app(AsegurarUnidadesDeAtributo::class)->handle();
+
+        $milimetro = UnidadMedida::query()
+            ->where('simbolo', 'mm')
+            ->where('uso', UsoUnidad::Atributo)
+            ->firstOrFail();
 
         $rodamientos = Categoria::query()->updateOrCreate(
             ['nombre' => 'Rodamientos'],
@@ -34,17 +34,6 @@ class CatalogoSeeder extends Seeder
             ->where('categoria_id', $rodamientos->id)
             ->where('clave', 'marca')
             ->delete();
-    }
-
-    private function unidad(string $nombre, string $simbolo, MagnitudUnidad $magnitud): UnidadMedida
-    {
-        return UnidadMedida::query()->updateOrCreate(
-            ['nombre' => $nombre],
-            [
-                'simbolo' => $simbolo,
-                'magnitud' => $magnitud,
-            ],
-        );
     }
 
     /**
