@@ -38,10 +38,12 @@ use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection as ModelCollection;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 
 class ProductoMaestroForm
 {
@@ -145,6 +147,11 @@ class ProductoMaestroForm
                             self::stockPorAlmacen(),
                             Section::make('Galería')
                                 ->schema([
+                                    View::make('filament.negocio.resources.producto-maestros.visor-fotos')
+                                        ->visible(fn (?ProductoMaestro $record): bool => filled($record?->imagenes))
+                                        ->viewData(fn (?ProductoMaestro $record): array => [
+                                            'fotos' => array_map(Storage::disk('public')->url(...), array_values($record?->imagenes ?? [])),
+                                        ]),
                                     FileUpload::make('imagenes')
                                         ->hiddenLabel()
                                         ->multiple()
@@ -155,7 +162,7 @@ class ProductoMaestroForm
                                         ->maxFiles(5)
                                         ->directory(fn (): string => app(ArchivosNegocio::class)->directorio(TipoArchivoNegocio::GaleriaProducto))
                                         ->disk('public')
-                                        ->helperText('Hasta 5 fotos. Arrastrá para ordenar. La primera es la principal.'),
+                                        ->helperText('Hasta 5 fotos. Arrastrá para ordenar. Guardá los cambios para actualizar el visor.'),
                                 ]),
                         ])->columnSpan(['default' => 1, 'xl' => 5]),
                     ]),

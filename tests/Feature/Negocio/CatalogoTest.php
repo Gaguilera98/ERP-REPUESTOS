@@ -800,6 +800,23 @@ it('suma la foto de la variante a la galería del producto', function () {
     tenancy()->end();
 });
 
+it('muestra el visor de las fotos guardadas en el producto', function () {
+    tenancy()->initialize(Tenant::factory()->create());
+    $supervisor = TenantUser::factory()->create();
+    $supervisor->assignRole('supervisor');
+    $producto = ProductoMaestro::factory()->create(['imagenes' => ['rodamiento-frente.jpg', 'rodamiento-reverso.jpg']]);
+
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+    Livewire::actingAs($supervisor, 'tenant')->test(EditProductoMaestro::class, ['record' => $producto->id])
+        ->assertSee('Ampliar foto 1 de 2')
+        ->assertSee('Ampliar foto 2 de 2')
+        ->assertSee('rodamiento-frente.jpg')
+        ->assertSee('rodamiento-reverso.jpg')
+        ->assertSee('Foto siguiente');
+
+    tenancy()->end();
+});
+
 it('abre un producto con dos sellos como variantes y no las duplica al guardar', function () {
     $tenant = Tenant::factory()->create();
     $tenant->domains()->create(['domain' => 'norte']);
