@@ -28,7 +28,9 @@
             <p class="text-sm">
                 <strong>Comprobante</strong>
                 {{ $vale->tipo_comprobante?->etiqueta() }} {{ $vale->numero_comprobante }}
-                @if ($vale->comprobante_archivo_path) · Archivo adjunto @endif
+                @if ($urlComprobante = app(\App\Archivos\ArchivosNegocio::class)->urlTemporal($vale->comprobante_archivo_path))
+                    · <a href="{{ $urlComprobante }}" target="_blank" rel="noopener" class="font-semibold text-primary-600 underline dark:text-primary-400">Ver comprobante</a>
+                @endif
             </p>
         @endif
     @else

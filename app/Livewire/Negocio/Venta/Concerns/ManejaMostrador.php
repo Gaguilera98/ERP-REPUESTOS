@@ -2,11 +2,13 @@
 
 namespace App\Livewire\Negocio\Venta\Concerns;
 
+use App\Archivos\ArchivosNegocio;
 use App\Clientes\BuscarClientesMostrador;
 use App\Clientes\RegistrarClienteRapido;
 use App\Compras\Montos;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\MetodoPago;
+use App\Enums\TipoArchivoNegocio;
 use App\Enums\TipoCliente;
 use App\Enums\TipoDescuento;
 use App\Enums\TipoPrecioCliente;
@@ -753,7 +755,7 @@ trait ManejaMostrador
                 $archivo = $pago['comprobante'] ?? null;
 
                 if ($archivo) {
-                    $path = $archivo->store('pagos', 'local');
+                    $path = app(ArchivosNegocio::class)->guardar($archivo, TipoArchivoNegocio::ComprobantePago);
                 }
 
                 $pagos[] = [

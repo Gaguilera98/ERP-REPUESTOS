@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\CajaChica;
 
+use App\Archivos\ArchivosNegocio;
 use App\Caja\CerrarCajaSesion;
 use App\CajaChica\AdjuntarComprobante;
 use App\CajaChica\AutorizarOrigen;
@@ -15,6 +16,7 @@ use App\CajaChica\ReponerFondo;
 use App\Enums\EstadoCajaChicaMovimiento;
 use App\Enums\EstadoCajaSesion;
 use App\Enums\MetodoPago;
+use App\Enums\TipoArchivoNegocio;
 use App\Enums\TipoCajaChicaMovimiento;
 use App\Enums\TipoComprobanteCajaChica;
 use App\Models\CajaChicaFondo;
@@ -85,7 +87,7 @@ class AccionesCajaChica
                 Toggle::make('sin_comprobante')->label('No va a haber comprobante')->live(),
                 Toggle::make('ya_ocurrido')->label('El gasto ya ocurrió y puede superar el efectivo'),
                 Textarea::make('motivo_excepcion')->label('Motivo')->visible(fn (callable $get): bool => (bool) $get('sin_comprobante')),
-                FileUpload::make('comprobante_archivo_path')->label('Comprobante')->disk('local')->directory('caja-chica')->acceptedFileTypes(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])->maxSize(NegocioConfiguracion::COMPROBANTE_MAX_KB),
+                self::comprobanteCajaChica('Comprobante')->acceptedFileTypes(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']),
             ])
             ->action(function (array $data): void {
                 $usuario = self::usuario();
@@ -154,7 +156,7 @@ class AccionesCajaChica
                     ->afterStateUpdated(fn (callable $set) => $set('destino_fondo_id', null)),
                 Select::make('tipo_comprobante')->label('Comprobante')->options(self::tiposComprobante())->native(false),
                 TextInput::make('numero_comprobante')->label('Número'),
-                FileUpload::make('comprobante_archivo_path')->label('Archivo')->disk('local')->directory('caja-chica')->maxSize(NegocioConfiguracion::COMPROBANTE_MAX_KB),
+                self::comprobanteCajaChica('Archivo'),
             ])
             ->action(function (array $data): void {
                 $vale = CajaChicaMovimiento::query()->findOrFail($data['vale_id']);
@@ -288,7 +290,7 @@ class AccionesCajaChica
                     ->all())->required()->native(false),
                 Select::make('tipo_comprobante')->label('Tipo')->options(self::tiposComprobante())->native(false),
                 TextInput::make('numero_comprobante')->label('Número'),
-                FileUpload::make('comprobante_archivo_path')->label('Archivo')->disk('local')->directory('caja-chica')->maxSize(NegocioConfiguracion::COMPROBANTE_MAX_KB),
+                self::comprobanteCajaChica('Archivo'),
             ])
             ->action(function (array $data): void {
                 $movimiento = CajaChicaMovimiento::query()->findOrFail($data['movimiento_id']);
@@ -469,6 +471,14 @@ class AccionesCajaChica
         }
 
         return $usuario;
+    }
+
+    private static function comprobanteCajaChica(string $etiqueta): FileUpload
+    {
+        return FileUpload::make('comprobante_archivo_path')
+            ->label($etiqueta)
+            ->directory(fn (): string => app(ArchivosNegocio::class)->directorio(TipoArchivoNegocio::ComprobanteCajaChica))
+            ->maxSize(NegocioConfiguracion::COMPROBANTE_MAX_KB);
     }
 
     private static function usuarioOpcional(): ?TenantUser

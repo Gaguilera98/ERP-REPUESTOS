@@ -2,10 +2,12 @@
 
 namespace App\Filament\Negocio\Resources\ProductoMaestros\Schemas;
 
+use App\Archivos\ArchivosNegocio;
 use App\Catalogo\PreciosDeReferencia;
 use App\Catalogo\VariantesProducto;
 use App\Compras\Montos;
 use App\Enums\DevolucionComercialProducto;
+use App\Enums\TipoArchivoNegocio;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
 use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
@@ -140,9 +142,8 @@ class ProductoMaestroForm
                                     ->appendFiles()
                                     ->image()
                                     ->maxFiles(5)
-                                    ->directory(fn (): string => 'tenants/'.tenant()->getTenantKey().'/productos/galeria')
-                                    ->disk(fn (): string => config('filesystems.default') === 's3' ? 's3' : 'public')
-                                    ->visibility('public')
+                                    ->directory(fn (): string => app(ArchivosNegocio::class)->directorio(TipoArchivoNegocio::GaleriaProducto))
+                                    ->disk('public')
                                     ->helperText('Hasta 5 imágenes. Arrastrá para ordenar.'),
                             ]),
                     ]),
@@ -298,9 +299,8 @@ class ProductoMaestroForm
                                             ->image()
                                             ->avatar()
                                             ->helperText('También queda en la galería.')
-                                            ->directory(fn (): string => 'tenants/'.tenant()->getTenantKey().'/productos/variantes')
-                                            ->disk(fn (): string => config('filesystems.default') === 's3' ? 's3' : 'public')
-                                            ->visibility('public')
+                                            ->directory(fn (): string => app(ArchivosNegocio::class)->directorio(TipoArchivoNegocio::FotoVariante))
+                                            ->disk('public')
                                             ->columnSpan([
                                                 'default' => 12,
                                                 'sm' => 3,

@@ -32,7 +32,7 @@ class ProductoMaestrosTable
             ->columns([
                 ImageColumn::make('imagenes')
                     ->label('Foto')
-                    ->disk(fn (): string => config('filesystems.default') === 's3' ? 's3' : 'public')
+                    ->disk('public')
                     ->circular()
                     ->stacked()
                     ->limit(1)

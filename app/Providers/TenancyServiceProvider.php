@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Tenancy\BorrarArchivosTenant;
 use App\Tenancy\CleanTenantPoolData;
 use App\Tenancy\ClearPermissionTeam;
 use App\Tenancy\RestoreCentralDatabaseConnection;
@@ -41,7 +42,13 @@ class TenancyServiceProvider extends ServiceProvider
             Events\TenantSaved::class => [],
             Events\UpdatingTenant::class => [],
             Events\TenantUpdated::class => [],
-            Events\DeletingTenant::class => [],
+            Events\DeletingTenant::class => [
+                JobPipeline::make([
+                    BorrarArchivosTenant::class,
+                ])->send(function (Events\DeletingTenant $event) {
+                    return $event->tenant;
+                })->shouldBeQueued(false),
+            ],
             Events\TenantDeleted::class => [
                 JobPipeline::make([
                     CleanTenantPoolData::class,

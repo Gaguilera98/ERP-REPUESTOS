@@ -108,11 +108,9 @@ return [
          * Each disk listed in the 'disks' array will be suffixed by the suffix_base, followed by the tenant_id.
          */
         'suffix_base' => 'tenant',
-        'disks' => [
-            'local',
-            'public',
-            // 's3',
-        ],
+        // El prefijo tenants/{id}/ aísla los archivos. No reescribir local ni public:
+        // en Cloud esos discos son buckets y un root local rompería la subida.
+        'disks' => [],
 
         /**
          * Use this for local disks.

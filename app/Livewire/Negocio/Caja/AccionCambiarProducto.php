@@ -2,9 +2,11 @@
 
 namespace App\Livewire\Negocio\Caja;
 
+use App\Archivos\ArchivosNegocio;
 use App\Clientes\BuscarClientesMostrador;
 use App\Compras\Montos;
 use App\Enums\MetodoPago;
+use App\Enums\TipoArchivoNegocio;
 use App\Models\Cliente;
 use App\Models\NegocioConfiguracion;
 use App\Models\ProductoVariante;
@@ -191,7 +193,9 @@ class AccionCambiarProducto
                 ->helperText(fn (Get $get): string => $this->vuelto($get, $moneda)),
             TextInput::make('numero_referencia_banco')->label('Referencia o número de voucher')->maxLength(255)->required()
                 ->visible(fn (Get $get): bool => $cobra($get) && in_array($get('metodo_pago'), [MetodoPago::Transferencia->value, MetodoPago::VoucherTarjeta->value], true)),
-            FileUpload::make('comprobante')->label('Comprobante')->disk('local')->directory('pagos')->visibility('private')->preventFilePathTampering()
+            FileUpload::make('comprobante')->label('Comprobante')
+                ->directory(fn (): string => app(ArchivosNegocio::class)->directorio(TipoArchivoNegocio::ComprobantePago))
+                ->preventFilePathTampering()
                 ->acceptedFileTypes(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])->maxSize(NegocioConfiguracion::COMPROBANTE_MAX_KB)
                 ->visible(fn (Get $get): bool => $cobra($get) && (bool) $this->metodo($get)?->aceptaComprobanteArchivo())
                 ->required(fn (Get $get): bool => ($metodo = $this->metodo($get)) && (bool) NegocioConfiguracion::query()->first()?->exigeComprobanteArchivo($metodo)),

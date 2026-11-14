@@ -294,6 +294,9 @@
                             @if (! $aplicacion->es_compensacion_cambio && (filled($pago?->numero_referencia_banco) || filled($pago?->qr_id_transaccion_banco)))
                                 <p class="text-xs text-gray-500 dark:text-gray-400">Ref. {{ $pago->numero_referencia_banco ?? $pago->qr_id_transaccion_banco }}</p>
                             @endif
+                            @if ($urlComprobante = app(\App\Archivos\ArchivosNegocio::class)->urlTemporal($pago?->comprobante_archivo_path))
+                                <p class="text-xs"><a href="{{ $urlComprobante }}" target="_blank" rel="noopener" class="font-semibold text-primary-600 underline dark:text-primary-400">Ver comprobante</a></p>
+                            @endif
                         </td>
                         <td data-label="Fecha y hora" class="px-2 py-3">{{ ($aplicacion->es_saldo_favor || $aplicacion->es_compensacion_cambio ? $aplicacion->created_at : $pago?->fecha_pago)?->format('d/m/Y H:i') ?? '—' }}</td>
                         <td data-label="Movimiento" class="px-2 py-3">
