@@ -33,6 +33,8 @@ class CerrarCajaSesion
     {
         return DB::transaction(function () use ($sesion, $data, $usuario): CajaSesion {
             $sesion = CajaSesion::query()->whereKey($sesion->id)->lockForUpdate()->firstOrFail();
+            $acceso = app(AccesoSucursales::class);
+            abort_unless($acceso->autoriza($usuario, (int) $sesion->sucursal_id), 403);
 
             if (! $sesion->aceptaConteo()) {
                 throw ValidationException::withMessages([

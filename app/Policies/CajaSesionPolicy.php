@@ -5,6 +5,7 @@ namespace App\Policies;
 use App\Models\CajaSesion;
 use App\Models\TenantUser;
 use App\Policies\Concerns\ChecksTenantPermission;
+use App\Tenancy\AccesoSucursales;
 
 class CajaSesionPolicy
 {
@@ -17,7 +18,9 @@ class CajaSesionPolicy
 
     public function view(TenantUser $user, CajaSesion $cajaSesion): bool
     {
-        if (! $this->allows($user, 'View:CajaSesion')) {
+        $acceso = app(AccesoSucursales::class);
+        if (! $this->allows($user, 'View:CajaSesion')
+            || ! $acceso->autoriza($user, (int) $cajaSesion->sucursal_id)) {
             return false;
         }
 
@@ -25,7 +28,7 @@ class CajaSesionPolicy
             return true;
         }
 
-        return $user->hasRole('supervisor');
+        return $user->can('View:CajasDelDia');
     }
 
     public function create(TenantUser $user): bool
@@ -35,7 +38,7 @@ class CajaSesionPolicy
 
     public function update(TenantUser $user, CajaSesion $cajaSesion): bool
     {
-        return $this->allows($user, 'Update:CajaSesion')
+        return $this->view($user, $cajaSesion) && $this->allows($user, 'Update:CajaSesion')
             && (int) $cajaSesion->user_id === (int) $user->id
             && $cajaSesion->aceptaConteo();
     }

@@ -80,6 +80,7 @@ function negocioConCajasDelDia(string $dominio = 'cajas-dia'): array
     $cajeroB->assignRole('cajero');
 
     $sucursal = Sucursal::factory()->create(['nombre' => 'Centro']);
+    $sucursal->usuarios()->attach([$supervisor->id, $cajeroA->id, $cajeroB->id], ['tenant_id' => $tenant->id]);
     $almacen = Almacen::factory()->create(['nombre' => 'Estante']);
     SucursalAlmacen::query()->create([
         'sucursal_id' => $sucursal->id,

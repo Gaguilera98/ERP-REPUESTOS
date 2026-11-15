@@ -7,6 +7,7 @@ use App\Enums\TipoMovimientoInventario;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Traslado;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -19,6 +20,10 @@ class TrasladarProductos
      */
     public function trasladar(int $origenId, int $destinoId, array $lineas, TenantUser $usuario, ?string $observacion = null): Traslado
     {
+        $acceso = app(AccesoSucursales::class);
+        $acceso->validarAlmacen($usuario, $origenId, 'almacen_origen_id');
+        $acceso->validarAlmacen($usuario, $destinoId, 'almacen_destino_id');
+
         abort_unless($usuario->can('Trasladar:Inventario'), 403);
 
         if ($origenId === $destinoId) {

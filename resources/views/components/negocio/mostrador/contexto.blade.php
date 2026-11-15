@@ -1,5 +1,6 @@
 @props([
     'sucursales',
+    'sucursalId',
     'almacenes',
     'clienteSeleccionado',
     'listaPrecio' => 'menor',
@@ -11,11 +12,7 @@
     <div class="grid gap-3 md:grid-cols-3">
         <label class="block">
             <x-negocio.label>Sucursal <span class="text-warning-600">*</span></x-negocio.label>
-            <x-negocio.select wire:model.live="sucursalId" loading="sucursalId">
-                @foreach ($sucursales as $sucursal)
-                    <option value="{{ $sucursal->id }}">{{ $sucursal->nombre }}</option>
-                @endforeach
-            </x-negocio.select>
+            <span class="negocio-field">{{ $sucursales->firstWhere('id', $sucursalId)?->nombre ?? 'Elegí una sucursal' }}</span>
         </label>
         <label class="block">
             <x-negocio.label>Almacén <span class="text-warning-600">*</span></x-negocio.label>

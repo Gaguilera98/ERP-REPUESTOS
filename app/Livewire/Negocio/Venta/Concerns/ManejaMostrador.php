@@ -21,10 +21,10 @@ use App\Models\InventarioStock;
 use App\Models\NegocioConfiguracion;
 use App\Models\Pago;
 use App\Models\ProductoVariante;
-use App\Models\Sucursal;
 use App\Models\SucursalAlmacen;
 use App\Models\TenantUser;
 use App\Models\Venta;
+use App\Tenancy\AccesoSucursales;
 use App\Ventas\BuscarProductosMostrador;
 use App\Ventas\CompletarVentaContado;
 use App\Ventas\CompraFlash;
@@ -38,9 +38,8 @@ use Livewire\Attributes\Locked;
 
 trait ManejaMostrador
 {
+    #[Locked]
     public ?int $sucursalId = null;
-
-    public ?int $sucursalIdAnterior = null;
 
     public ?int $almacenId = null;
 
@@ -189,57 +188,13 @@ trait ManejaMostrador
             'comprobante' => null,
         ]];
 
-        $usuario = auth('tenant')->user();
-        $caja = $usuario instanceof TenantUser
-            ? CajaSesion::query()
-                ->where('user_id', $usuario->id)
-                ->where('estado_sesion', EstadoCajaSesion::Abierta)
-                ->whereDate('fecha_apertura', now()->toDateString())
-                ->orderByDesc('id')
-                ->first()
-            : null;
-
-        if ($caja instanceof CajaSesion) {
-            $this->sucursalId = (int) $caja->sucursal_id;
-            $this->actualizarAlmacenPorDefecto();
-
-            return;
-        }
-
-        $sucursal = Sucursal::query()->where('is_active', true)->orderBy('nombre')->first();
-
-        if ($sucursal instanceof Sucursal) {
-            $this->sucursalId = $sucursal->id;
-            $this->actualizarAlmacenPorDefecto();
-        }
-    }
-
-    public function updatingSucursalId(mixed $value): void
-    {
-        $this->sucursalIdAnterior = $this->sucursalId;
-    }
-
-    public function updatedSucursalId(): void
-    {
-        if ($this->sucursalId && $this->cajaAbierta() === null) {
-            Notification::make()
-                ->title('Sin caja en esa sucursal')
-                ->body('Abrí la caja de esa sucursal antes de vender ahí.')
-                ->warning()
-                ->send();
-
-            $this->sucursalId = $this->sucursalIdAnterior;
-            $this->actualizarAlmacenPorDefecto();
-
-            return;
-        }
-
+        $this->sucursalId = app(AccesoSucursales::class)->activa($this->usuario());
         $this->actualizarAlmacenPorDefecto();
-        $this->refrescarResultadosBusqueda(trim($this->busqueda));
     }
 
     public function updatedAlmacenId(): void
     {
+        $this->validarAlmacenDelMostrador();
         $this->refrescarResultadosBusqueda(trim($this->busqueda));
 
         if ($this->mostrarBusquedaAvanzada) {
@@ -677,6 +632,7 @@ trait ManejaMostrador
         $usuario = $this->usuario();
 
         try {
+            $this->validarAlmacenDelMostrador();
             $payload = [
                 'almacen_id' => $this->almacenId,
                 'cantidad' => $this->flashCantidad,
@@ -724,6 +680,13 @@ trait ManejaMostrador
         }
 
         $this->resetValidation();
+
+        $acceso = app(AccesoSucursales::class);
+        if ($acceso->activa($usuario) !== $this->sucursalId) {
+            Notification::make()->title('Cambió la sucursal activa')->body('Revisá el carrito y volvé a abrir Mostrador para continuar.')->warning()->send();
+
+            return;
+        }
 
         if ($this->cajaAbierta() === null) {
             Notification::make()->title('Abrí la caja de hoy')->body('Necesitás una caja abierta en esta sucursal para confirmar la operación.')->warning()->send();
@@ -1036,7 +999,8 @@ trait ManejaMostrador
     protected function datosVistaMostrador(): array
     {
         return [
-            'sucursales' => Sucursal::query()->where('is_active', true)->orderBy('nombre')->get(),
+            'sucursales' => app(AccesoSucursales::class)->disponibles($this->usuario())->orderBy('nombre')->get(),
+            'sucursalId' => $this->sucursalId,
             'almacenes' => $this->almacenesDeSucursal(),
             'clienteSeleccionado' => $this->clienteSeleccionado(),
             'puedeRegistrarCliente' => $this->usuario()->can('create', Cliente::class),
@@ -1063,6 +1027,7 @@ trait ManejaMostrador
 
     protected function refrescarResultadosBusqueda(string $texto): void
     {
+        $this->validarAlmacenDelMostrador();
         $this->indiceResultado = 0;
 
         $resultado = $this->buscador()->sugerir([
@@ -1100,6 +1065,7 @@ trait ManejaMostrador
 
     protected function refrescarBusquedaAvanzada(): void
     {
+        $this->validarAlmacenDelMostrador();
         if (! $this->tieneCriterioBusquedaAvanzada()) {
             $this->resultadosAvanzados = [];
             $this->totalAvanzados = 0;
@@ -1386,7 +1352,7 @@ trait ManejaMostrador
      */
     protected function almacenesDeSucursal(): Collection
     {
-        if (! $this->sucursalId) {
+        if (! $this->sucursalId || app(AccesoSucursales::class)->activa($this->usuario()) !== $this->sucursalId) {
             return collect();
         }
 
@@ -1401,7 +1367,8 @@ trait ManejaMostrador
     {
         $usuario = auth('tenant')->user();
 
-        if (! $usuario instanceof TenantUser || ! $this->sucursalId) {
+        if (! $usuario instanceof TenantUser || ! $this->sucursalId
+            || app(AccesoSucursales::class)->activa($usuario) !== $this->sucursalId) {
             return null;
         }
 
@@ -1415,7 +1382,7 @@ trait ManejaMostrador
 
     protected function disponibleDe(int $varianteId): string
     {
-        if (! $this->almacenId) {
+        if (! $this->almacenId || ! $this->almacenesDeSucursal()->contains('id', $this->almacenId)) {
             return '0.0000';
         }
 
@@ -1433,6 +1400,13 @@ trait ManejaMostrador
             bcmul((string) $stock->cantidad_reservada, '-1', 4),
             4,
         );
+    }
+
+    private function validarAlmacenDelMostrador(): void
+    {
+        if ($this->almacenId !== null && ! $this->almacenesDeSucursal()->contains('id', $this->almacenId)) {
+            throw ValidationException::withMessages(['almacenId' => 'Revisá el almacén de la sucursal activa.']);
+        }
     }
 
     protected function totalTentativo(): string

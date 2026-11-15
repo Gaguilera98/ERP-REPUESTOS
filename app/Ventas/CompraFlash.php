@@ -18,6 +18,7 @@ use App\Models\ProductoVariante;
 use App\Models\Proveedor;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -59,6 +60,7 @@ class CompraFlash
 
         return DB::transaction(function () use ($data, $usuario): array {
             $almacenId = $this->id($data['almacen_id'] ?? null, 'almacen_id', 'Elegí el almacén.');
+            app(AccesoSucursales::class)->validarAlmacen($usuario, $almacenId);
 
             if (! Almacen::query()->whereKey($almacenId)->exists()) {
                 throw ValidationException::withMessages([

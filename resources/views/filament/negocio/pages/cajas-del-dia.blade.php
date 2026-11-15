@@ -16,6 +16,7 @@
         $nombreVendedor = $sesionesVendedor[0]['cajero'] ?? 'Vendedor';
         $cierreDia = $this->cierreDia();
         $puedeCerrarDia = is_array($consolidado)
+            && auth('tenant')->user()->can('Cerrar:CajaDia')
             && $cierreDia === null
             && $consolidado['sesiones_abiertas'] === 0
             && $consolidado['sesiones_pendientes'] === 0

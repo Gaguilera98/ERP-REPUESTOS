@@ -18,6 +18,7 @@ use App\Models\ProveedorContacto;
 use App\Models\TenantUser;
 use App\Models\Trabajador;
 use App\Models\UnidadMedida;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -33,6 +34,7 @@ class GuardarOrdenCompra
         return DB::transaction(function () use ($data, $usuario): OrdenCompra {
             $lineas = $this->lineas($data['lineas'] ?? null);
             $cabecera = $this->cabecera($data);
+            app(AccesoSucursales::class)->validarAlmacen($usuario, $cabecera['almacen_destino_id'], 'almacen_destino_id');
 
             $orden = OrdenCompra::query()->create([
                 ...$cabecera,
@@ -54,9 +56,9 @@ class GuardarOrdenCompra
     /**
      * @param  array<string, mixed>  $data
      */
-    public function actualizar(OrdenCompra $orden, array $data): OrdenCompra
+    public function actualizar(OrdenCompra $orden, array $data, TenantUser $usuario): OrdenCompra
     {
-        return DB::transaction(function () use ($orden, $data): OrdenCompra {
+        return DB::transaction(function () use ($orden, $data, $usuario): OrdenCompra {
             $orden = OrdenCompra::query()->whereKey($orden->id)->lockForUpdate()->firstOrFail();
 
             if ($orden->estado === EstadoOrdenCompra::Anulada) {
@@ -73,6 +75,9 @@ class GuardarOrdenCompra
 
             $lineas = $this->lineas($data['lineas'] ?? null, $orden);
             $cabecera = $this->cabecera($data, $orden);
+            $acceso = app(AccesoSucursales::class);
+            $acceso->validarAlmacen($usuario, (int) $orden->almacen_destino_id, 'almacen_destino_id');
+            $acceso->validarAlmacen($usuario, $cabecera['almacen_destino_id'], 'almacen_destino_id');
 
             $orden->fill([
                 ...$cabecera,

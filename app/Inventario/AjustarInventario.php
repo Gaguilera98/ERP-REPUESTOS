@@ -13,6 +13,7 @@ use App\Models\InventarioStock;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Venta;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -25,6 +26,7 @@ class AjustarInventario
      */
     public function abrirConteo(int $almacenId, array $lineas, TenantUser $usuario): AjusteInventario
     {
+        app(AccesoSucursales::class)->validarAlmacen($usuario, $almacenId);
         abort_unless($usuario->can('Cargar:Conteo'), 403);
 
         return DB::transaction(function () use ($almacenId, $lineas, $usuario): AjusteInventario {
@@ -46,6 +48,7 @@ class AjustarInventario
      */
     public function puntual(int $almacenId, array $datos, TenantUser $usuario): AjusteInventario
     {
+        app(AccesoSucursales::class)->validarAlmacen($usuario, $almacenId);
         abort_unless($usuario->can('Ajustar:Inventario'), 403);
         $motivo = MotivoAjusteInventario::tryFrom((string) ($datos['motivo'] ?? ''));
         $observacion = trim((string) ($datos['observacion'] ?? ''));
@@ -90,6 +93,7 @@ class AjustarInventario
 
     public function cerrarConteo(AjusteInventario $ajuste, TenantUser $usuario): AjusteInventario
     {
+        app(AccesoSucursales::class)->validarAlmacen($usuario, (int) $ajuste->almacen_id);
         abort_unless($usuario->can('Cerrar:Conteo'), 403);
 
         return DB::transaction(function () use ($ajuste, $usuario): AjusteInventario {

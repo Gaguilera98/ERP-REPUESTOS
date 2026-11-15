@@ -59,8 +59,13 @@ class SeedNegocioRoles
             Permission::findOrCreate($name, 'tenant');
         }
 
+        NegocioRole::findOrCreate(AccesoSucursales::ADMINISTRADOR, 'tenant')->syncPermissions($this->permissionNames());
+
         $supervisor = NegocioRole::findOrCreate('supervisor', 'tenant');
-        $supervisor->syncPermissions($this->permissionNames());
+        $supervisor->syncPermissions(array_filter(
+            $this->permissionNames(),
+            fn (string $permiso): bool => ! self::esPermisoAdministrativo($permiso),
+        ));
 
         $cajero = NegocioRole::findOrCreate('cajero', 'tenant');
         $cajero->syncPermissions([
@@ -123,12 +128,22 @@ class SeedNegocioRoles
         app(AsegurarTiposDocumentoIdentidad::class)->handle();
     }
 
+    private static function esPermisoAdministrativo(string $permiso): bool
+    {
+        return str_ends_with($permiso, ':TenantUser')
+            || str_ends_with($permiso, ':NegocioRole')
+            || in_array($permiso, ['Administrar:AccesoUsuarios', 'View:ConfiguracionDelNegocio', 'Publicar:TipoCambio'], true)
+            || (! str_starts_with($permiso, 'View') && (str_ends_with($permiso, ':Sucursal') || str_ends_with($permiso, ':Almacen')));
+    }
+
     /**
      * @return list<string>
      */
     private function permissionNames(): array
     {
         $names = [
+            'Administrar:AccesoUsuarios',
+            'Cerrar:CajaDia',
             'Corregir:Venta',
             'Reembolsar:Sena',
             'Ampliar:Reserva',

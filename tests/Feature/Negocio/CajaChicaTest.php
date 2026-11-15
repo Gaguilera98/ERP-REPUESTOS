@@ -80,6 +80,7 @@ function negocioDeCajaChica(string $dominio = 'cajachica'): array
         'es_principal' => true,
     ]);
     $supervisor->sucursales()->attach($sucursal->id, ['tenant_id' => (string) tenant()->getTenantKey()]);
+    $cajero->sucursales()->attach($sucursal->id, ['tenant_id' => $tenant->id]);
 
     $variante = ProductoVariante::factory()->create([
         'sku' => 'CCH-1',

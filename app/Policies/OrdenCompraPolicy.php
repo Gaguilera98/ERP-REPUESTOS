@@ -6,6 +6,7 @@ use App\Enums\EstadoOrdenCompra;
 use App\Models\OrdenCompra;
 use App\Models\TenantUser;
 use App\Policies\Concerns\ChecksTenantPermission;
+use App\Tenancy\AccesoSucursales;
 
 class OrdenCompraPolicy
 {
@@ -18,7 +19,10 @@ class OrdenCompraPolicy
 
     public function view(TenantUser $user, OrdenCompra $ordenCompra): bool
     {
-        return $this->allows($user, 'View:OrdenCompra');
+        $acceso = app(AccesoSucursales::class);
+
+        return $this->allows($user, 'View:OrdenCompra')
+            && $acceso->autorizaAlmacen($user, (int) $ordenCompra->almacen_destino_id);
     }
 
     public function create(TenantUser $user): bool
@@ -28,7 +32,7 @@ class OrdenCompraPolicy
 
     public function update(TenantUser $user, OrdenCompra $ordenCompra): bool
     {
-        return $this->allows($user, 'Update:OrdenCompra');
+        return $this->view($user, $ordenCompra) && $this->allows($user, 'Update:OrdenCompra');
     }
 
     public function delete(TenantUser $user, OrdenCompra $ordenCompra): bool

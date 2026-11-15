@@ -106,6 +106,7 @@ function negocioConMostrador(string $dominio = 'venta'): array
     $cajero->assignRole('cajero');
 
     $sucursal = Sucursal::factory()->create(['nombre' => 'Centro']);
+    $sucursal->usuarios()->attach([$supervisor->id, $cajero->id], ['tenant_id' => $tenant->id]);
     $almacen = Almacen::factory()->create(['nombre' => 'Estante']);
     SucursalAlmacen::query()->create([
         'sucursal_id' => $sucursal->id,

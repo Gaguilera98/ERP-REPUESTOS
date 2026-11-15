@@ -11,7 +11,6 @@ use App\Enums\TipoArchivoNegocio;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
 use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
-use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
 use App\Models\InventarioStock;
@@ -20,6 +19,7 @@ use App\Models\NegocioConfiguracion;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
 use App\Models\UnidadMedida;
+use App\Tenancy\AccesoSucursales;
 use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\CheckboxList;
@@ -339,15 +339,15 @@ class ProductoMaestroForm
         );
 
         return Section::make('Stock por almacén')
-            ->visibleOn('edit')
+            ->visible(fn (?ProductoMaestro $record): bool => $record !== null && app(AccesoSucursales::class)->puedeVerStock(auth('tenant')->user()))
             ->schema([
                 RepeatableEntry::make('stock_por_almacen')
                     ->hiddenLabel()
                     ->extraAttributes(['class' => 'producto-stock'])
                     ->placeholder('No hay existencias registradas.')
-                    ->state(fn (?ProductoMaestro $record): ?ModelCollection => $record
-                        ?->loadMissing('stocks.almacen', 'stocks.variante.productoMaestro.unidadBase')->stocks
-                        ->sortBy(['almacen.nombre', 'variante.sku']))
+                    ->state(fn (?ProductoMaestro $record): ?ModelCollection => $record === null ? null
+                        : app(AccesoSucursales::class)->filtrarAlmacen($record->stocks()->getQuery(), auth('tenant')->user())
+                            ->with('almacen', 'variante.productoMaestro.unidadBase')->get()->sortBy(['almacen.nombre', 'variante.sku']))
                     ->table([
                         TableColumn::make('Almacén'),
                         TableColumn::make('SKU'),
@@ -517,7 +517,7 @@ class ProductoMaestroForm
                 Hidden::make('id'),
                 Select::make('almacen_id')
                     ->label('Almacén')
-                    ->options(fn (): array => Almacen::query()->orderBy('nombre')->pluck('nombre', 'id')->all())
+                    ->options(fn (): array => app(AccesoSucursales::class)->almacenes(auth('tenant')->user())->orderBy('nombre')->pluck('nombre', 'id')->all())
                     ->disabled()
                     ->dehydrated(false),
                 TextInput::make('ubicacion')

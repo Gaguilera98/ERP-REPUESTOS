@@ -6,12 +6,14 @@ use App\Filament\Negocio\Resources\Traslados\Pages\CreateTraslado;
 use App\Filament\Negocio\Resources\Traslados\Pages\ListTraslados;
 use App\Filament\Negocio\Resources\Traslados\Pages\ViewTraslado;
 use App\Models\Traslado;
+use App\Tenancy\AccesoSucursales;
 use BackedEnum;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class TrasladoResource extends Resource
 {
@@ -30,6 +32,15 @@ class TrasladoResource extends Resource
     protected static string|\UnitEnum|null $navigationGroup = 'Catálogo';
 
     protected static ?int $navigationSort = 9;
+
+    public static function getEloquentQuery(): Builder
+    {
+        $acceso = app(AccesoSucursales::class);
+        $usuario = auth('tenant')->user();
+        $query = $acceso->filtrarAlmacen(parent::getEloquentQuery(), $usuario, 'almacen_origen_id');
+
+        return $acceso->filtrarAlmacen($query, $usuario, 'almacen_destino_id');
+    }
 
     public static function table(Table $table): Table
     {

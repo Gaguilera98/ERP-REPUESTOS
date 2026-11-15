@@ -88,6 +88,7 @@ function negocioConCaja(string $dominio = 'caja'): array
     $cajero->assignRole('cajero');
 
     $sucursal = Sucursal::factory()->create(['nombre' => 'Centro']);
+    $sucursal->usuarios()->attach([$cajero->id, $supervisor->id], ['tenant_id' => $tenant->id]);
 
     return compact('supervisor', 'cajero', 'sucursal');
 }

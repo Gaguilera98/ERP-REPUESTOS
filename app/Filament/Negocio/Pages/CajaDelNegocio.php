@@ -12,8 +12,8 @@ use App\Enums\MetodoPago;
 use App\Filament\Negocio\CajaChica\AccionesCajaChica;
 use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
-use App\Models\Sucursal;
 use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use BackedEnum;
 use Closure;
 use Filament\Actions\Action;
@@ -43,6 +43,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
+use Livewire\Attributes\Locked;
 use UnitEnum;
 
 class CajaDelNegocio extends Page implements HasSchemas, HasTable
@@ -71,6 +72,9 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
 
     public bool $confirmandoCierre = false;
 
+    #[Locked]
+    public ?int $sucursalDelTurno = null;
+
     /** @var array<int, CajaSesion|null> */
     private array $turnosAnteriores = [];
 
@@ -97,6 +101,8 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         $usuario = auth('tenant')->user();
 
         if ($usuario instanceof TenantUser) {
+            $acceso = app(AccesoSucursales::class);
+            $this->sucursalDelTurno = $acceso->activa($usuario);
             app(CongelarTurnosVencidos::class)->de($usuario);
         }
 
@@ -128,8 +134,8 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
                     ->schema([
                         Select::make('sucursal_id')
                             ->label('Sucursal')
-                            ->options(fn (): array => Sucursal::query()
-                                ->where('is_active', true)
+                            ->options(fn (): array => app(AccesoSucursales::class)->disponibles(auth('tenant')->user())
+                                ->whereKey($this->sucursalDelTurno)
                                 ->orderBy('nombre')
                                 ->pluck('nombre', 'id')
                                 ->all())
@@ -249,6 +255,9 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
 
         abort_unless($usuario instanceof TenantUser && $usuario->can('create', CajaSesion::class), 403);
 
+        $acceso = app(AccesoSucursales::class);
+        $acceso->validarOperacion($usuario, (int) $this->sucursalDelTurno);
+
         app(AbrirCajaSesion::class)->abrir($this->form->getState(), $usuario);
 
         Notification::make()
@@ -338,7 +347,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         }
 
         if (! array_key_exists($sesionId, $this->turnosAnteriores)) {
-            $this->turnosAnteriores[$sesionId] = CajaSesion::query()
+            $this->turnosAnteriores[$sesionId] = app(AccesoSucursales::class)->filtrarSucursal(CajaSesion::query(), auth('tenant')->user())
                 ->with('sucursal')
                 ->whereKey($sesionId)
                 ->where('user_id', auth('tenant')->id())
@@ -373,7 +382,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
             ->heading('Mis días de caja')
             ->extraAttributes(['class' => 'caja-mobile-table'])
             ->description('Una fila por día de apertura. Entrá en Ver sesiones para consultar los turnos de esa fecha.')
-            ->query(CajaSesion::query()
+            ->query(app(AccesoSucursales::class)->filtrarSucursal(CajaSesion::query(), auth('tenant')->user())
                 ->where('user_id', auth('tenant')->id())
                 ->selectRaw('MIN(id) as id, DATE(fecha_apertura) as dia, COUNT(*) as sesiones')
                 ->selectRaw("SUM(CASE WHEN estado_sesion = 'abierta' THEN 1 ELSE 0 END) as abiertas")
@@ -487,7 +496,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
             return collect();
         }
 
-        return CajaSesion::query()
+        return app(AccesoSucursales::class)->filtrarSucursal(CajaSesion::query(), $usuario)
             ->with('sucursal')
             ->where('user_id', $usuario->id)
             ->where('estado_sesion', EstadoCajaSesion::PendienteArqueo)
@@ -518,10 +527,16 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
             return null;
         }
 
+        $acceso = app(AccesoSucursales::class);
+        if ($this->sucursalDelTurno === null || $this->sucursalDelTurno !== $acceso->activa($usuario)) {
+            return null;
+        }
+
         return CajaSesion::query()
             ->with('sucursal')
             ->where('user_id', $usuario->id)
             ->where('estado_sesion', EstadoCajaSesion::Abierta)
+            ->where('sucursal_id', $this->sucursalDelTurno)
             ->orderByDesc('fecha_apertura')
             ->first();
     }
@@ -567,7 +582,7 @@ class CajaDelNegocio extends Page implements HasSchemas, HasTable
         }
 
         $this->form->fill([
-            'sucursal_id' => Sucursal::query()->where('is_active', true)->orderBy('nombre')->value('id'),
+            'sucursal_id' => $this->sucursalDelTurno,
             'monto_apertura' => '0.00',
         ]);
     }

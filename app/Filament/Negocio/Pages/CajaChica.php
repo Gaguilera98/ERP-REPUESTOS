@@ -88,7 +88,7 @@ class CajaChica extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->query(fn (): Builder => CajaChicaMovimiento::query()
+            ->query(fn (): Builder => app(AccesoSucursales::class)->filtrarSucursal(CajaChicaMovimiento::query(), auth('tenant')->user())
                 ->where('fondo_id', $this->fondoHistorialId ?? 0)
                 ->whereIn('fondo_id', $this->fondosVisibles()->select('id')))
             ->defaultSort('id', 'desc')
@@ -142,7 +142,7 @@ class CajaChica extends Page implements HasTable
         abort_unless(static::canAccess() && $usuario instanceof TenantUser, 403);
 
         $sucursales = $usuario->can(Permisos::REVISAR) ? app(AccesoSucursales::class)->ids($usuario) : [];
-        $vale = CajaChicaMovimiento::query()->where('tipo', TipoCajaChicaMovimiento::EgresoVale)
+        $vale = app(AccesoSucursales::class)->filtrarSucursal(CajaChicaMovimiento::query(), $usuario)->where('tipo', TipoCajaChicaMovimiento::EgresoVale)
             ->where(fn (Builder $query): Builder => $query
                 ->whereIn('fondo_id', $this->fondosVisibles()->select('id'))
                 ->orWhereHas('sesion', fn (Builder $sesion): Builder => $sesion->where('user_id', $usuario->id)->orWhereIn('sucursal_id', $sucursales)))
@@ -166,7 +166,7 @@ class CajaChica extends Page implements HasTable
             ? app(AccesoSucursales::class)->ids($usuario)
             : [];
 
-        return CajaChicaFondo::query()
+        return app(AccesoSucursales::class)->filtrarSucursal(CajaChicaFondo::query(), $usuario)
             ->where(fn (Builder $query): Builder => $query->where('responsable_id', $usuario->id)
                 ->orWhereIn('sucursal_id', $sucursales));
     }

@@ -40,7 +40,7 @@ it('keeps platform roles out of a store and store roles out of the platform', fu
 
     tenancy()->initialize($tenant);
 
-    expect(NegocioRole::query()->pluck('name')->sort()->values()->all())->toBe(['cajero', 'supervisor']);
+    expect(NegocioRole::query()->pluck('name')->sort()->values()->all())->toBe(['administrador', 'cajero', 'supervisor']);
 
     tenancy()->end();
 
@@ -83,7 +83,7 @@ it('arma el host completo del negocio con el dominio central', function () {
         ->and(NegocioDomainRule::hostCompleto(''))->toBeNull();
 });
 
-it('creates a store with a lowercase domain and its first supervisor', function () {
+it('creates a store with a lowercase domain and its first administrator', function () {
     $admin = User::factory()->create();
     $admin->assignRole('admin');
 
@@ -116,7 +116,7 @@ it('creates a store with a lowercase domain and its first supervisor', function 
     $supervisor = TenantUser::query()->where('email', 'dueno@god.test')->first();
 
     expect($supervisor)->not->toBeNull()
-        ->and($supervisor->hasRole('supervisor'))->toBeTrue();
+        ->and($supervisor->hasRole('administrador'))->toBeTrue();
 
     tenancy()->end();
 });
@@ -234,7 +234,7 @@ it('rejects a pool that is not registered', function () {
     ]);
 });
 
-it('rejects a supervisor password shorter than 8 characters', function () {
+it('rejects an administrator password shorter than 8 characters', function () {
     $admin = User::factory()->create();
     $admin->assignRole('admin');
 
@@ -251,7 +251,7 @@ it('rejects a supervisor password shorter than 8 characters', function () {
         ])
         ->call('create')
         ->assertHasFormErrors([
-            'supervisor_password' => 'La contraseña del supervisor debe tener al menos 8 caracteres.',
+            'supervisor_password' => 'La contraseña del administrador debe tener al menos 8 caracteres.',
         ]);
 });
 

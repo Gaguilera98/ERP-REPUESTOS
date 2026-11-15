@@ -3,19 +3,26 @@
 namespace App\Filament\Negocio\Resources\Almacens;
 
 use App\Filament\Negocio\Resources\Almacens\Pages\ListAlmacens;
-// use App\Filament\Negocio\Resources\Almacens\Pages\CreateAlmacen;
-// use App\Filament\Negocio\Resources\Almacens\Pages\EditAlmacen;
 use App\Filament\Negocio\Resources\Almacens\Schemas\AlmacenForm;
 use App\Filament\Negocio\Resources\Almacens\Tables\AlmacensTable;
+// use App\Filament\Negocio\Resources\Almacens\Pages\CreateAlmacen;
+// use App\Filament\Negocio\Resources\Almacens\Pages\EditAlmacen;
 use App\Models\Almacen;
+use App\Tenancy\AccesoSucursales;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class AlmacenResource extends Resource
 {
+    public static function getEloquentQuery(): Builder
+    {
+        return app(AccesoSucursales::class)->filtrarAlmacen(parent::getEloquentQuery(), auth('tenant')->user(), 'almacenes.id');
+    }
+
     protected static ?string $model = Almacen::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedArchiveBox;

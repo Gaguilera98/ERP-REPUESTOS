@@ -5,11 +5,11 @@ namespace App\Filament\Negocio\Resources\Traslados\Pages;
 use App\Compras\Montos;
 use App\Filament\Negocio\Resources\Traslados\TrasladoResource;
 use App\Inventario\TrasladarProductos;
-use App\Models\Almacen;
 use App\Models\CategoriaAtributo;
 use App\Models\InventarioStock;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -35,7 +35,7 @@ class CreateTraslado extends CreateRecord
 
     public function form(Schema $schema): Schema
     {
-        $almacenes = fn (): array => Almacen::query()->orderBy('nombre')->pluck('nombre', 'id')->all();
+        $almacenes = fn (): array => app(AccesoSucursales::class)->almacenes(auth('tenant')->user())->orderBy('nombre')->pluck('nombre', 'id')->all();
 
         return $schema->components([
             Select::make('almacen_origen_id')->label('Almacén de origen')->options($almacenes)
@@ -50,7 +50,7 @@ class CreateTraslado extends CreateRecord
                     $this->resetValidation('data.almacen_destino_id');
                 }),
             Select::make('almacen_destino_id')->label('Almacén de destino')
-                ->options(fn (Get $get): array => Almacen::query()
+                ->options(fn (Get $get): array => app(AccesoSucursales::class)->almacenes(auth('tenant')->user())
                     ->whereKeyNot((int) $get('almacen_origen_id'))
                     ->orderBy('nombre')->pluck('nombre', 'id')->all())
                 ->validationMessages([
@@ -100,6 +100,10 @@ class CreateTraslado extends CreateRecord
     #[Computed]
     public function filas(): array
     {
+        if (! $this->tieneRuta()) {
+            return [];
+        }
+
         $origen = (int) ($this->data['almacen_origen_id'] ?? 0);
         $destino = (int) ($this->data['almacen_destino_id'] ?? 0);
         $ids = $this->data['productos'] ?? [];
@@ -177,7 +181,10 @@ class CreateTraslado extends CreateRecord
         $origen = (int) ($this->data['almacen_origen_id'] ?? 0);
         $destino = (int) ($this->data['almacen_destino_id'] ?? 0);
 
-        return $origen > 0 && $destino > 0 && $origen !== $destino;
+        $acceso = app(AccesoSucursales::class);
+
+        return $origen > 0 && $destino > 0 && $origen !== $destino
+            && $acceso->almacenes(auth('tenant')->user())->whereKey([$origen, $destino])->count() === 2;
     }
 
     /** @return array<int, string> */

@@ -20,6 +20,7 @@ class AutorizarOrigen
 
     public function sesionParaSalida(CajaSesion $sesion, TenantUser $actor): void
     {
+        $this->sucursalAsignada($actor, (int) $sesion->sucursal_id);
         $config = NegocioConfiguracion::query()->first();
 
         if (! $config instanceof NegocioConfiguracion || ! $config->permite_gastos_cajon_venta) {
@@ -41,14 +42,11 @@ class AutorizarOrigen
         }
 
         $this->exigir($actor->can(Permisos::AJENA), 'No podés registrar gastos en la caja de otro.');
-        $this->exigir(
-            $this->acceso->autoriza($actor, (int) $sesion->sucursal_id),
-            'No tenés esa sucursal asignada.',
-        );
     }
 
     public function sesionParaEntrada(CajaSesion $sesion, TenantUser $actor): void
     {
+        $this->sucursalAsignada($actor, (int) $sesion->sucursal_id);
         if ($sesion->estado_sesion !== EstadoCajaSesion::Abierta) {
             throw ValidationException::withMessages([
                 'destino' => 'El sobrante tiene que entrar en un turno abierto.',
@@ -62,11 +60,11 @@ class AutorizarOrigen
         }
 
         $this->exigir($actor->can(Permisos::AJENA) || $actor->can(Permisos::REVISAR), 'No podés recibir el sobrante en esa caja.');
-        $this->exigir($this->acceso->autoriza($actor, (int) $sesion->sucursal_id), 'No tenés esa sucursal asignada.');
     }
 
     public function fondoParaOperar(CajaChicaFondo $fondo, TenantUser $actor): void
     {
+        $this->sucursalAsignada($actor, (int) $fondo->sucursal_id);
         $this->exigir($actor->can(Permisos::OPERAR), 'No podés operar la caja chica.');
         $this->exigir(
             (int) $fondo->responsable_id === (int) $actor->id,
@@ -85,7 +83,7 @@ class AutorizarOrigen
         $sucursales = $actor->can(Permisos::AJENA) || $actor->can(Permisos::REVISAR)
             ? $this->acceso->ids($actor) : [];
 
-        return CajaChicaMovimiento::query()->where(function (Builder $query) use ($actor, $sucursales): void {
+        return $this->acceso->filtrarSucursal(CajaChicaMovimiento::query(), $actor)->where(function (Builder $query) use ($actor, $sucursales): void {
             $query->whereRaw('1 = 0');
 
             if ($actor->can(Permisos::PROPIA)) {

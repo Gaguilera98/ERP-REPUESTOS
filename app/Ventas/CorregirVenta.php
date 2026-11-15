@@ -22,6 +22,7 @@ use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
 use App\Models\Venta;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -180,6 +181,7 @@ class CorregirVenta
 
     public function confirmar(Venta $venta, array $lineas, string $motivo, string $revision, TenantUser $usuario): void
     {
+        app(AccesoSucursales::class)->validarOperacion($usuario, (int) $venta->sucursal_id);
         $motivo = trim($motivo);
         validator(['motivo' => $motivo], ['motivo' => ['required', 'string', 'max:500']])->validate();
 

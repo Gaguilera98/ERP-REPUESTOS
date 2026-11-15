@@ -11,6 +11,7 @@ use App\Models\OrdenCompraDetalle;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -26,6 +27,7 @@ class RecibirMercaderia
      */
     public function recibir(OrdenCompra $orden, array $lineas, TenantUser $usuario, bool $confirmoCostos): OrdenCompra
     {
+        app(AccesoSucursales::class)->validarAlmacen($usuario, (int) $orden->almacen_destino_id, 'almacen_destino_id');
         if (! $confirmoCostos) {
             throw ValidationException::withMessages([
                 'confirmo_costos' => 'Confirmá el costo por unidad antes de recibir. Si no confirmás, no se guarda.',

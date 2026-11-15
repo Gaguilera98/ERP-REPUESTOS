@@ -9,6 +9,8 @@ use App\Models\InventarioStock;
 use App\Models\NegocioConfiguracion;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
+use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 
@@ -408,7 +410,10 @@ class VariantesProducto
                 continue;
             }
 
-            $variante->stocks()->whereKey($ubicacion['id'])->update([
+            $stock = $variante->stocks()->whereKey($ubicacion['id'])->getQuery();
+            $usuario = auth('tenant')->user();
+            abort_unless($usuario instanceof TenantUser, 403);
+            app(AccesoSucursales::class)->filtrarAlmacen($stock, $usuario)->update([
                 'ubicacion' => $this->texto($ubicacion['ubicacion'] ?? null),
             ]);
         }
@@ -423,7 +428,12 @@ class VariantesProducto
             return [];
         }
 
-        return $variante->stocks
+        $acceso = app(AccesoSucursales::class);
+        $usuario = auth('tenant')->user();
+        $stocks = $usuario instanceof TenantUser
+            ? $acceso->filtrarAlmacen($variante->stocks()->getQuery(), $usuario)->get() : collect();
+
+        return $stocks
             ->sortBy('id')
             ->map(fn (InventarioStock $stock): array => [
                 'id' => $stock->id,

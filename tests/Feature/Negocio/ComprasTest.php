@@ -65,7 +65,7 @@ function negocioConPieza(string $dominio = 'norte'): array
     tenancy()->initialize($tenant);
 
     $supervisor = TenantUser::factory()->create();
-    $supervisor->assignRole('supervisor');
+    $supervisor->assignRole('administrador');
     $almacen = Almacen::factory()->create(['nombre' => 'Depósito']);
     $variante = ProductoVariante::factory()->create([
         'sku' => '6204-2RS',
@@ -206,7 +206,7 @@ it('guarda la compra sin mover stock ni el precio y solo recibe si confirman el 
             'cantidad_pedida' => 4,
             'costo_unitario' => '200',
         ]],
-    ]))->toThrow(ValidationException::class);
+    ], $supervisor))->toThrow(ValidationException::class);
 });
 
 it('al recibir recalcula el costo promedio de toda la pieza, escribe kardex y no toca el precio de venta', function () {
@@ -355,7 +355,7 @@ it('rechaza un producto de otro negocio', function () {
     $variante = ProductoVariante::factory()->create();
 
     tenancy()->initialize($sur);
-    $ajeno = TenantUser::factory()->create();
+    $ajeno = TenantUser::factory()->create()->assignRole('administrador');
     $almacenSur = Almacen::factory()->create();
     $proveedorSur = Proveedor::query()->where('es_ocasional', true)->firstOrFail();
 
@@ -717,7 +717,7 @@ it('al editar conserva los datos de la compra y recalcula el total', function ()
                 'costo_unitario' => '200',
             ],
         ],
-    ]);
+    ], $supervisor);
 
     expect($orden->subtotal)->toBe('1000.00')
         ->and($orden->total)->toBe('1000.00');
@@ -820,7 +820,7 @@ it('borra las compras del negocio y deja las del otro', function () {
     $sur = Tenant::factory()->create();
 
     tenancy()->initialize($norte);
-    $supervisor = TenantUser::factory()->create();
+    $supervisor = TenantUser::factory()->create()->assignRole('administrador');
     $almacen = Almacen::factory()->create();
     $variante = ProductoVariante::factory()->create(['precio_venta' => 10]);
     $ocasional = Proveedor::query()->where('es_ocasional', true)->firstOrFail();

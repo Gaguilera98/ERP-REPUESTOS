@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Rules\NegocioDomainRule;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Spatie\Permission\PermissionRegistrar;
@@ -39,7 +40,7 @@ class CreateNegocio
             ],
             [
                 'db_pool.in' => 'Esa base no está registrada.',
-                'supervisor_password.min' => 'La contraseña del supervisor debe tener al menos 8 caracteres.',
+                'supervisor_password.min' => 'La contraseña del administrador debe tener al menos 8 caracteres.',
             ],
         )->validate();
 
@@ -53,7 +54,7 @@ class CreateNegocio
             'domain' => $domain,
         ]);
 
-        $this->createSupervisor($tenant, $data);
+        $this->createAdministrator($tenant, $data);
 
         return $tenant;
     }
@@ -61,21 +62,21 @@ class CreateNegocio
     /**
      * @param  array<string, mixed>  $data
      */
-    private function createSupervisor(Tenant $tenant, array $data): void
+    private function createAdministrator(Tenant $tenant, array $data): void
     {
         $previousTeamId = getPermissionsTeamId();
 
         tenancy()->initialize($tenant);
 
         try {
-            $supervisor = TenantUser::query()->create([
+            $administrador = TenantUser::query()->create([
                 'name' => $data['supervisor_name'],
                 'email' => $data['supervisor_email'],
                 'password' => $data['supervisor_password'],
                 'is_active' => true,
             ]);
 
-            $supervisor->assignRole('supervisor');
+            $administrador->assignRole(AccesoSucursales::ADMINISTRADOR);
         } finally {
             if (tenancy()->initialized) {
                 tenancy()->end();

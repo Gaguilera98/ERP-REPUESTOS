@@ -16,8 +16,10 @@ use App\Models\Pago;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Venta;
+use App\Tenancy\AccesoSucursales;
 use App\Ventas\Pagos\Handlers\EfectivoHandler;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -87,6 +89,9 @@ class GestionarReservas
 
     public function cancelar(Venta $venta, string $motivo, TenantUser $usuario): void
     {
+        if ((string) $venta->tenant_id !== (string) tenant()->getTenantKey()) {
+            throw (new ModelNotFoundException)->setModel(Venta::class, [$venta->id]);
+        }
         abort_unless($usuario->can('anular', $venta), 403);
         $motivo = trim($motivo);
         validator(['motivo' => $motivo], ['motivo' => ['required', 'string', 'max:500']])->validate();
@@ -126,6 +131,7 @@ class GestionarReservas
 
     public function entregar(Venta $venta, string $saldoConfirmado, TenantUser $usuario, ?string $efectivoRecibido = null): void
     {
+        app(AccesoSucursales::class)->validarOperacion($usuario, (int) $venta->sucursal_id);
         abort_unless($usuario->can('create', Venta::class) && $usuario->can('view', $venta), 403);
         $this->procesarVencidas();
 

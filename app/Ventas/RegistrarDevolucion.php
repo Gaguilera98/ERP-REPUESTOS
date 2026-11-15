@@ -19,6 +19,7 @@ use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
 use App\Models\Venta;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -210,6 +211,7 @@ class RegistrarDevolucion
 
     public function confirmar(Venta $venta, array $seleccion, string $resolucion, string $motivo, string $motivoExcepcion, string $revision, TenantUser $usuario): void
     {
+        app(AccesoSucursales::class)->validarOperacion($usuario, (int) $venta->sucursal_id);
         validator(['motivo' => trim($motivo), 'motivo_excepcion' => trim($motivoExcepcion)], [
             'motivo' => ['required', 'string', 'max:500'], 'motivo_excepcion' => ['string', 'max:500'],
         ])->validate();

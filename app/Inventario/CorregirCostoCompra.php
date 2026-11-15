@@ -10,6 +10,7 @@ use App\Models\InventarioStock;
 use App\Models\OrdenCompraDetalle;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
@@ -51,6 +52,7 @@ class CorregirCostoCompra
 
         return DB::transaction(function () use ($detalle, $costoNuevo, $observacion, $usuario): CorreccionCosto {
             $detalle = OrdenCompraDetalle::query()->lockForUpdate()->findOrFail($detalle->id);
+            app(AccesoSucursales::class)->validarAlmacen($usuario, (int) $detalle->orden->almacen_destino_id, 'almacen_destino_id');
             $variante = $this->variante($detalle);
             $variante = ProductoVariante::query()->whereKey($variante->id)->lockForUpdate()->firstOrFail();
             $stock = $this->stock($variante, bloquear: true);

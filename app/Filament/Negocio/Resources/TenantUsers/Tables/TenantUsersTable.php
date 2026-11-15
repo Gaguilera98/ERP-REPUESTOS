@@ -2,7 +2,9 @@
 
 namespace App\Filament\Negocio\Resources\TenantUsers\Tables;
 
+use App\Filament\Negocio\Resources\TenantUsers\PermisosExtras;
 use App\Filament\Tables\OrdenRegistro;
+use App\Tenancy\AccesoSucursales;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -25,17 +27,19 @@ class TenantUsersTable
                     ->searchable(),
                 TextColumn::make('roles.name')
                     ->label('Rol')
+                    ->formatStateUsing(fn (string $state): string => AccesoSucursales::etiquetaRol($state))
                     ->badge(),
                 IconColumn::make('is_active')
                     ->label('Activo')
                     ->boolean(),
             ])
             ->recordActions([
+                PermisosExtras::accion(),
                 EditAction::make(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->authorizeIndividualRecords('delete'),
                 ]),
             ]));
     }

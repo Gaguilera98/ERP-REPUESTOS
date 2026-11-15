@@ -7,6 +7,7 @@ use App\Livewire\Negocio\Caja\AccionVerDetalleVenta;
 use App\Livewire\Negocio\Venta\Concerns\ManejaMostrador;
 use App\Models\TenantUser;
 use App\Models\Venta;
+use App\Tenancy\AccesoSucursales;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Pages\Page;
@@ -42,6 +43,21 @@ class MostradorDelNegocio extends Page
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('cambiarSucursal')
+                ->label('Cambiar sucursal')
+                ->icon(Heroicon::OutlinedBuildingStorefront)
+                ->color('gray')
+                ->visible(fn (): bool => $this->sucursalId === null
+                    || app(AccesoSucursales::class)->disponibles($this->usuario())->count() > 1)
+                ->requiresConfirmation(fn (): bool => $this->lineas !== [])
+                ->modalHeading('¿Descartar la venta en curso?')
+                ->modalDescription('Vaciá el carrito para elegir otra sucursal. Tu turno queda en el local donde lo abriste.')
+                ->modalSubmitActionLabel('Descartar y continuar')
+                ->modalCancelActionLabel('Seguir vendiendo')
+                ->action(function (): void {
+                    $this->vaciarCarrito();
+                    $this->redirect(ElegirSucursal::getUrl(['volver' => 'mostrador']));
+                }),
             Action::make('misVentas')
                 ->label('Mis ventas')
                 ->icon(Heroicon::OutlinedReceiptPercent)

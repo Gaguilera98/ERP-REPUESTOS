@@ -20,6 +20,7 @@ use App\Models\MovimientoInventario;
 use App\Models\OrdenCompra;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
+use App\Models\Sucursal;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
@@ -49,7 +50,7 @@ it('muestra el stock total del producto y separa las reservas por almacén y SKU
     $tenant = Tenant::factory()->create();
     tenancy()->initialize($tenant);
     $supervisor = TenantUser::factory()->create();
-    $supervisor->assignRole('supervisor');
+    $supervisor->assignRole('administrador');
     $deposito = Almacen::factory()->create(['nombre' => 'Depósito Central']);
     $tienda = Almacen::factory()->create(['nombre' => 'Tienda Norte']);
     $producto = ProductoMaestro::factory()->create();
@@ -86,6 +87,11 @@ it('consulta el kardex del producto y filtra por almacén, tipo y día', functio
     $variante = ProductoVariante::factory()->create(['producto_maestro_id' => $producto->id]);
     $deposito = Almacen::factory()->create();
     $tienda = Almacen::factory()->create();
+    $sucursal = Sucursal::factory()->create();
+    $sucursal->asignaciones()->create(['almacen_id' => $deposito->id]);
+    $sucursal->asignaciones()->create(['almacen_id' => $tienda->id]);
+    $cajero->sucursales()->attach($sucursal->id, ['tenant_id' => $tenant->id]);
+    $cajero->givePermissionTo('ViewAny:InventarioStock');
     $movimiento = fn (array $datos): MovimientoInventario => MovimientoInventario::factory()->create([
         'producto_variante_id' => $variante->id, 'almacen_id' => $deposito->id, 'user_id' => $cajero->id,
         'created_at' => '2026-11-11 10:00:00', ...$datos,
@@ -122,7 +128,8 @@ it('consulta el kardex del producto y filtra por almacén, tipo y día', functio
         ->assertCanNotSeeTableRecords([$salida, $otroDia, $otroAlmacen, $otroProducto]);
 
     $usuarioSinCompras = TenantUser::factory()->create();
-    $usuarioSinCompras->givePermissionTo('ViewAny:ProductoMaestro', 'View:ProductoMaestro');
+    $usuarioSinCompras->givePermissionTo('ViewAny:ProductoMaestro', 'View:ProductoMaestro', 'ViewAny:InventarioStock');
+    $usuarioSinCompras->sucursales()->attach($sucursal->id, ['tenant_id' => $tenant->id]);
     Livewire::actingAs($usuarioSinCompras, 'tenant')->test(KardexProductoMaestro::class, ['record' => $producto->id])
         ->assertCanSeeTableRecords([$compra])
         ->assertTableColumnHidden('costo_unitario_entrada')

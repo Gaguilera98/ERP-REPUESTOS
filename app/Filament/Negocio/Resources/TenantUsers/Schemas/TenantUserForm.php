@@ -2,14 +2,14 @@
 
 namespace App\Filament\Negocio\Resources\TenantUsers\Schemas;
 
-use App\CajaChica\Permisos;
 use App\Models\NegocioRole;
 use App\Models\Sucursal;
+use App\Tenancy\AccesoSucursales;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Unique;
 
 class TenantUserForm
@@ -39,26 +39,26 @@ class TenantUserForm
                     ->label('Rol')
                     ->options(fn (): array => NegocioRole::query()
                         ->where('guard_name', 'tenant')
+                        ->when(! auth('tenant')->user()?->hasRole(AccesoSucursales::ADMINISTRADOR), fn ($query) => $query
+                            ->where('name', '!=', AccesoSucursales::ADMINISTRADOR))
                         ->orderBy('name')
                         ->pluck('name')
-                        ->mapWithKeys(fn (string $name): array => [$name => Str::headline($name)])
+                        ->mapWithKeys(fn (string $name): array => [$name => AccesoSucursales::etiquetaRol($name)])
                         ->all())
                     ->required()
+                    ->live()
                     ->native(false),
                 Toggle::make('is_active')
                     ->label('Activo')
                     ->default(true),
                 Select::make('sucursales')
-                    ->label('Sucursales de caja chica')
-                    ->helperText('Hacen falta para operar un cajón ajeno, reponer entre cajas o revisar otra sucursal.')
+                    ->label('Sucursales asignadas')
+                    ->helperText(fn (Get $get): string => $get('role') === AccesoSucursales::ADMINISTRADOR
+                        ? 'El administrador tiene acceso a todas las sucursales del negocio.'
+                        : 'Locales donde puede operar, según los permisos que tenga.')
                     ->multiple()
+                    ->disabled(fn (Get $get): bool => $get('role') === AccesoSucursales::ADMINISTRADOR)
                     ->options(fn (): array => Sucursal::query()->where('is_active', true)->orderBy('nombre')->pluck('nombre', 'id')->all())
-                    ->native(false),
-                Select::make('permisos_directos')
-                    ->label('Permisos directos de caja chica')
-                    ->helperText('Se suman al rol. No reemplazan los permisos del rol.')
-                    ->multiple()
-                    ->options(Permisos::etiquetas())
                     ->native(false),
             ]);
     }

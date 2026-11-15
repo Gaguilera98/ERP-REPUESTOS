@@ -8,14 +8,21 @@ use App\Filament\Negocio\Resources\Sucursals\Pages\ListSucursals;
 use App\Filament\Negocio\Resources\Sucursals\Schemas\SucursalForm;
 use App\Filament\Negocio\Resources\Sucursals\Tables\SucursalsTable;
 use App\Models\Sucursal;
+use App\Tenancy\AccesoSucursales;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class SucursalResource extends Resource
 {
+    public static function getEloquentQuery(): Builder
+    {
+        return app(AccesoSucursales::class)->filtrarSucursal(parent::getEloquentQuery(), auth('tenant')->user(), 'sucursales.id');
+    }
+
     protected static ?string $model = Sucursal::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingStorefront;

@@ -6,6 +6,7 @@ use App\Catalogo\VariantesProducto;
 use App\Filament\Negocio\Resources\ProductoMaestros\Concerns\GuardaVariantesDelProducto;
 use App\Filament\Negocio\Resources\ProductoMaestros\ProductoMaestroResource;
 use App\Models\ProductoMaestro;
+use App\Tenancy\AccesoSucursales;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
@@ -21,7 +22,8 @@ class EditProductoMaestro extends EditRecord
     {
         return [
             Action::make('kardex')->label('Ver kardex')->icon(Heroicon::OutlinedClock)->color('gray')
-                ->authorize(fn (): bool => ProductoMaestroResource::canView($this->getRecord()))
+                ->authorize(fn (): bool => ProductoMaestroResource::canView($this->getRecord())
+                    && app(AccesoSucursales::class)->puedeVerStock(auth('tenant')->user()))
                 ->url(fn (): string => $this->getResourceUrl('kardex')),
             DeleteAction::make(),
         ];

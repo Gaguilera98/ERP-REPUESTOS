@@ -5,6 +5,7 @@ namespace App\Policies;
 use App\Models\TenantUser;
 use App\Models\Venta;
 use App\Policies\Concerns\ChecksTenantPermission;
+use App\Tenancy\AccesoSucursales;
 
 class VentaPolicy
 {
@@ -17,7 +18,10 @@ class VentaPolicy
 
     public function view(TenantUser $user, Venta $venta): bool
     {
-        return $this->allows($user, 'View:Venta');
+        $acceso = app(AccesoSucursales::class);
+
+        return $this->allows($user, 'View:Venta')
+            && $acceso->autoriza($user, (int) $venta->sucursal_id);
     }
 
     public function create(TenantUser $user): bool

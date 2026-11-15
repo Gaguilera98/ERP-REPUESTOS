@@ -7,8 +7,8 @@ use App\Caja\ConsolidarCajasDelDia;
 use App\Compras\Montos;
 use App\Models\CajaDia;
 use App\Models\NegocioConfiguracion;
-use App\Models\Sucursal;
 use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use BackedEnum;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
@@ -60,8 +60,10 @@ class CajasDelDia extends Page implements HasSchemas
 
     public function mount(): void
     {
+        $usuario = auth('tenant')->user();
+        $acceso = app(AccesoSucursales::class);
         $this->form->fill([
-            'sucursal_id' => Sucursal::query()->where('is_active', true)->orderBy('nombre')->value('id'),
+            'sucursal_id' => $acceso->activa($usuario) ?? $acceso->disponibles($usuario)->orderBy('nombre')->value('id'),
             'fecha' => now()->toDateString(),
         ]);
     }
@@ -76,8 +78,7 @@ class CajasDelDia extends Page implements HasSchemas
                 ])->schema([
                     Select::make('sucursal_id')
                         ->label('Sucursal')
-                        ->options(fn (): array => Sucursal::query()
-                            ->where('is_active', true)
+                        ->options(fn (): array => app(AccesoSucursales::class)->disponibles(auth('tenant')->user())
                             ->orderBy('nombre')
                             ->pluck('nombre', 'id')
                             ->all())
@@ -171,6 +172,9 @@ class CajasDelDia extends Page implements HasSchemas
         if (! is_numeric($sucursalId) || ! is_string($fecha) || $fecha === '') {
             return null;
         }
+
+        $acceso = app(AccesoSucursales::class);
+        abort_unless($acceso->autoriza(auth('tenant')->user(), (int) $sucursalId), 404);
 
         return app(ConsolidarCajasDelDia::class)->de((int) $sucursalId, $fecha);
     }

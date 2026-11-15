@@ -12,6 +12,7 @@ use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
 use App\Models\TenantUser;
 use App\Models\Venta;
+use App\Tenancy\AccesoSucursales;
 use App\Ventas\AnularVenta;
 use App\Ventas\CompletarVentaContado;
 use App\Ventas\CorregirVenta;
@@ -67,7 +68,8 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
         $this->autorizarConsulta();
 
         if ($sesionId !== null) {
-            CajaSesion::query()->when(! $supervision, fn (Builder $query) => $query->where('user_id', auth('tenant')->id()))->findOrFail($sesionId);
+            app(AccesoSucursales::class)->filtrarSucursal(CajaSesion::query(), auth('tenant')->user())
+                ->when(! $supervision, fn (Builder $query) => $query->where('user_id', auth('tenant')->id()))->findOrFail($sesionId);
         }
     }
 
@@ -78,10 +80,10 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
         $enMostrador = $this->sucursalMostradorId !== null;
 
         return $table
-            ->heading($enMostrador ? 'Ventas de la sucursal activa' : 'Ventas de esta sesión')
+            ->heading($enMostrador ? 'Mis ventas' : 'Ventas de esta sesión')
             ->extraAttributes(['class' => 'caja-mobile-table'])
             ->query($enMostrador
-                ? Venta::query()->where('user_id', auth('tenant')->id())->where('sucursal_id', $this->sucursalMostradorId)
+                ? Venta::query()->where('user_id', auth('tenant')->id())
                 : Venta::query()->where(function (Builder $ventas): void {
                     $sesion = fn (Builder $query): Builder => $query->whereKey($this->sesionId)
                         ->when(! $this->supervision, fn (Builder $query): Builder => $query->where('user_id', auth('tenant')->id()));
@@ -90,7 +92,7 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                         ->where('es_saldo_favor', false)->where('es_compensacion_cambio', false)->whereHas('pago.cajaSesion', $sesion));
                 }))
             ->defaultSort('created_at', 'desc')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('ultimaCorreccion')
+            ->modifyQueryUsing(fn (Builder $query): Builder => app(AccesoSucursales::class)->filtrarSucursal($query, auth('tenant')->user())->with('ultimaCorreccion')
                 ->withSum('devoluciones as total_devuelto', 'total')
                 ->withExists(['cambioOrigen', 'devoluciones as tiene_cambios' => fn (Builder $notas): Builder => $notas->whereNotNull('venta_reemplazo_id')]))
             ->queryStringIdentifier($enMostrador ? 'misVentasMostrador' : 'ventasDeSesion')
@@ -101,6 +103,9 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                 TextColumn::make('codigo')->label('Venta')->searchable()->extraCellAttributes(['data-label' => 'Venta'])
                     ->description(fn (Venta $record): ?string => $record->cambio_origen_exists ? 'Reemplazo' : null),
                 TextColumn::make('created_at')->label('Fecha y hora')->extraCellAttributes(['data-label' => 'Fecha y hora'])->dateTime('d/m/Y H:i'),
+                TextColumn::make('sucursal.nombre')->label('Sucursal')
+                    ->visible($enMostrador)
+                    ->extraCellAttributes(['data-label' => 'Sucursal']),
                 TextColumn::make('cliente.razon_social')->label('Cliente')->placeholder('Consumidor final')->searchable()->visible($enMostrador)->extraCellAttributes(['data-label' => 'Cliente']),
                 TextColumn::make('condicion')->label('Condición')->formatStateUsing(fn (CondicionVenta $state): string => $state->etiqueta())->visible($enMostrador)->extraCellAttributes(['data-label' => 'Condición']),
                 TextColumn::make('estado')->label('Estado')->badge()
@@ -118,6 +123,11 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
                     ->money(NegocioConfiguracion::codigoMoneda()),
             ])
             ->filters($enMostrador ? [
+                SelectFilter::make('sucursal_id')->label('Sucursal')
+                    ->visible(fn (): bool => app(AccesoSucursales::class)->disponibles(auth('tenant')->user())->count() > 1)
+                    ->default($this->sucursalMostradorId)
+                    ->placeholder('Todas las autorizadas')
+                    ->options(fn (): array => app(AccesoSucursales::class)->disponibles(auth('tenant')->user())->orderBy('nombre')->pluck('nombre', 'id')->all()),
                 Filter::make('dia')
                     ->schema([DatePicker::make('fecha')->label('Fecha de venta')->native(false)->displayFormat('d/m/Y')->default(fn (): string => now()->toDateString())])
                     ->query(function (Builder $query, array $data): Builder {
@@ -288,8 +298,10 @@ class VentasDeSesion extends Component implements HasActions, HasSchemas, HasTab
 
     private function autorizarConsulta(): void
     {
+        $acceso = app(AccesoSucursales::class);
         if ($this->sucursalMostradorId !== null) {
             abort_unless(MostradorDelNegocio::canAccess() && auth('tenant')->user()?->can('viewAny', Venta::class), 403);
+            abort_unless($acceso->autoriza(auth('tenant')->user(), $this->sucursalMostradorId), 404);
 
             return;
         }

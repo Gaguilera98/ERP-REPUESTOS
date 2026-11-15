@@ -30,6 +30,7 @@ use App\Models\TenantUser;
 use App\Models\UnidadMedida;
 use App\Models\Venta;
 use App\Models\VentaDetalle;
+use App\Tenancy\AccesoSucursales;
 use App\Ventas\Pagos\MetodoPagoFactory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -128,6 +129,7 @@ class CompletarVentaContado
 
         return DB::transaction(function () use ($data, $usuario, $condicion, $reserva, $cambio): array {
             $sucursalId = $this->id($data['sucursal_id'] ?? null, 'sucursal_id', 'Elegí la sucursal.');
+            app(AccesoSucursales::class)->validarOperacion($usuario, $sucursalId);
             $almacenId = $this->id($data['almacen_id'] ?? null, 'almacen_id', 'Elegí el almacén.');
 
             if (! SucursalAlmacen::query()
@@ -462,6 +464,7 @@ class CompletarVentaContado
     public function abonarEnEfectivo(string $codigo, int $sucursalId, string $monto, TenantUser $usuario, ?string $efectivoRecibido = null): string
     {
         abort_unless($usuario->can('create', Venta::class), 403);
+        app(AccesoSucursales::class)->validarOperacion($usuario, $sucursalId);
 
         return DB::transaction(function () use ($codigo, $sucursalId, $monto, $usuario, $efectivoRecibido): string {
             app(CongelarTurnosVencidos::class)->de($usuario, $sucursalId);

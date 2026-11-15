@@ -58,6 +58,7 @@ function negocioConArqueo(string $dominio = 'arqueo'): array
     $cajero->assignRole('cajero');
 
     $sucursal = Sucursal::factory()->create(['nombre' => 'Centro']);
+    $cajero->sucursales()->attach($sucursal->id, ['tenant_id' => $tenant->id]);
     $almacen = Almacen::factory()->create(['nombre' => 'Estante']);
     SucursalAlmacen::query()->create([
         'sucursal_id' => $sucursal->id,

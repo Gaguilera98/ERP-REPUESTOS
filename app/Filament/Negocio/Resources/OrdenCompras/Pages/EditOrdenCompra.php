@@ -74,6 +74,6 @@ class EditOrdenCompra extends EditRecord
             return $record;
         }
 
-        return app(GuardarOrdenCompra::class)->actualizar($record, $data);
+        return app(GuardarOrdenCompra::class)->actualizar($record, $data, auth('tenant')->user());
     }
 }

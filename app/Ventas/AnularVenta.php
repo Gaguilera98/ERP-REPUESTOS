@@ -16,6 +16,7 @@ use App\Models\MovimientoInventario;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
 use App\Models\Venta;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -25,6 +26,7 @@ class AnularVenta
 
     public function anular(Venta $venta, string $motivo, string $cobradoConfirmado, TenantUser $usuario): void
     {
+        app(AccesoSucursales::class)->validarOperacion($usuario, (int) $venta->sucursal_id);
         $motivo = trim($motivo);
         validator(['motivo' => $motivo], ['motivo' => ['required', 'string', 'max:500']])->validate();
 

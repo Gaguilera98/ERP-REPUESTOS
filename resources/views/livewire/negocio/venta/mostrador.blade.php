@@ -14,6 +14,7 @@
 
     <x-negocio.mostrador.contexto
         :sucursales="$sucursales"
+        :sucursal-id="$sucursalId"
         :almacenes="$almacenes"
         :cliente-seleccionado="$clienteSeleccionado"
         :lista-precio="$listaPrecio"

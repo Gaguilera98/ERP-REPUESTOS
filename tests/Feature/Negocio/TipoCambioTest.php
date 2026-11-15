@@ -41,7 +41,7 @@ function negocioConDolar(): TenantUser
     tenancy()->initialize(Tenant::factory()->create());
     NegocioConfiguracion::query()->firstOrFail()->update(['modo_moneda' => ModoMoneda::ConDolar]);
     $supervisor = TenantUser::factory()->create();
-    $supervisor->assignRole('supervisor');
+    $supervisor->assignRole('administrador');
     Filament::setCurrentPanel(Filament::getPanel('negocio'));
 
     return $supervisor;

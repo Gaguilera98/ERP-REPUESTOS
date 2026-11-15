@@ -49,7 +49,7 @@ class TenantForm
                     ->label('Activo')
                     ->default(true),
                 Section::make('Usuario inicial')
-                    ->description('Entra al negocio con este usuario. Nace como supervisor.')
+                    ->description('Este usuario será el administrador del negocio.')
                     ->visibleOn('create')
                     ->components([
                         TextInput::make('supervisor_name')
@@ -69,7 +69,7 @@ class TenantForm
                             ->minLength(8)
                             ->maxLength(255)
                             ->validationMessages([
-                                'min' => 'La contraseña del supervisor debe tener al menos 8 caracteres.',
+                                'min' => 'La contraseña del administrador debe tener al menos 8 caracteres.',
                             ]),
                     ]),
             ]);

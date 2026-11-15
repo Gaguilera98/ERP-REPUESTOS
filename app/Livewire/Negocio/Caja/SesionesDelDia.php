@@ -8,6 +8,7 @@ use App\Filament\Negocio\Pages\CajaDelNegocio;
 use App\Filament\Negocio\Pages\CajasDelDia;
 use App\Models\CajaSesion;
 use App\Models\NegocioConfiguracion;
+use App\Tenancy\AccesoSucursales;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
@@ -54,7 +55,7 @@ class SesionesDelDia extends Component implements HasActions, HasSchemas, HasTab
         return $table
             ->heading('Sesiones del día')
             ->extraAttributes(['class' => 'caja-mobile-table'])
-            ->query(CajaSesion::query()->with('sucursal')
+            ->query(app(AccesoSucursales::class)->filtrarSucursal(CajaSesion::query(), auth('tenant')->user())->with('sucursal')
                 ->where('user_id', $this->vendedorId ?? auth('tenant')->id())
                 ->when($this->sucursalId !== null, fn ($query) => $query->where('sucursal_id', $this->sucursalId)->where('estado_sesion', '!=', EstadoCajaSesion::Anulada))
                 ->whereDate('fecha_apertura', $this->fecha))

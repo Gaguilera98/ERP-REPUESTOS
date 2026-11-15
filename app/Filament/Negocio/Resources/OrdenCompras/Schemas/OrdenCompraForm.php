@@ -7,7 +7,6 @@ use App\Compras\Montos;
 use App\Enums\EstadoOrdenCompra;
 use App\Enums\MonedaLineaCompra;
 use App\Enums\UsoUnidad;
-use App\Models\Almacen;
 use App\Models\NegocioConfiguracion;
 use App\Models\OrdenCompra;
 use App\Models\OrdenCompraDetalle;
@@ -16,6 +15,7 @@ use App\Models\Proveedor;
 use App\Models\ProveedorContacto;
 use App\Models\Trabajador;
 use App\Models\UnidadMedida;
+use App\Tenancy\AccesoSucursales;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
@@ -120,7 +120,7 @@ class OrdenCompraForm
                             ->label('Almacén que recibe')
                             ->placeholder('Elegí un almacén')
                             ->prefixIcon(Heroicon::OutlinedBuildingOffice2)
-                            ->options(fn (): array => Almacen::query()->orderBy('nombre')->pluck('nombre', 'id')->all())
+                            ->options(fn (): array => app(AccesoSucursales::class)->almacenes(auth('tenant')->user())->orderBy('nombre')->pluck('nombre', 'id')->all())
                             ->required()
                             ->searchable()
                             ->preload()

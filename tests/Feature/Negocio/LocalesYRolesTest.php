@@ -38,7 +38,7 @@ it('seeds the store roles and the default configuration', function () {
 
     $configuracion = NegocioConfiguracion::query()->first();
 
-    expect(NegocioRole::query()->pluck('name')->sort()->values()->all())->toBe(['cajero', 'supervisor'])
+    expect(NegocioRole::query()->pluck('name')->sort()->values()->all())->toBe(['administrador', 'cajero', 'supervisor'])
         ->and(Schema::connection('pool_shared_1')->hasColumn('users', 'rol'))->toBeFalse()
         ->and(Schema::connection('pool_shared_1')->hasColumn('almacenes', 'sucursal_id'))->toBeFalse()
         ->and($configuracion)->not->toBeNull()
@@ -57,7 +57,7 @@ it('guarda la política comercial de devoluciones solo para el negocio actual', 
     $otroTenant = Tenant::factory()->create();
     tenancy()->initialize($tenant);
     $usuario = TenantUser::factory()->create();
-    $usuario->assignRole('supervisor');
+    $usuario->assignRole('administrador');
     Filament::setCurrentPanel(Filament::getPanel('negocio'));
     $configuracion = NegocioConfiguracion::query()->firstOrFail();
     expect($configuracion->acepta_devoluciones)->toBeFalse();
@@ -214,7 +214,7 @@ it('lets the supervisor manage roles and keeps the cashier out', function () {
     $cajero = TenantUser::factory()->create();
     $cajero->assignRole('cajero');
     $supervisor = TenantUser::factory()->create();
-    $supervisor->assignRole('supervisor');
+    $supervisor->assignRole('administrador');
 
     expect($cajero->can('viewAny', NegocioRole::class))->toBeFalse()
         ->and($cajero->can('create', Sucursal::class))->toBeFalse()
@@ -251,7 +251,7 @@ it('lets the supervisor manage roles and keeps the cashier out', function () {
 it('crea un almacén desde la sucursal y lo vincula al guardar', function () {
     tenancy()->initialize(Tenant::factory()->create());
     $supervisor = TenantUser::factory()->create();
-    $supervisor->assignRole('supervisor');
+    $supervisor->assignRole('administrador');
     $sucursal = Sucursal::factory()->create();
     $existente = Almacen::factory()->create(['nombre' => 'Depósito actual']);
     $asignacion = $sucursal->asignaciones()->create(['almacen_id' => $existente->id]);
@@ -290,7 +290,7 @@ it('opens a warehouse from the list instead of its own page', function () {
 
     tenancy()->initialize($tenant);
     $supervisor = TenantUser::factory()->create();
-    $supervisor->assignRole('supervisor');
+    $supervisor->assignRole('administrador');
 
     Filament::setCurrentPanel(Filament::getPanel('negocio'));
 

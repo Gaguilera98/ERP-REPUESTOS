@@ -2,7 +2,11 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Negocio\Pages\ElegirSucursal;
+use App\Filament\Negocio\Pages\MostradorDelNegocio;
 use App\Filament\Paleta;
+use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Facades\Filament as FilamentFacade;
 use Filament\Http\Middleware\Authenticate;
@@ -42,6 +46,22 @@ class NegocioPanelProvider extends PanelProvider
                 PanelsRenderHook::STYLES_AFTER,
                 fn (): string => view('filament.paleta')->render(),
             )
+            ->renderHook(PanelsRenderHook::TOPBAR_END, function (): string {
+                $usuario = auth('tenant')->user();
+                $acceso = app(AccesoSucursales::class);
+                if (! $usuario instanceof TenantUser) {
+                    return '';
+                }
+
+                $id = $acceso->activa($usuario);
+                $mostrarEnlace = ! request()->routeIs(MostradorDelNegocio::getRouteName())
+                    && ($id === null || $acceso->disponibles($usuario)->count() > 1);
+
+                return view('filament.negocio.pages.sucursal-activa', [
+                    'nombre' => $id === null ? null : $acceso->disponibles($usuario)->whereKey($id)->value('nombre'),
+                    'url' => $mostrarEnlace ? ElegirSucursal::getUrl() : null,
+                ])->render();
+            })
             ->discoverResources(in: app_path('Filament/Negocio/Resources'), for: 'App\Filament\Negocio\Resources')
             ->discoverPages(in: app_path('Filament/Negocio/Pages'), for: 'App\Filament\Negocio\Pages')
             ->discoverWidgets(in: app_path('Filament/Negocio/Widgets'), for: 'App\Filament\Negocio\Widgets')

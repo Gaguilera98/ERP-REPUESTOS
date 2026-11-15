@@ -8,6 +8,7 @@ use App\Models\CajaDia;
 use App\Models\CajaSesion;
 use App\Models\Sucursal;
 use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -19,6 +20,7 @@ class AbrirCajaSesion
     public function abrir(array $data, TenantUser $usuario): CajaSesion
     {
         $sucursalId = $this->id($data['sucursal_id'] ?? null, 'sucursal_id', 'Elegí la sucursal.');
+        app(AccesoSucursales::class)->validarOperacion($usuario, $sucursalId);
         $monto = $this->monto($data['monto_apertura'] ?? null, 'monto_apertura');
 
         if (! Sucursal::query()->whereKey($sucursalId)->exists()) {

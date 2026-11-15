@@ -6,11 +6,11 @@ use App\Compras\Montos;
 use App\Enums\TipoMovimientoInventario;
 use App\Filament\Negocio\Resources\OrdenCompras\OrdenCompraResource;
 use App\Filament\Negocio\Resources\ProductoMaestros\ProductoMaestroResource;
-use App\Models\Almacen;
 use App\Models\MovimientoInventario;
 use App\Models\NegocioConfiguracion;
 use App\Models\OrdenCompra;
 use App\Models\ProductoMaestro;
+use App\Tenancy\AccesoSucursales;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -45,7 +45,8 @@ class KardexProductoMaestro extends Page implements HasTable
     {
         $producto = $parameters['record'] ?? null;
 
-        return $producto instanceof ProductoMaestro && static::getResource()::canView($producto);
+        return $producto instanceof ProductoMaestro && static::getResource()::canView($producto)
+            && app(AccesoSucursales::class)->puedeVerStock(auth('tenant')->user());
     }
 
     public function getTitle(): string
@@ -66,7 +67,7 @@ class KardexProductoMaestro extends Page implements HasTable
         $unidad = $producto->unidadBase?->simbolo;
 
         return $table
-            ->query(MovimientoInventario::query()
+            ->query(app(AccesoSucursales::class)->filtrarAlmacen(MovimientoInventario::query(), auth('tenant')->user())
                 ->whereHas('variante', fn (Builder $variantes): Builder => $variantes->where('producto_maestro_id', $producto->getKey()))
                 ->with($puedeVerCompras ? ['variante', 'almacen', 'ordenCompraReferenciada'] : ['variante', 'almacen']))
             ->defaultSort('id', 'desc')
@@ -117,7 +118,7 @@ class KardexProductoMaestro extends Page implements HasTable
             ])
             ->filters([
                 SelectFilter::make('almacen_id')->label('Almacén')->searchable()
-                    ->options(fn (): array => Almacen::query()->orderBy('nombre')->pluck('nombre', 'id')->all()),
+                    ->options(fn (): array => app(AccesoSucursales::class)->almacenes(auth('tenant')->user())->orderBy('nombre')->pluck('nombre', 'id')->all()),
                 SelectFilter::make('tipo_movimiento')->label('Movimiento')->multiple()->options(
                     collect(TipoMovimientoInventario::cases())->mapWithKeys(fn (TipoMovimientoInventario $tipo): array => [$tipo->value => $tipo->etiqueta()])->all(),
                 ),

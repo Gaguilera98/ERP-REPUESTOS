@@ -9,6 +9,7 @@ use App\Filament\Negocio\Resources\OrdenCompras\Pages\ViewOrdenCompra;
 use App\Filament\Negocio\Resources\OrdenCompras\Schemas\OrdenCompraForm;
 use App\Filament\Negocio\Resources\OrdenCompras\Tables\OrdenComprasTable;
 use App\Models\OrdenCompra;
+use App\Tenancy\AccesoSucursales;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -46,7 +47,8 @@ class OrdenCompraResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with(['proveedor']);
+        return app(AccesoSucursales::class)->filtrarAlmacen(parent::getEloquentQuery(), auth('tenant')->user(), 'almacen_destino_id')
+            ->with(['proveedor']);
     }
 
     public static function getPages(): array

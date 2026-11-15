@@ -5,10 +5,10 @@ namespace App\Filament\Negocio\Resources\AjusteInventarios\Pages;
 use App\Compras\Montos;
 use App\Filament\Negocio\Resources\AjusteInventarios\AjusteInventarioResource;
 use App\Inventario\AjustarInventario;
-use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\ProductoVariante;
 use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Resources\Pages\CreateRecord;
@@ -42,7 +42,7 @@ class CreateAjusteInventario extends CreateRecord
         return $schema->components([
             Select::make('almacen_id')
                 ->label('Almacén')
-                ->options(fn (): array => Almacen::query()->orderBy('nombre')->pluck('nombre', 'id')->all())
+                ->options(fn (): array => app(AccesoSucursales::class)->almacenes(auth('tenant')->user())->orderBy('nombre')->pluck('nombre', 'id')->all())
                 ->required()
                 ->searchable()
                 ->native(false)
@@ -71,6 +71,7 @@ class CreateAjusteInventario extends CreateRecord
         if (blank($this->data['almacen_id'] ?? null) || ($busqueda === '' && $this->categoria === '')) {
             return [];
         }
+        app(AccesoSucursales::class)->validarAlmacen(auth('tenant')->user(), (int) $this->data['almacen_id']);
 
         $coincidencia = '%'.$busqueda.'%';
 

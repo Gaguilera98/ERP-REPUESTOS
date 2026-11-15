@@ -35,7 +35,7 @@ it('redirige desde el inicio y permite crear y vincular la primera sucursal y su
     $tenant->domains()->create(['domain' => 'inicio']);
     tenancy()->initialize($tenant);
     $supervisor = TenantUser::factory()->create();
-    $supervisor->assignRole('supervisor');
+    $supervisor->assignRole('administrador');
     tenancy()->end();
 
     $this->actingAs($supervisor, 'tenant')->get('http://inicio.localhost/negocio')
@@ -70,7 +70,7 @@ it('reutiliza los registros del negocio y rechaza un almacén de otro tenant', f
     $almacenAjeno = Almacen::factory()->create();
     tenancy()->initialize($tenant);
     $supervisor = TenantUser::factory()->create();
-    $supervisor->assignRole('supervisor');
+    $supervisor->assignRole('administrador');
     $sucursal = Sucursal::factory()->create();
     $almacen = Almacen::factory()->create();
     $asignacion = SucursalAlmacen::factory()->for($sucursal)->for($almacen)->create();

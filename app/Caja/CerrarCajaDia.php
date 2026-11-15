@@ -7,6 +7,7 @@ use App\Models\CajaDia;
 use App\Models\CajaSesion;
 use App\Models\Sucursal;
 use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,8 @@ class CerrarCajaDia
 {
     public function cerrar(int $sucursalId, string $fecha, TenantUser $usuario): CajaDia
     {
+        $acceso = app(AccesoSucursales::class);
+        abort_unless($usuario->can('Cerrar:CajaDia') && $acceso->autoriza($usuario, $sucursalId), 403);
         $dia = Carbon::parse($fecha)->toDateString();
 
         return DB::transaction(function () use ($sucursalId, $dia, $usuario): CajaDia {

@@ -6,6 +6,7 @@ use App\Enums\EstadoOrdenCompra;
 use App\Models\OrdenCompra;
 use App\Models\Proveedor;
 use App\Models\TenantUser;
+use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -13,6 +14,8 @@ class ReasignarProveedorFlash
 {
     public function ejecutar(OrdenCompra $orden, int $proveedorId, TenantUser $usuario): OrdenCompra
     {
+        app(AccesoSucursales::class)->validarAlmacen($usuario, (int) $orden->almacen_destino_id, 'almacen_destino_id');
+
         return DB::transaction(function () use ($orden, $proveedorId, $usuario): OrdenCompra {
             $orden = OrdenCompra::query()->lockForUpdate()->findOrFail($orden->id);
             abort_unless($usuario->can('update', $orden), 403);

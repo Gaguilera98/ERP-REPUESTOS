@@ -21,6 +21,7 @@ class AnularOrdenCompraAction
             ->modalHeading('Anular compra')
             ->modalDescription('La mercadería no entró. Anular no escribe kardex.')
             ->modalSubmitActionLabel('Anular')
+            ->authorize(fn (OrdenCompra $record): bool => auth('tenant')->user()?->can('update', $record) ?? false)
             ->visible(function (OrdenCompra $record): bool {
                 $usuario = auth('tenant')->user();
 
