@@ -3,6 +3,8 @@
 use App\Archivos\ArchivosNegocio;
 use App\Enums\TipoArchivoNegocio;
 use App\Models\Tenant;
+use App\Models\TenantUser;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -64,4 +66,19 @@ it('al borrar un negocio vacía solo su carpeta en los dos discos', function () 
     Storage::assertMissing($pago);
     Storage::disk('public')->assertExists($fotoSur);
     Storage::assertExists($pagoSur);
+});
+
+it('conserva el negocio y sus datos cuando el disco rechaza el borrado', function () {
+    $tenant = Tenant::factory()->create();
+    $dominio = $tenant->domains()->create(['domain' => 'taller-norte']);
+    $usuario = $tenant->run(fn () => TenantUser::factory()->create());
+    $disco = Mockery::mock(FilesystemAdapter::class);
+    $disco->shouldReceive('deleteDirectory')->with('tenants/'.$tenant->id)->once()->andReturnFalse();
+    Storage::set('public', $disco);
+
+    expect(fn () => $tenant->delete())->toThrow(RuntimeException::class, 'No se pudieron borrar los archivos del negocio.');
+
+    $this->assertModelExists($tenant);
+    $this->assertModelExists($dominio);
+    $this->assertDatabaseHas('users', ['id' => $usuario->id], 'pool_shared_1');
 });

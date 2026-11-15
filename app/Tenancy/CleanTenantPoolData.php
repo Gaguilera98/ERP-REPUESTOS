@@ -2,9 +2,10 @@
 
 namespace App\Tenancy;
 
+use App\Archivos\ArchivosNegocio;
 use App\Exceptions\Tenancy\TenantPoolNotConfiguredException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
+use LogicException;
 use Stancl\Tenancy\Contracts\Tenant;
 
 class CleanTenantPoolData
@@ -24,32 +25,33 @@ class CleanTenantPoolData
         $tenantId = (string) $this->tenant->getTenantKey();
         $tables = config('tenant-pools.tables', []);
 
-        if (! is_array($tables)) {
-            return;
+        if (! is_array($tables) || $tables === []) {
+            throw new LogicException('La lista de tablas del negocio está vacía o es inválida.');
         }
 
         $connection = DB::connection($pool);
+        $schema = $connection->getSchemaBuilder();
 
-        foreach ($tables as $table) {
-            if (! is_string($table) || ! Schema::connection($pool)->hasTable($table)) {
-                continue;
+        $connection->transaction(function () use ($connection, $schema, $tables, $tenantId): void {
+            foreach ($tables as $table) {
+                if (! $schema->hasTable($table)) {
+                    continue;
+                }
+
+                if ($table === 'role_has_permissions') {
+                    $connection->table('role_has_permissions')
+                        ->whereIn('role_id', function ($query) use ($tenantId): void {
+                            $query->select('id')->from('roles')->where('tenant_id', $tenantId);
+                        })
+                        ->delete();
+
+                    continue;
+                }
+
+                $connection->table($table)->where('tenant_id', $tenantId)->delete();
             }
 
-            if ($table === 'role_has_permissions') {
-                $connection->table('role_has_permissions')
-                    ->whereIn('role_id', function ($query) use ($tenantId): void {
-                        $query->select('id')->from('roles')->where('tenant_id', $tenantId);
-                    })
-                    ->delete();
-
-                continue;
-            }
-
-            if (! Schema::connection($pool)->hasColumn($table, 'tenant_id')) {
-                continue;
-            }
-
-            $connection->table($table)->where('tenant_id', $tenantId)->delete();
-        }
+            app(ArchivosNegocio::class)->borrarDelTenant($tenantId);
+        });
     }
 }

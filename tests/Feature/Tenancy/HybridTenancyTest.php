@@ -5,8 +5,11 @@ use App\Exceptions\Tenancy\TenantContextMissingException;
 use App\Exceptions\Tenancy\TenantPoolNotConfiguredException;
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
@@ -101,6 +104,10 @@ it('refuses to store a record for another tenant', function () {
 it('removes the deleted tenant rows and keeps the other tenant', function () {
     $north = Tenant::factory()->create();
     $south = Tenant::factory()->create();
+    $northDomain = $north->domains()->create(['domain' => 'taller-norte']);
+    $southDomain = $south->domains()->create(['domain' => 'taller-sur']);
+    Storage::fake();
+    Storage::fake('public');
 
     tenancy()->initialize($north);
     $northUser = TenantUser::factory()->create();
@@ -111,8 +118,45 @@ it('removes the deleted tenant rows and keeps the other tenant', function () {
 
     $north->delete();
 
+    $this->assertModelMissing($north);
+    $this->assertModelMissing($northDomain);
+    $this->assertModelExists($south);
+    $this->assertModelExists($southDomain);
     $this->assertDatabaseMissing('users', ['id' => $northUser->id], 'pool_shared_1');
     $this->assertDatabaseHas('users', ['id' => $southUser->id], 'pool_shared_1');
+});
+
+it('keeps the tenant and restores its rows when the pool cleanup fails', function () {
+    $tenant = Tenant::factory()->create();
+    $domain = $tenant->domains()->create(['domain' => 'taller-norte']);
+    $user = $tenant->run(fn () => TenantUser::factory()->create());
+    $pool = DB::connection('pool_shared_1');
+    $pool->getSchemaBuilder()->create('deletion_blockers', function (Blueprint $table): void {
+        $table->foreignId('user_id')->constrained('users');
+    });
+    $pool->table('deletion_blockers')->insert(['user_id' => $user->id]);
+    $disk = Storage::fake('public');
+    $path = 'tenants/'.$tenant->id.'/producto.jpg';
+    $disk->put($path, 'imagen');
+
+    expect(fn () => $tenant->delete())->toThrow(QueryException::class);
+
+    $this->assertModelExists($tenant);
+    $this->assertModelExists($domain);
+    $this->assertDatabaseHas('users', ['id' => $user->id], 'pool_shared_1');
+    $this->assertDatabaseHas('roles', ['tenant_id' => $tenant->id], 'pool_shared_1');
+    $disk->assertExists($path);
+});
+
+it('includes all tenant-owned tables in the pool cleanup', function () {
+    $schema = DB::connection('pool_shared_1')->getSchemaBuilder();
+    $cleanupTables = config('tenant-pools.tables');
+
+    foreach ($schema->getTableListing(schemaQualified: false) as $table) {
+        if ($schema->hasColumn($table, 'tenant_id') || $table === 'role_has_permissions') {
+            expect($cleanupTables)->toContain($table);
+        }
+    }
 });
 
 it('resolves the tenant domain on its pool and returns to the central connection', function () {

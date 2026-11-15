@@ -48,8 +48,9 @@ class ArchivosNegocio
     {
         $carpeta = $this->carpetaDelTenant($tenantId);
 
-        Storage::disk('public')->deleteDirectory($carpeta);
-        Storage::deleteDirectory($carpeta);
+        if (! Storage::disk('public')->deleteDirectory($carpeta) || ! Storage::deleteDirectory($carpeta)) {
+            throw new RuntimeException('No se pudieron borrar los archivos del negocio.');
+        }
     }
 
     private function carpetaDelTenant(string $tenantId): string
