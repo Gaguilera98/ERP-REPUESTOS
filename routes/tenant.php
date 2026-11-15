@@ -12,6 +12,8 @@ Route::middleware([
     PreventAccessFromCentralDomains::class,
     InitializeTenancyBySubdomain::class,
 ])->group(function () {
+    Route::get('/', fn () => to_route('filament.negocio.pages.dashboard'));
+
     Route::get('/tenant/whoami', function () {
         return response()->json([
             'tenant_id' => tenant()->getTenantKey(),

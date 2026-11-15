@@ -177,3 +177,33 @@ it('resolves the tenant domain on its pool and returns to the central connection
 it('returns 404 for a tenant route on a central domain', function () {
     $this->get('http://localhost/tenant/whoami')->assertNotFound();
 });
+
+it('redirects the central homepage to the administration panel', function () {
+    $this->get('http://localhost/')->assertRedirect('http://localhost/admin');
+});
+
+it('returns 404 for the homepage on an unrelated host', function () {
+    $this->get('http://example.test/')->assertNotFound()->assertSee('Negocio no encontrado');
+});
+
+it('redirects a registered tenant homepage to the business panel', function () {
+    $tenant = Tenant::factory()->create();
+    $tenant->domains()->create(['domain' => 'taller-norte']);
+
+    $this->get('http://taller-norte.localhost/')->assertRedirect('http://taller-norte.localhost/negocio');
+    $this->get('http://taller-norte.localhost/negocio')->assertRedirect('http://taller-norte.localhost/negocio/login');
+});
+
+it('shows a business not found page on the homepage and panel of a deleted tenant', function () {
+    Storage::fake();
+    Storage::fake('public');
+    $tenant = Tenant::factory()->create();
+    $tenant->domains()->create(['domain' => 'taller-norte']);
+    $tenant->delete();
+
+    $this->get('http://taller-norte.localhost/')->assertNotFound()->assertSee('Negocio no encontrado');
+    $this->get('http://taller-norte.localhost/negocio')->assertNotFound()->assertSee('Negocio no encontrado');
+    $this->getJson('http://taller-norte.localhost/tenant/whoami')
+        ->assertNotFound()
+        ->assertJsonPath('message', 'Negocio no encontrado');
+});
