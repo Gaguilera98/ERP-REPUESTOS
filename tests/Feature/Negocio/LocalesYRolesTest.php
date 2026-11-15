@@ -4,6 +4,7 @@ use App\Enums\ModoMoneda;
 use App\Enums\Moneda;
 use App\Filament\Negocio\Pages\ConfiguracionDelNegocio;
 use App\Filament\Negocio\Resources\Almacens\Pages\ListAlmacens;
+use App\Filament\Negocio\Resources\Sucursals\Pages\EditSucursal;
 use App\Models\Almacen;
 use App\Models\NegocioConfiguracion;
 use App\Models\NegocioRole;
@@ -245,6 +246,42 @@ it('lets the supervisor manage roles and keeps the cashier out', function () {
 
     $this->get('http://sur.localhost/negocio/shield/roles')
         ->assertRedirect();
+});
+
+it('crea un almacén desde la sucursal y lo vincula al guardar', function () {
+    tenancy()->initialize(Tenant::factory()->create());
+    $supervisor = TenantUser::factory()->create();
+    $supervisor->assignRole('supervisor');
+    $sucursal = Sucursal::factory()->create();
+    $existente = Almacen::factory()->create(['nombre' => 'Depósito actual']);
+    $asignacion = $sucursal->asignaciones()->create(['almacen_id' => $existente->id]);
+    $campo = "asignaciones.record-{$asignacion->id}.almacen_id";
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $pagina = Livewire::actingAs($supervisor, 'tenant')->test(EditSucursal::class, ['record' => $sucursal->id]);
+    $pagina->callFormComponentAction($campo, 'createOption', data: ['nombre' => 'Depósito nuevo'])
+        ->assertHasNoErrors();
+
+    $nuevo = Almacen::query()->where('nombre', 'Depósito nuevo')->sole();
+    $pagina->assertSet("data.{$campo}", $nuevo->id)->call('save')->assertHasNoErrors();
+    expect($asignacion->refresh()->almacen_id)->toBe($nuevo->id);
+
+    tenancy()->end();
+});
+
+it('oculta la creación de almacenes al usuario que solo puede editar sucursales', function () {
+    tenancy()->initialize(Tenant::factory()->create());
+    $usuario = TenantUser::factory()->create();
+    $usuario->assignRole('cajero');
+    $usuario->givePermissionTo('Update:Sucursal');
+    $sucursal = Sucursal::factory()->create();
+    $asignacion = $sucursal->asignaciones()->create(['almacen_id' => Almacen::factory()->create()->id]);
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    Livewire::actingAs($usuario, 'tenant')->test(EditSucursal::class, ['record' => $sucursal->id])
+        ->assertFormComponentActionHidden("asignaciones.record-{$asignacion->id}.almacen_id", 'createOption');
+
+    tenancy()->end();
 });
 
 it('opens a warehouse from the list instead of its own page', function () {

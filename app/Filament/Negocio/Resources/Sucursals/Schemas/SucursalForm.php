@@ -2,7 +2,10 @@
 
 namespace App\Filament\Negocio\Resources\Sucursals\Schemas;
 
+use App\Filament\Negocio\Resources\Almacens\Schemas\AlmacenForm;
 use App\Models\Almacen;
+use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -12,6 +15,7 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rules\Unique;
 
 class SucursalForm
@@ -74,6 +78,15 @@ class SucursalForm
                                             ->required()
                                             ->searchable()
                                             ->native(false)
+                                            ->createOptionForm([AlmacenForm::nombre()])
+                                            ->createOptionAction(fn (Action $action): Action => $action
+                                                ->authorize(fn (): bool => Filament::auth()->user()?->can('create', Almacen::class) ?? false)
+                                                ->modalHeading('Nuevo almacén'))
+                                            ->createOptionUsing(function (array $data): int {
+                                                Gate::forUser(Filament::auth()->user())->authorize('create', Almacen::class);
+
+                                                return Almacen::query()->create($data)->getKey();
+                                            })
                                             ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
                                         Toggle::make('es_principal')
                                             ->label('Principal de esta sucursal')
