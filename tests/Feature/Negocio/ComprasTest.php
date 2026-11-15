@@ -380,7 +380,7 @@ it('rechaza un producto de otro negocio', function () {
 it('muestra el costo por unidad y no escribe kardex hasta confirmarlo', function () {
     ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConPieza();
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
 
     expect($cajero->can('create', OrdenCompra::class))->toBeFalse()
         ->and($supervisor->can('create', OrdenCompra::class))->toBeTrue()

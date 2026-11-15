@@ -85,7 +85,7 @@ function negocioConCaja(string $dominio = 'caja'): array
     $supervisor->assignRole('supervisor');
 
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
 
     $sucursal = Sucursal::factory()->create(['nombre' => 'Centro']);
     $sucursal->usuarios()->attach([$cajero->id, $supervisor->id], ['tenant_id' => $tenant->id]);

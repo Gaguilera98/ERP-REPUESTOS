@@ -82,7 +82,7 @@ it('consulta el kardex del producto y filtra por almacén, tipo y día', functio
     $tenant = Tenant::factory()->create();
     tenancy()->initialize($tenant);
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
     $producto = ProductoMaestro::factory()->create();
     $variante = ProductoVariante::factory()->create(['producto_maestro_id' => $producto->id]);
     $deposito = Almacen::factory()->create();
@@ -142,7 +142,7 @@ it('consulta el kardex del producto y filtra por almacén, tipo y día', functio
     $otroTenant = Tenant::factory()->create();
     tenancy()->initialize($otroTenant);
     $otroCajero = TenantUser::factory()->create();
-    $otroCajero->assignRole('cajero');
+    $otroCajero->assignRole('vendedor');
     Livewire::actingAs($otroCajero, 'tenant')->test(KardexProductoMaestro::class, ['record' => $producto->id])->assertNotFound();
 
     tenancy()->end();
@@ -502,7 +502,7 @@ it('el supervisor crea productos y el cajero no puede editar el catálogo', func
     $categoria = Categoria::factory()->create(['nombre' => 'Rodamientos']);
     Almacen::factory()->create(['nombre' => 'Depósito']);
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
     $supervisor = TenantUser::factory()->create();
     $supervisor->assignRole('supervisor');
 

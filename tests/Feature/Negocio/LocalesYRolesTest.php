@@ -38,7 +38,7 @@ it('seeds the store roles and the default configuration', function () {
 
     $configuracion = NegocioConfiguracion::query()->first();
 
-    expect(NegocioRole::query()->pluck('name')->sort()->values()->all())->toBe(['administrador', 'cajero', 'supervisor'])
+    expect(NegocioRole::query()->pluck('name')->sort()->values()->all())->toBe(['administrador', 'supervisor', 'vendedor'])
         ->and(Schema::connection('pool_shared_1')->hasColumn('users', 'rol'))->toBeFalse()
         ->and(Schema::connection('pool_shared_1')->hasColumn('almacenes', 'sucursal_id'))->toBeFalse()
         ->and($configuracion)->not->toBeNull()
@@ -97,7 +97,7 @@ it('rechaza guardar una política de devoluciones sin permiso de configuración'
     $tenant = Tenant::factory()->create();
     tenancy()->initialize($tenant);
     $usuario = TenantUser::factory()->create();
-    $usuario->assignRole('cajero');
+    $usuario->assignRole('vendedor');
     $usuario->givePermissionTo('View:ConfiguracionDelNegocio');
     Filament::setCurrentPanel(Filament::getPanel('negocio'));
     $pagina = Livewire::actingAs($usuario, 'tenant')->test(ConfiguracionDelNegocio::class);
@@ -112,11 +112,11 @@ it('keeps roles and branch names inside the store', function () {
     $south = Tenant::factory()->create();
 
     tenancy()->initialize($north);
-    $northRole = NegocioRole::query()->where('name', 'cajero')->first();
+    $northRole = NegocioRole::query()->where('name', 'vendedor')->first();
     Sucursal::factory()->create(['nombre' => 'Central']);
 
     tenancy()->initialize($south);
-    $southRole = NegocioRole::query()->where('name', 'cajero')->first();
+    $southRole = NegocioRole::query()->where('name', 'vendedor')->first();
     Sucursal::factory()->create(['nombre' => 'Central']);
 
     expect($northRole)->not->toBeNull()
@@ -212,7 +212,7 @@ it('lets the supervisor manage roles and keeps the cashier out', function () {
 
     tenancy()->initialize($north);
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
     $supervisor = TenantUser::factory()->create();
     $supervisor->assignRole('administrador');
 
@@ -272,7 +272,7 @@ it('crea un almacén desde la sucursal y lo vincula al guardar', function () {
 it('oculta la creación de almacenes al usuario que solo puede editar sucursales', function () {
     tenancy()->initialize(Tenant::factory()->create());
     $usuario = TenantUser::factory()->create();
-    $usuario->assignRole('cajero');
+    $usuario->assignRole('vendedor');
     $usuario->givePermissionTo('Update:Sucursal');
     $sucursal = Sucursal::factory()->create();
     $asignacion = $sucursal->asignaciones()->create(['almacen_id' => Almacen::factory()->create()->id]);

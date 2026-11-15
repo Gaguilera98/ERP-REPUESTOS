@@ -67,8 +67,8 @@ class SeedNegocioRoles
             fn (string $permiso): bool => ! self::esPermisoAdministrativo($permiso),
         ));
 
-        $cajero = NegocioRole::findOrCreate('cajero', 'tenant');
-        $cajero->syncPermissions([
+        $vendedor = NegocioRole::findOrCreate('vendedor', 'tenant');
+        $vendedor->syncPermissions([
             'ViewAny:Sucursal',
             'View:Sucursal',
             'ViewAny:Almacen',

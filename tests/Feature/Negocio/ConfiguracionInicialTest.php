@@ -93,7 +93,7 @@ it('muestra la situación al cajero y rechaza el guardado sin permisos', functio
     $tenant = Tenant::factory()->create();
     tenancy()->initialize($tenant);
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
 
     Livewire::actingAs($cajero, 'tenant')->test(ConfiguracionInicial::class)
         ->assertSee('Pedile a la persona encargada')

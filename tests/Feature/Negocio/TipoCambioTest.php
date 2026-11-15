@@ -134,7 +134,7 @@ it('permite configurar y luego quitar la referencia del Menor sin alterar el May
 it('restringe la pantalla y la publicación al permiso asignado', function () {
     negocioConDolar();
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
     $accion = app(PublicarTipoCambio::class);
     $vista = $accion->previsualizar('11');
 

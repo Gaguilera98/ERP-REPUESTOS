@@ -7,7 +7,7 @@
 - El rol y los permisos directos definen qué puede hacer una persona. Las sucursales asignadas definen dónde puede hacerlo. El servidor comprueba ambas condiciones dentro del tenant actual.
 - **Administrador del negocio.** Administra usuarios, roles, permisos, sucursales, configuración y catálogos. Tiene alcance sobre todas las sucursales del negocio, incluidas las nuevas. El admin central de la plataforma conserva su ámbito propio.
 - **Supervisor.** Supervisa ventas, cajas y stock de sus sucursales asignadas según sus permisos.
-- **Vendedor.** Opera en una o varias sucursales asignadas. Mostrar «Vendedor» y conservar inicialmente la clave interna `cajero` para las asignaciones existentes.
+- **Vendedor.** Opera en una o varias sucursales asignadas. Su clave interna es `vendedor`.
 - Una persona tiene una sola cuenta por negocio. Reutilizar `user_sucursales` para asignarle una o varias sucursales. Los usuarios, roles, permisos, productos, categorías, marcas y unidades de medida se administran a nivel del negocio.
 - El producto existe una sola vez en el catálogo. El stock se registra por SKU y almacén. El usuario con permiso de stock ve los almacenes vinculados a sus sucursales autorizadas. Un almacén compartido se cuenta una sola vez en los totales.
 

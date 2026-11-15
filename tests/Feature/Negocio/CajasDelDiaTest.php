@@ -74,10 +74,10 @@ function negocioConCajasDelDia(string $dominio = 'cajas-dia'): array
     $supervisor->assignRole('supervisor');
 
     $cajeroA = TenantUser::factory()->create(['name' => 'Ana']);
-    $cajeroA->assignRole('cajero');
+    $cajeroA->assignRole('vendedor');
 
     $cajeroB = TenantUser::factory()->create(['name' => 'Luis']);
-    $cajeroB->assignRole('cajero');
+    $cajeroB->assignRole('vendedor');
 
     $sucursal = Sucursal::factory()->create(['nombre' => 'Centro']);
     $sucursal->usuarios()->attach([$supervisor->id, $cajeroA->id, $cajeroB->id], ['tenant_id' => $tenant->id]);

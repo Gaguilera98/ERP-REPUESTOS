@@ -103,7 +103,7 @@ function negocioConMostrador(string $dominio = 'venta'): array
     $supervisor->assignRole('supervisor');
 
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
 
     $sucursal = Sucursal::factory()->create(['nombre' => 'Centro']);
     $sucursal->usuarios()->attach([$supervisor->id, $cajero->id], ['tenant_id' => $tenant->id]);

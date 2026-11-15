@@ -281,7 +281,7 @@ function negocioDeInventario(string $dominio): array
     $supervisor = TenantUser::factory()->create();
     $supervisor->assignRole('administrador');
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
     $sucursal = Sucursal::factory()->create(['nombre' => 'Centro']);
     $cajero->sucursales()->attach($sucursal->id, ['tenant_id' => $tenant->id]);
     $almacen = Almacen::factory()->create(['nombre' => 'Estante']);

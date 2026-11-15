@@ -17,7 +17,6 @@ class AccesoSucursales
     {
         return match ($rol) {
             self::ADMINISTRADOR => 'Administrador del negocio',
-            'cajero' => 'Vendedor',
             default => str($rol)->headline()->toString(),
         };
     }

@@ -42,7 +42,7 @@ it('usa la sucursal asignada en mostrador e impide abrir caja o trasladar a un l
     $tenant = Tenant::factory()->create();
     $tenant->domains()->create(['domain' => 'acceso']);
     tenancy()->initialize($tenant);
-    $vendedor = TenantUser::factory()->create()->assignRole('cajero');
+    $vendedor = TenantUser::factory()->create()->assignRole('vendedor');
     $local = Sucursal::factory()->create(['nombre' => 'San Pedro', 'is_active' => true]);
     $otro = Sucursal::factory()->create(['nombre' => 'Sucursal restringida', 'is_active' => true]);
     $almacen = Almacen::factory()->create(['nombre' => 'Depósito San Pedro']);
@@ -99,7 +99,7 @@ it('permite consultar otra sucursal autorizada y bloquea el cobro en una pestañ
 it('autoriza todas las sucursales al administrador y permite agregar permisos directos', function () {
     tenancy()->initialize(Tenant::factory()->create());
     $admin = TenantUser::factory()->create()->assignRole(AccesoSucursales::ADMINISTRADOR);
-    $vendedor = TenantUser::factory()->create()->assignRole('cajero');
+    $vendedor = TenantUser::factory()->create()->assignRole('vendedor');
     $sucursal = Sucursal::factory()->create(['is_active' => true]);
     expect(app(AccesoSucursales::class)->activa($admin))->toBe($sucursal->id);
 
@@ -143,7 +143,7 @@ it('consolida stock de almacenes compartidos una sola vez y excluye los almacene
 
 it('impide operar a un vendedor sin sucursales desde que se crea el negocio', function () {
     tenancy()->initialize(Tenant::factory()->create());
-    $vendedor = TenantUser::factory()->create()->assignRole('cajero');
+    $vendedor = TenantUser::factory()->create()->assignRole('vendedor');
     $sucursal = Sucursal::factory()->create(['is_active' => true]);
 
     Livewire::actingAs($vendedor, 'tenant')->test(ElegirSucursal::class)

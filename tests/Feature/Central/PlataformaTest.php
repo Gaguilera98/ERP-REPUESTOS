@@ -40,7 +40,7 @@ it('keeps platform roles out of a store and store roles out of the platform', fu
 
     tenancy()->initialize($tenant);
 
-    expect(NegocioRole::query()->pluck('name')->sort()->values()->all())->toBe(['administrador', 'cajero', 'supervisor']);
+    expect(NegocioRole::query()->pluck('name')->sort()->values()->all())->toBe(['administrador', 'supervisor', 'vendedor']);
 
     tenancy()->end();
 

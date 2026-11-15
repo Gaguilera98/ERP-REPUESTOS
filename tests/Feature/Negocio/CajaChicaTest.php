@@ -68,7 +68,7 @@ function negocioDeCajaChica(string $dominio = 'cajachica'): array
     tenancy()->initialize($tenant);
 
     $cajero = TenantUser::factory()->create();
-    $cajero->assignRole('cajero');
+    $cajero->assignRole('vendedor');
     $supervisor = TenantUser::factory()->create();
     $supervisor->assignRole('supervisor');
 
@@ -193,7 +193,7 @@ it('no deja gastar el cajón de otro sin sucursal ni permiso directo', function 
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'categoria' => $categoria] = negocioDeCajaChica('cajachica-ajena');
     habilitarCajon();
     $otro = TenantUser::factory()->create();
-    $otro->assignRole('cajero');
+    $otro->assignRole('vendedor');
     $otro->givePermissionTo(Permisos::AJENA);
     $sesion = sesionDe($cajero, $sucursal, '30');
 
