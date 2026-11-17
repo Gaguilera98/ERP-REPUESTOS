@@ -38,6 +38,29 @@ afterEach(function () {
     tenancy()->end();
 });
 
+it('muestra el selector de sucursal antes del menú de usuario y oculta la búsqueda global', function () {
+    $tenant = Tenant::factory()->create();
+    $tenant->domains()->create(['domain' => 'acceso']);
+
+    $admin = $tenant->run(function (): TenantUser {
+        $admin = TenantUser::factory()->create()->assignRole(AccesoSucursales::ADMINISTRADOR);
+        $sucursal = Sucursal::factory()->create(['is_active' => true]);
+        Sucursal::factory()->create(['is_active' => true]);
+        $sucursal->asignaciones()->create(['almacen_id' => Almacen::factory()->create()->id, 'es_principal' => true]);
+
+        return $admin;
+    });
+
+    $this->actingAs($admin, 'tenant')->get('http://acceso.localhost/negocio/productos')
+        ->assertOk()
+        ->assertDontSee('class="fi-global-search-ctn"', escape: false)
+        ->assertSeeInOrder([
+            'class="fi-topbar-end"',
+            'href="http://acceso.localhost/negocio/elegir-sucursal"',
+            'class="fi-user-menu-trigger"',
+        ], escape: false);
+});
+
 it('usa la sucursal asignada en mostrador e impide abrir caja o trasladar a un local ajeno', function () {
     $tenant = Tenant::factory()->create();
     $tenant->domains()->create(['domain' => 'acceso']);

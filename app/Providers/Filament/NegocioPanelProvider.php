@@ -37,6 +37,7 @@ class NegocioPanelProvider extends PanelProvider
             ->path('negocio')
             ->login(Login::class)
             ->authGuard('tenant')
+            ->globalSearch(false)
             ->darkMode()
             ->colors(Paleta::colors())
             ->viteTheme('resources/css/filament/negocio/theme.css')
@@ -50,7 +51,7 @@ class NegocioPanelProvider extends PanelProvider
                 PanelsRenderHook::STYLES_AFTER,
                 fn (): string => view('filament.paleta')->render(),
             )
-            ->renderHook(PanelsRenderHook::TOPBAR_END, function (): string {
+            ->renderHook(PanelsRenderHook::GLOBAL_SEARCH_BEFORE, function (): string {
                 $usuario = auth('tenant')->user();
                 $acceso = app(AccesoSucursales::class);
                 if (! $usuario instanceof TenantUser) {
