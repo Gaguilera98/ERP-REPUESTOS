@@ -5,7 +5,9 @@ namespace App\Filament\Negocio\Resources\Categorias\Schemas;
 use App\Enums\MagnitudUnidad;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
+use App\Models\Categoria;
 use App\Models\UnidadMedida;
+use Closure;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -18,7 +20,6 @@ use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rules\Unique;
 
 class CategoriaForm
 {
@@ -32,12 +33,7 @@ class CategoriaForm
                     ->icon(Heroicon::OutlinedTag)
                     ->columnSpanFull()
                     ->schema([
-                        TextInput::make('nombre')
-                            ->label('Nombre del rubro / categoría')
-                            ->placeholder('Ej: Rodamientos, Filtros de Aceite, Frenos, Suspensión...')
-                            ->required()
-                            ->maxLength(255)
-                            ->unique(ignoreRecord: true, modifyRuleUsing: fn (Unique $rule): Unique => $rule->where('tenant_id', tenant()->getTenantKey())),
+                        self::nombre(),
                         Toggle::make('is_active')
                             ->label('Activa')
                             ->default(true)
@@ -119,6 +115,32 @@ class CategoriaForm
                                     ]),
                             ]),
                     ]),
+            ]);
+    }
+
+    public static function nombre(): TextInput
+    {
+        return TextInput::make('nombre')
+            ->label('Nombre del rubro / categoría')
+            ->placeholder('Ej: Rodamientos, Filtros de Aceite, Frenos, Suspensión...')
+            ->required()
+            ->maxLength(255)
+            ->dehydrateStateUsing(fn (string $state): string => trim($state))
+            ->rules([
+                fn (TextInput $component): Closure => function (string $attribute, mixed $value, Closure $fail) use ($component): void {
+                    $nombre = trim((string) $value);
+                    $record = $component->getRecord();
+                    $categoriaId = $record instanceof Categoria ? $record->getKey() : null;
+
+                    $existe = Categoria::query()
+                        ->where('nombre', $nombre)
+                        ->when($categoriaId, fn ($query) => $query->whereKeyNot($categoriaId))
+                        ->exists();
+
+                    if ($existe) {
+                        $fail('Ya existe una categoría con ese nombre.');
+                    }
+                },
             ]);
     }
 

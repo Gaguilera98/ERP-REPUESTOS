@@ -10,6 +10,7 @@ use App\Enums\DevolucionComercialProducto;
 use App\Enums\TipoArchivoNegocio;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
+use App\Filament\Negocio\Resources\Categorias\Schemas\CategoriaForm;
 use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
@@ -42,6 +43,7 @@ use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection as ModelCollection;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 
@@ -81,7 +83,26 @@ class ProductoMaestroForm
                                             $set('opciones', []);
                                             $set('variantes', []);
                                             $set('ficha', []);
-                                        }),
+                                        })
+                                        ->createOptionForm(fn (Schema $schema): Schema => CategoriaForm::configure(
+                                            $schema->model(Categoria::class),
+                                        ))
+                                        ->createOptionUsing(function (array $data, Schema $schema): int {
+                                            $categoria = Categoria::query()->create(Arr::only($data, [
+                                                'nombre',
+                                                'is_active',
+                                                'sin_devolucion_comercial',
+                                            ]));
+
+                                            $schema->model($categoria)->saveRelationships();
+
+                                            return $categoria->getKey();
+                                        })
+                                        ->createOptionAction(fn (Action $action): Action => $action
+                                            ->visible(fn (): bool => (bool) auth('tenant')->user()?->can('create', Categoria::class))
+                                            ->modalHeading('Nueva categoría')
+                                            ->stickyModalHeader()
+                                            ->stickyModalFooter()),
                                     Select::make('marca_id')
                                         ->label('Marca')
                                         ->options(fn (Get $get): array => self::catalogoActivo(Marca::class, $get, 'marca_id'))
@@ -131,12 +152,6 @@ class ProductoMaestroForm
                                     self::referencia('precio_venta_dolar', 'Referencia Menor en USD', $conDolar, $moneda, $cotizacion),
                                     self::referencia('precio_mayor_dolar', 'Referencia Mayor en USD', $conDolar, $moneda, $cotizacion),
                                 ]),
-                            Section::make('Ficha técnica')
-                                ->columns(['default' => 1, 'md' => 2])
-                                ->schema(fn (Get $get): array => self::camposFicha($get)),
-                            Section::make('Empaques')
-                                ->collapsed()
-                                ->schema([self::empaques()]),
                             Section::make('Ubicación en almacenes')
                                 ->hiddenOn('create')
                                 ->visible(fn (Get $get): bool => ! self::conVariantes($get))
@@ -164,6 +179,11 @@ class ProductoMaestroForm
                                         ->disk('public')
                                         ->helperText('Hasta 5 fotos. Arrastrá para ordenar. Guardá los cambios para actualizar el visor.'),
                                 ]),
+                            Section::make('Ficha técnica')
+                                ->schema(fn (Get $get): array => self::camposFicha($get)),
+                            Section::make('Empaques')
+                                ->collapsed()
+                                ->schema([self::empaques()]),
                         ])->columnSpan(['default' => 1, 'xl' => 5]),
                     ]),
 

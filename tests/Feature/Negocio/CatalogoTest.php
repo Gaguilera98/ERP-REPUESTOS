@@ -575,6 +575,54 @@ it('crea la marca desde el producto y rechaza el mismo nombre con otra mayúscul
     tenancy()->end();
 });
 
+it('crea la categoría desde el producto y rechaza un nombre repetido', function () {
+    $tenant = Tenant::factory()->create();
+    $tenant->domains()->create(['domain' => 'norte']);
+
+    tenancy()->initialize($tenant);
+
+    $supervisor = TenantUser::factory()->create();
+    $supervisor->assignRole('supervisor');
+
+    Filament::setCurrentPanel(Filament::getPanel('negocio'));
+
+    $pagina = Livewire::actingAs($supervisor, 'tenant')
+        ->test(CreateProductoMaestro::class)
+        ->callFormComponentAction('categoria_id', 'createOption', data: [
+            'nombre' => ' Rodamientos ',
+            'is_active' => true,
+            'sin_devolucion_comercial' => false,
+            'atributos' => [
+                [
+                    'etiqueta' => 'Sello',
+                    'clave' => 'sello',
+                    'tipo' => TipoAtributoCategoria::Lista->value,
+                    'obligatorio' => false,
+                    'opciones' => ['2RS', 'ZZ'],
+                ],
+            ],
+        ])
+        ->assertHasNoFormComponentActionErrors();
+
+    $categoria = Categoria::query()->where('nombre', 'Rodamientos')->first();
+
+    expect($categoria)->not->toBeNull()
+        ->and($pagina->get('data.categoria_id'))->toEqual($categoria->id)
+        ->and($categoria->atributos)->toHaveCount(1)
+        ->and($categoria->atributos->first()->clave)->toBe('sello')
+        ->and($categoria->atributos->first()->opciones)->toBe(['2RS', 'ZZ']);
+
+    $pagina
+        ->callFormComponentAction('categoria_id', 'createOption', data: [
+            'nombre' => 'Rodamientos',
+        ])
+        ->assertHasFormComponentActionErrors(['nombre']);
+
+    expect(Categoria::query()->count())->toBe(1);
+
+    tenancy()->end();
+});
+
 it('agrega un sello que no estaba en la lista y rechaza el mismo con otra mayúscula', function () {
     $tenant = Tenant::factory()->create();
     $tenant->domains()->create(['domain' => 'norte']);
