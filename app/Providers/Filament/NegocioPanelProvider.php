@@ -8,6 +8,7 @@ use App\Filament\Negocio\Pages\MostradorDelNegocio;
 use App\Filament\Negocio\Resources\Sucursals\SucursalResource;
 use App\Filament\Paleta;
 use App\Http\Controllers\CambiarSucursalActiva;
+use App\Http\Controllers\ImprimirNotaVenta;
 use App\Http\Middleware\RequerirConfiguracionInicial;
 use App\Models\TenantUser;
 use App\Tenancy\AccesoSucursales;
@@ -46,6 +47,9 @@ class NegocioPanelProvider extends PanelProvider
                 Route::post('/sucursal-activa/{sucursal}', CambiarSucursalActiva::class)
                     ->whereNumber('sucursal')
                     ->name('sucursal-activa');
+                Route::get('/ventas/{venta}/nota-a4', ImprimirNotaVenta::class)
+                    ->whereNumber('venta')
+                    ->name('ventas.nota-a4');
             })
             ->darkMode()
             ->colors(Paleta::colors())

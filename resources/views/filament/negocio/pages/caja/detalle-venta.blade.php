@@ -31,11 +31,24 @@
 <div class="space-y-5">
     <div class="flex flex-wrap items-center justify-between gap-3">
         <p class="text-sm font-medium text-gray-950 dark:text-white">{{ $venta->created_at?->format('d/m/Y H:i') }}</p>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap items-center gap-2">
             @if ($hayDevoluciones && ! $hayCambios)
                 <x-filament::badge color="warning">{{ collect($productosTrasDevoluciones)->every(fn ($linea) => bccomp($linea['disponible'], '0', 4) === 0) ? 'Devolución total' : 'Devolución parcial' }}</x-filament::badge>
             @endif
             <x-filament::badge :color="$colorEstado">{{ $venta->estado->etiqueta() }}</x-filament::badge>
+            @if ($venta->tieneNotaImprimible())
+                <x-filament::button
+                    tag="a"
+                    :href="route('filament.negocio.ventas.nota-a4', ['venta' => $venta])"
+                    target="_blank"
+                    rel="noopener"
+                    color="gray"
+                    size="sm"
+                    icon="heroicon-o-printer"
+                >
+                    Imprimir nota A4
+                </x-filament::button>
+            @endif
         </div>
     </div>
     @if ($venta->cambioOrigen?->ventaOriginal)

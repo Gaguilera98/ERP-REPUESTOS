@@ -179,4 +179,11 @@ class Venta extends Model
     {
         return $this->estado === EstadoVenta::Completada;
     }
+
+    public function tieneNotaImprimible(): bool
+    {
+        return $this->tipo_comprobante === TipoComprobante::NotaVenta
+            && ! in_array($this->estado, [EstadoVenta::Reserva, EstadoVenta::Vencida], true)
+            && ($this->vence_en === null || $this->entregada_en !== null);
+    }
 }
