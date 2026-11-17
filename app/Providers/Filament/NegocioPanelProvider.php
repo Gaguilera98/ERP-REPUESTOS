@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Negocio\Auth\Login;
 use App\Filament\Negocio\Pages\ElegirSucursal;
 use App\Filament\Negocio\Pages\MostradorDelNegocio;
 use App\Filament\Paleta;
@@ -34,14 +35,16 @@ class NegocioPanelProvider extends PanelProvider
         return $panel
             ->id('negocio')
             ->path('negocio')
-            ->login()
+            ->login(Login::class)
             ->authGuard('tenant')
             ->darkMode()
             ->colors(Paleta::colors())
             ->viteTheme('resources/css/filament/negocio/theme.css')
             ->renderHook(
                 PanelsRenderHook::BODY_START,
-                fn (): string => view('filament.partials.splash-screen')->render(),
+                fn (): string => request()->routeIs('filament.negocio.auth.login')
+                    ? ''
+                    : view('filament.partials.splash-screen')->render(),
             )
             ->renderHook(
                 PanelsRenderHook::STYLES_AFTER,
