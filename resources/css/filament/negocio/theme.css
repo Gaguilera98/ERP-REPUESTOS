@@ -7,6 +7,34 @@
 @source '../../../../resources/views/livewire/**/*';
 @source '../../../../resources/views/components/negocio/**/*';
 
+.sucursal-selector-trigger {
+    @apply inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 text-sm font-semibold text-gray-950 dark:border-[#354147] dark:bg-[#1E2529] dark:text-white;
+}
+
+:is(button, a).sucursal-selector-trigger {
+    @apply transition-colors hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 motion-reduce:transition-none dark:hover:bg-[#263035];
+}
+
+.sucursal-selector-chevron {
+    @apply text-gray-500 transition-transform motion-reduce:transition-none dark:text-gray-400;
+}
+
+.sucursal-selector-trigger[aria-expanded='true'] .sucursal-selector-chevron {
+    @apply rotate-180;
+}
+
+.fi-dropdown-panel.sucursal-selector-panel {
+    width: min(21.25rem, calc(100dvw - 1.5rem));
+}
+
+.sucursal-selector-opcion {
+    @apply flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start text-gray-950 hover:bg-gray-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary-600 dark:text-white dark:hover:bg-[#263035];
+}
+
+.sucursal-selector-opcion.sucursal-selector-seleccionada {
+    @apply cursor-default bg-primary-50 text-primary-700 dark:bg-[#193D30] dark:text-[#6EE7A0];
+}
+
 .fi-sc-wizard.configuracion-inicial-wizard {
     @apply lg:grid lg:grid-cols-[15.5rem_minmax(0,1fr)] lg:items-start lg:gap-x-6;
 

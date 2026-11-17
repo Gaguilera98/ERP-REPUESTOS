@@ -38,27 +38,43 @@ afterEach(function () {
     tenancy()->end();
 });
 
-it('muestra el selector de sucursal antes del menú de usuario y oculta la búsqueda global', function () {
+it('cambia la sucursal desde el encabezado y solo ofrece locales asignados', function () {
     $tenant = Tenant::factory()->create();
     $tenant->domains()->create(['domain' => 'acceso']);
 
-    $admin = $tenant->run(function (): TenantUser {
-        $admin = TenantUser::factory()->create()->assignRole(AccesoSucursales::ADMINISTRADOR);
-        $sucursal = Sucursal::factory()->create(['is_active' => true]);
-        Sucursal::factory()->create(['is_active' => true]);
-        $sucursal->asignaciones()->create(['almacen_id' => Almacen::factory()->create()->id, 'es_principal' => true]);
+    [$supervisor, $sur, $restringida] = $tenant->run(function (): array {
+        $supervisor = TenantUser::factory()->create()->assignRole('supervisor');
+        $norte = Sucursal::factory()->create(['nombre' => 'Local Norte', 'is_active' => true]);
+        $sur = Sucursal::factory()->create(['nombre' => 'Local Sur', 'is_active' => true]);
+        $restringida = Sucursal::factory()->create(['nombre' => 'Sucursal restringida', 'is_active' => true]);
+        $norte->asignaciones()->create([
+            'almacen_id' => Almacen::factory()->create(['nombre' => 'Depósito Norte'])->id,
+            'es_principal' => true,
+        ]);
+        $supervisor->sucursales()->attach([$norte->id, $sur->id], ['tenant_id' => tenant()->id]);
 
-        return $admin;
+        return [$supervisor, $sur, $restringida];
     });
 
-    $this->actingAs($admin, 'tenant')->get('http://acceso.localhost/negocio/productos')
+    $this->actingAs($supervisor, 'tenant')->get('http://acceso.localhost/negocio/productos')
         ->assertOk()
         ->assertDontSee('class="fi-global-search-ctn"', escape: false)
+        ->assertSee('Depósito Norte')
+        ->assertDontSee('Sucursal restringida')
+        ->assertDontSee('Administrar sucursales')
         ->assertSeeInOrder([
             'class="fi-topbar-end"',
-            'href="http://acceso.localhost/negocio/elegir-sucursal"',
+            'class="sucursal-selector-trigger"',
             'class="fi-user-menu-trigger"',
         ], escape: false);
+
+    $this->post('http://acceso.localhost/negocio/sucursal-activa/'.$sur->id)
+        ->assertRedirect('http://acceso.localhost/negocio');
+    $this->post('http://acceso.localhost/negocio/sucursal-activa/'.$restringida->id)->assertForbidden();
+    $this->get('http://acceso.localhost/negocio/productos')
+        ->assertOk()
+        ->assertSee('Cambiar sucursal. Activa: Local Sur')
+        ->assertSee('aria-current="true"', escape: false);
 });
 
 it('usa la sucursal asignada en mostrador e impide abrir caja o trasladar a un local ajeno', function () {

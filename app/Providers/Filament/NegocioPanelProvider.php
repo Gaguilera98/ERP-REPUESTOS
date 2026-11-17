@@ -5,7 +5,9 @@ namespace App\Providers\Filament;
 use App\Filament\Negocio\Auth\Login;
 use App\Filament\Negocio\Pages\ElegirSucursal;
 use App\Filament\Negocio\Pages\MostradorDelNegocio;
+use App\Filament\Negocio\Resources\Sucursals\SucursalResource;
 use App\Filament\Paleta;
+use App\Http\Controllers\CambiarSucursalActiva;
 use App\Http\Middleware\RequerirConfiguracionInicial;
 use App\Models\TenantUser;
 use App\Tenancy\AccesoSucursales;
@@ -21,9 +23,11 @@ use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Stancl\Tenancy\Middleware\InitializeTenancyBySubdomain;
 use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
@@ -38,6 +42,11 @@ class NegocioPanelProvider extends PanelProvider
             ->login(Login::class)
             ->authGuard('tenant')
             ->globalSearch(false)
+            ->authenticatedRoutes(function (): void {
+                Route::post('/sucursal-activa/{sucursal}', CambiarSucursalActiva::class)
+                    ->whereNumber('sucursal')
+                    ->name('sucursal-activa');
+            })
             ->darkMode()
             ->colors(Paleta::colors())
             ->viteTheme('resources/css/filament/negocio/theme.css')
@@ -58,13 +67,24 @@ class NegocioPanelProvider extends PanelProvider
                     return '';
                 }
 
-                $id = $acceso->activa($usuario);
-                $mostrarEnlace = ! request()->routeIs(MostradorDelNegocio::getRouteName())
-                    && ($id === null || $acceso->disponibles($usuario)->count() > 1);
+                $sucursalId = $acceso->activa($usuario);
+                $enMostrador = request()->routeIs(MostradorDelNegocio::getRouteName());
+                $sucursales = $acceso->disponibles($usuario)
+                    ->orderBy('nombre')
+                    ->with(['asignaciones' => fn (HasMany $asignaciones): HasMany => $asignaciones
+                        ->where('es_principal', true)->with('almacen')])
+                    ->get();
+                $puedeCambiar = ! $enMostrador && $sucursales->count() > 1;
 
                 return view('filament.negocio.pages.sucursal-activa', [
-                    'nombre' => $id === null ? null : $acceso->disponibles($usuario)->whereKey($id)->value('nombre'),
-                    'url' => $mostrarEnlace ? ElegirSucursal::getUrl() : null,
+                    'sucursalId' => $sucursalId,
+                    'nombre' => $sucursales->firstWhere('id', $sucursalId)?->nombre,
+                    'sucursales' => $sucursales,
+                    'puedeCambiar' => $puedeCambiar,
+                    'urlElegir' => $sucursales->isEmpty() && ! $enMostrador ? ElegirSucursal::getUrl() : null,
+                    'urlAdministrar' => $puedeCambiar && $usuario->hasRole(AccesoSucursales::ADMINISTRADOR) && SucursalResource::canAccess()
+                        ? SucursalResource::getUrl()
+                        : null,
                 ])->render();
             })
             ->discoverResources(in: app_path('Filament/Negocio/Resources'), for: 'App\Filament\Negocio\Resources')
