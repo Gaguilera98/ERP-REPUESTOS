@@ -24,6 +24,17 @@ class VentaPolicy
             && $acceso->autoriza($user, (int) $venta->sucursal_id);
     }
 
+    public function viewOtherSales(TenantUser $user): bool
+    {
+        return $this->allows($user, 'View:CajasDelDia');
+    }
+
+    public function viewInHistory(TenantUser $user, Venta $venta): bool
+    {
+        return $this->view($user, $venta)
+            && ((int) $venta->user_id === (int) $user->getKey() || $this->viewOtherSales($user));
+    }
+
     public function create(TenantUser $user): bool
     {
         return $this->allows($user, 'Create:Venta');

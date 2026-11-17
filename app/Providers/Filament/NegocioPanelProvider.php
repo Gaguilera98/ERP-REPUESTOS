@@ -50,6 +50,9 @@ class NegocioPanelProvider extends PanelProvider
                 Route::get('/ventas/{venta}/nota-a4', ImprimirNotaVenta::class)
                     ->whereNumber('venta')
                     ->name('ventas.nota-a4');
+                Route::get('/ventas/{venta}/nota-a4.pdf', ImprimirNotaVenta::class)
+                    ->whereNumber('venta')
+                    ->name('ventas.nota-a4-pdf');
             })
             ->darkMode()
             ->colors(Paleta::colors())

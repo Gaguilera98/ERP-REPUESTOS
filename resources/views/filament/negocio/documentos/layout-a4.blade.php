@@ -14,7 +14,11 @@
             dt, .secundario { color: #42515a; font-size: 9pt; }
             .hoja, .barra { width: min(calc(100% - 24px), 210mm); margin: auto; }
             .barra { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 0; }
-            .barra button { padding: 9px 15px; border: 0; border-radius: 7px; background: #174c3a; color: #fff; font: inherit; cursor: pointer; }
+            .acciones { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+            .acciones button, .acciones a { padding: 9px 12px; border: 1px solid #174c3a; border-radius: 7px; background: #fff; color: #174c3a; font: inherit; text-decoration: none; cursor: pointer; }
+            .acciones .compartir { background: #174c3a; color: #fff; }
+            .acciones button:disabled { opacity: .65; cursor: wait; }
+            .estado-archivo { width: 100%; color: #42515a; }
             .hoja { padding: 14mm; margin-bottom: 24px; background: #fff; box-shadow: 0 3px 24px #17232c19; }
             .encabezado { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4mm; padding-bottom: 4mm; border-bottom: 2px solid #174c3a; }
             .negocio { color: #174c3a; font-weight: bold; }
@@ -44,15 +48,92 @@
                 .tabla { overflow: visible; }
                 thead { display: table-header-group; }
             }
+            @if ($paraPdf)
+                body { background: #fff; font-family: 'DejaVu Sans', sans-serif; }
+                .hoja { width: auto; margin: 0; padding: 0; box-shadow: none; }
+                .encabezado, .ficha, .resumen > div { display: table; width: 100%; }
+                .encabezado, .ficha { table-layout: fixed; }
+                .encabezado > div, .ficha > div, .resumen dt, .resumen dd { display: table-cell; vertical-align: top; }
+                .encabezado > div:first-child { width: 68%; word-wrap: break-word; }
+                .encabezado .referencia { text-align: right; white-space: nowrap; }
+                .referencia > * { display: block; }
+                .ficha > div { padding-right: 3mm; word-wrap: break-word; }
+                .tabla { overflow: visible; }
+                .resumen { width: 78mm; }
+                .encabezado, .aviso, .pie, .resumen { page-break-inside: avoid; }
+            @endif
         </style>
     </head>
     <body>
-        <div class="barra">
-            <p>Vista previa · A4</p>
-            <button type="button" onclick="window.print()">Imprimir o guardar como PDF</button>
-        </div>
+        @unless ($paraPdf)
+            <div class="barra">
+                <p>Vista previa · A4</p>
+                <div class="acciones">
+                    <button type="button" onclick="window.print()">Imprimir</button>
+                    <a id="descargar-pdf" href="{{ $urlPdf }}" download="{{ $nombreArchivo }}">Descargar PDF</a>
+                    <button id="compartir-pdf" class="compartir" type="button" hidden>Compartir PDF</button>
+                </div>
+                <p id="estado-pdf" class="estado-archivo" role="status" hidden></p>
+            </div>
+        @endunless
         <main class="hoja">
             @yield('documento')
         </main>
+        @unless ($paraPdf)
+            <script>
+                const descargarPdf = document.getElementById('descargar-pdf')
+                const compartirPdf = document.getElementById('compartir-pdf')
+                const estadoPdf = document.getElementById('estado-pdf')
+                const tipoPdf = 'application/pdf'
+
+                function mostrarEstadoPdf(mensaje) {
+                    estadoPdf.textContent = mensaje
+                    estadoPdf.hidden = false
+                }
+
+                async function prepararArchivoParaCompartir() {
+                    const nombre = descargarPdf.download
+                    if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
+                        return
+                    }
+
+                    compartirPdf.hidden = false
+                    compartirPdf.disabled = true
+                    compartirPdf.textContent = 'Preparando PDF…'
+
+                    try {
+                        const respuesta = await fetch(descargarPdf.href, { cache: 'no-store', redirect: 'error' })
+                        if (! respuesta.ok || respuesta.headers.get('Content-Type')?.split(';')[0] !== tipoPdf) {
+                            throw new Error('Respuesta PDF inválida')
+                        }
+
+                        const archivo = new File([await respuesta.blob()], nombre, { type: tipoPdf })
+                        if (! navigator.canShare({ files: [archivo] })) {
+                            compartirPdf.hidden = true
+                            return
+                        }
+
+                        compartirPdf.addEventListener('click', async () => {
+                            estadoPdf.hidden = true
+
+                            try {
+                                await navigator.share({ files: [archivo] })
+                            } catch (error) {
+                                if (error.name !== 'AbortError') {
+                                    mostrarEstadoPdf('No se pudo compartir. Podés descargar el PDF y adjuntarlo.')
+                                }
+                            }
+                        })
+                        compartirPdf.textContent = 'Compartir PDF'
+                        compartirPdf.disabled = false
+                    } catch {
+                        compartirPdf.hidden = true
+                        mostrarEstadoPdf('No se pudo preparar el archivo para compartir. Probá con Descargar PDF.')
+                    }
+                }
+
+                prepararArchivoParaCompartir()
+            </script>
+        @endunless
     </body>
 </html>

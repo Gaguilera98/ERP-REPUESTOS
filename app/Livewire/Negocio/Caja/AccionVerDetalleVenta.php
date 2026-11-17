@@ -19,12 +19,12 @@ use Illuminate\Support\Facades\DB;
 
 class AccionVerDetalleVenta
 {
-    public function crear(string $nombre = 'verDetalle', bool $conNotasVinculadas = true): Action
+    public function crear(string $nombre = 'verDetalle', bool $conNotasVinculadas = true, string $habilidad = 'view'): Action
     {
         $accion = Action::make($nombre)
             ->label('Ver detalle')
             ->icon(Heroicon::OutlinedEye)
-            ->authorize(fn (?Venta $record): bool => $record !== null && (bool) auth('tenant')->user()?->can('view', $record))
+            ->authorize(fn (?Venta $record): bool => $record !== null && (bool) auth('tenant')->user()?->can($habilidad, $record))
             ->modalHeading(fn (Venta $record): string => $record->tipo_comprobante->etiqueta().' · '.$record->codigo)
             ->modalWidth('5xl')
             ->extraModalWindowAttributes(['class' => 'caja-modal-window'])
@@ -32,27 +32,27 @@ class AccionVerDetalleVenta
             ->stickyModalFooter()
             ->modalSubmitAction(false)
             ->modalCancelActionLabel('Cerrar')
-            ->modalContent(fn (Venta $record, Action $action): View => $this->vista($record, $conNotasVinculadas ? $action : null));
+            ->modalContent(fn (Venta $record, Action $action): View => $this->vista($record, $conNotasVinculadas ? $action : null, $habilidad));
 
         if ($conNotasVinculadas) {
             $accion->registerModalActions([
-                $this->accionVinculada('verReemplazo', 'Ver reemplazo'),
-                $this->accionVinculada('verVentaOriginal', 'Ver venta original'),
+                $this->accionVinculada('verReemplazo', 'Ver reemplazo', $habilidad),
+                $this->accionVinculada('verVentaOriginal', 'Ver venta original', $habilidad),
             ]);
         }
 
         return $accion;
     }
 
-    private function accionVinculada(string $nombre, string $etiqueta): Action
+    private function accionVinculada(string $nombre, string $etiqueta, string $habilidad): Action
     {
-        return $this->crear($nombre, conNotasVinculadas: false)
+        return $this->crear($nombre, conNotasVinculadas: false, habilidad: $habilidad)
             ->label($etiqueta)->color('gray')
             ->record(fn (Action $action): ?Venta => $this->ventaVinculada($action))
-            ->authorize(function (Action $action): bool {
+            ->authorize(function (Action $action) use ($habilidad): bool {
                 $venta = $this->ventaVinculada($action);
 
-                return $venta !== null && (bool) auth('tenant')->user()?->can('view', $venta);
+                return $venta !== null && (bool) auth('tenant')->user()?->can($habilidad, $venta);
             });
     }
 
@@ -71,9 +71,9 @@ class AccionVerDetalleVenta
         return is_int($notaId) ? $venta->devoluciones->find($notaId)?->ventaReemplazo : null;
     }
 
-    private function vista(Venta $record, ?Action $accion): View
+    private function vista(Venta $record, ?Action $accion, string $habilidad): View
     {
-        abort_unless(auth('tenant')->user()?->can('view', $record), 403);
+        abort_unless(auth('tenant')->user()?->can($habilidad, $record), 403);
 
         $record->loadMissing([
             'cliente',

@@ -62,21 +62,32 @@ it('imprime el precio de la venta, el vuelto de contado y el saldo de crédito e
 
     $this->actingAs($usuario, 'tenant');
 
-    $this->get('http://taller.localhost/negocio/ventas/'.$contado->id.'/nota-a4')
+    $respuesta = $this->get('http://taller.localhost/negocio/ventas/'.$contado->id.'/nota-a4')
         ->assertOk()
-        ->assertHeader('Cache-Control', 'no-store, private')
         ->assertSee('size: A4 portrait')
         ->assertSee('Taller El Rápido')
         ->assertSee($contado->codigo)
         ->assertSee('BOB 50.00')
         ->assertDontSee('BOB 74.99')
         ->assertSeeInOrder(['Efectivo recibido', 'BOB 125.00', 'Vuelto entregado', 'BOB 25.00'])
+        ->assertSee('Descargar PDF')
+        ->assertSee('Compartir PDF')
         ->assertSee('NO TIENE VALIDEZ FISCAL');
+
+    expect($respuesta->headers->hasCacheControlDirective('no-store'))->toBeTrue();
 
     $this->get('http://taller.localhost/negocio/ventas/'.$credito->id.'/nota-a4')
         ->assertOk()
         ->assertSeeInOrder(['Pagado a la fecha', 'BOB 30.00', 'Saldo pendiente', 'BOB 70.00'])
         ->assertDontSee('Vuelto entregado');
+
+    $archivo = $this->get('http://taller.localhost/negocio/ventas/'.$contado->id.'/nota-a4.pdf')
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf')
+        ->assertDownload('nota-'.strtolower($contado->codigo).'.pdf');
+
+    expect($archivo->getContent())->toStartWith('%PDF-')
+        ->and($archivo->headers->hasCacheControlDirective('no-store'))->toBeTrue();
 });
 
 it('protege la nota por sesión, sucursal y tenant y excluye reservas sin entregar', function () {
@@ -89,7 +100,7 @@ it('protege la nota por sesión, sucursal y tenant y excluye reservas sin entreg
         return Venta::factory()->for($asignacion->sucursal)->for($asignacion->almacen)->create();
     });
 
-    [$usuario, $local, $restringida, $reserva] = $tenant->run(function (): array {
+    [$usuario, $local, $restringida, $reserva, $deOtroVendedor] = $tenant->run(function (): array {
         $usuario = TenantUser::factory()->create()->assignRole('vendedor');
         $asignacion = SucursalAlmacen::factory()->create(['es_principal' => true]);
         $usuario->sucursales()->attach($asignacion->sucursal, ['tenant_id' => tenant()->id]);
@@ -98,17 +109,22 @@ it('protege la nota por sesión, sucursal y tenant y excluye reservas sin entreg
 
         return [
             $usuario,
+            $ventas->for($usuario, 'usuario')->create(),
+            Venta::factory()->for($otraAsignacion->sucursal)->for($otraAsignacion->almacen)->for($usuario, 'usuario')->create(),
+            $ventas->for($usuario, 'usuario')->create(['estado' => EstadoVenta::Reserva, 'vence_en' => now()->addDay(), 'entregada_en' => null]),
             $ventas->create(),
-            Venta::factory()->for($otraAsignacion->sucursal)->for($otraAsignacion->almacen)->create(),
-            $ventas->create(['estado' => EstadoVenta::Reserva, 'vence_en' => now()->addDay(), 'entregada_en' => null]),
         ];
     });
 
     $url = fn (Venta $venta): string => 'http://taller.localhost/negocio/ventas/'.$venta->id.'/nota-a4';
 
     $this->get($url($local))->assertRedirect('http://taller.localhost/negocio/login');
+    $this->get($url($local).'.pdf')->assertRedirect('http://taller.localhost/negocio/login');
     $this->actingAs($usuario, 'tenant')->get($url($local))->assertOk();
     $this->get($url($restringida))->assertForbidden();
+    $this->get($url($deOtroVendedor))->assertForbidden();
     $this->get($url($ventaAjena))->assertNotFound();
     $this->get($url($reserva))->assertNotFound();
+    $this->get($url($deOtroVendedor).'.pdf')->assertForbidden();
+    $this->get($url($ventaAjena).'.pdf')->assertNotFound();
 });

@@ -36,7 +36,7 @@
                 <x-filament::badge color="warning">{{ collect($productosTrasDevoluciones)->every(fn ($linea) => bccomp($linea['disponible'], '0', 4) === 0) ? 'Devolución total' : 'Devolución parcial' }}</x-filament::badge>
             @endif
             <x-filament::badge :color="$colorEstado">{{ $venta->estado->etiqueta() }}</x-filament::badge>
-            @if ($venta->tieneNotaImprimible())
+            @if ($venta->tieneNotaImprimible() && auth('tenant')->user()?->can('viewInHistory', $venta))
                 <x-filament::button
                     tag="a"
                     :href="route('filament.negocio.ventas.nota-a4', ['venta' => $venta])"
