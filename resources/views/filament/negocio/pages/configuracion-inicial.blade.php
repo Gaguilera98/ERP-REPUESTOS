@@ -2,10 +2,6 @@
     @if ($this->puedeConfigurar())
         <form wire:submit="guardar">
             {{ $this->form }}
-
-            <x-filament::button type="submit" icon="heroicon-m-check">
-                Guardar y continuar
-            </x-filament::button>
         </form>
     @else
         <x-filament::section icon="heroicon-o-information-circle">
@@ -14,7 +10,7 @@
         </x-filament::section>
     @endif
 
-    <form method="POST" action="{{ filament()->getLogoutUrl() }}">
+    <form method="POST" action="{{ filament()->getLogoutUrl() }}" class="flex justify-center">
         @csrf
         <x-filament::button type="submit" color="gray" outlined>
             Cerrar sesión

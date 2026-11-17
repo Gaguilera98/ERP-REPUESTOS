@@ -6,30 +6,38 @@ use App\Models\Almacen;
 use App\Models\NegocioConfiguracion;
 use App\Models\Sucursal;
 use App\Models\TenantUser;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Wizard;
+use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Support\Components\Attributes\Unexposed;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\HtmlString;
 
 class ConfiguracionInicial extends Page
 {
     protected static ?string $title = 'Configuración inicial';
 
+    protected ?string $subheading = 'Vinculá tu primera sucursal con su almacén principal para habilitar los módulos del negocio.';
+
     protected static bool $shouldRegisterNavigation = false;
 
     protected static string $layout = 'filament-panels::components.layout.simple';
 
-    protected Width|string|null $maxContentWidth = Width::ThreeExtraLarge;
+    protected Width|string|null $maxContentWidth = Width::FiveExtraLarge;
 
     protected string $view = 'filament.negocio.pages.configuracion-inicial';
 
@@ -92,31 +100,61 @@ class ConfiguracionInicial extends Page
 
     public function form(Schema $schema): Schema
     {
+        $sucursales = $this->sucursalesDisponibles();
+        $almacenes = $this->almacenesDisponibles();
+
         return $schema
             ->statePath('data')
             ->components([
-                Section::make('Sucursal')
-                    ->description('El local desde el que vas a vender.')
-                    ->icon(Heroicon::OutlinedBuildingStorefront)
-                    ->schema([
-                        Select::make('sucursal')->label('Sucursal')->live()->native(false)->required()
-                            ->options(fn (): array => ['nueva' => 'Crear sucursal'] + $this->sucursalesDisponibles()),
-                        TextInput::make('nombre_sucursal')->label('Nombre de la sucursal')->placeholder('Ej. Local Centro')
-                            ->required()->trim()->maxLength(255)->scopedUnique(Sucursal::class, 'nombre')
-                            ->validationMessages(['unique' => 'Ya existe una sucursal con este nombre.'])
-                            ->visible(fn (Get $get): bool => $get('sucursal') === 'nueva'),
-                    ]),
-                Section::make('Almacén principal')
-                    ->description('El lugar donde vas a guardar el stock de esta sucursal.')
-                    ->icon(Heroicon::OutlinedArchiveBox)
-                    ->schema([
-                        Select::make('almacen')->label('Almacén')->live()->native(false)->required()
-                            ->options(fn (): array => ['nuevo' => 'Crear almacén'] + $this->almacenesDisponibles()),
-                        TextInput::make('nombre_almacen')->label('Nombre del almacén')->required()->trim()->maxLength(255)
-                            ->scopedUnique(Almacen::class, 'nombre')
-                            ->validationMessages(['unique' => 'Ya existe un almacén con este nombre.'])
-                            ->visible(fn (Get $get): bool => $get('almacen') === 'nuevo'),
-                    ]),
+                Wizard::make([
+                    Step::make('Sucursal')->icon(Heroicon::OutlinedBuildingStorefront)
+                        ->description('Dónde vas a vender')
+                        ->schema([
+                            Section::make('Definí tu sucursal')->schema([
+                                Select::make('sucursal')->label('Sucursal')->live()->native(false)->required()
+                                    ->options(['nueva' => 'Crear sucursal'] + $sucursales)
+                                    ->visible($sucursales !== []),
+                                TextInput::make('nombre_sucursal')->label('Nombre de la sucursal')->placeholder('Ej. Local Centro')
+                                    ->helperText('Así la van a ver tus vendedores al abrir caja.')
+                                    ->required()->trim()->maxLength(255)->scopedUnique(Sucursal::class, 'nombre')
+                                    ->validationMessages(['unique' => 'Ya existe una sucursal con este nombre.'])
+                                    ->visible(fn (Get $get): bool => $sucursales === [] || $get('sucursal') === 'nueva'),
+                            ]),
+                        ]),
+                    Step::make('Almacén principal')->icon(Heroicon::OutlinedArchiveBox)
+                        ->description('Dónde guardás el stock')
+                        ->schema([
+                            Section::make('Definí tu almacén principal')->schema([
+                                Select::make('almacen')->label('Almacén')->live()->native(false)->required()
+                                    ->options(['nuevo' => 'Crear almacén'] + $almacenes)
+                                    ->visible($almacenes !== []),
+                                TextInput::make('nombre_almacen')->label('Nombre del almacén')->required()->trim()->maxLength(255)
+                                    ->scopedUnique(Almacen::class, 'nombre')
+                                    ->validationMessages(['unique' => 'Ya existe un almacén con este nombre.'])
+                                    ->visible(fn (Get $get): bool => $almacenes === [] || $get('almacen') === 'nuevo'),
+                            ]),
+                        ]),
+                    Step::make('Revisión')->icon(Heroicon::OutlinedCheckCircle)
+                        ->description('Confirmá antes de entrar')
+                        ->schema([
+                            Section::make('Revisá tu configuración')
+                                ->description('El almacén quedará vinculado como principal de esta sucursal.')
+                                ->schema([
+                                    TextEntry::make('resumen_sucursal')->label('Sucursal')
+                                        ->state(fn (Get $get): ?string => $this->nombreParaRevision($sucursales, $get('sucursal'), $get('nombre_sucursal'))),
+                                    TextEntry::make('resumen_almacen')->label('Almacén principal')
+                                        ->state(fn (Get $get): ?string => $this->nombreParaRevision($almacenes, $get('almacen'), $get('nombre_almacen'))),
+                                ])->columns(2),
+                        ]),
+                ])
+                    ->key('configuracionInicial')
+                    ->contained(false)
+                    ->extraAttributes(['class' => 'configuracion-inicial-wizard'])
+                    ->nextAction(fn (Action $action): Action => $action->label('Continuar'))
+                    ->previousAction(fn (Action $action): Action => $action->label('Volver'))
+                    ->submitAction(new HtmlString(Blade::render(
+                        '<x-filament::button type="submit" icon="heroicon-m-check">Guardar y entrar</x-filament::button>',
+                    ))),
             ]);
     }
 
@@ -134,14 +172,14 @@ class ConfiguracionInicial extends Page
 
             $datos = $this->form->getState();
 
-            if ($datos['sucursal'] === 'nueva') {
+            if (($datos['sucursal'] ?? 'nueva') === 'nueva') {
                 $sucursal = Sucursal::query()->create(['nombre' => $datos['nombre_sucursal'], 'is_active' => true]);
             } else {
                 $sucursal = Sucursal::query()->where('is_active', true)->findOrFail($datos['sucursal']);
                 $gate->authorize('update', $sucursal);
             }
 
-            if ($datos['almacen'] === 'nuevo') {
+            if (($datos['almacen'] ?? 'nuevo') === 'nuevo') {
                 $almacen = Almacen::query()->create(['nombre' => $datos['nombre_almacen']]);
             } else {
                 $almacen = Almacen::query()->findOrFail($datos['almacen']);
@@ -178,5 +216,15 @@ class ConfiguracionInicial extends Page
         }
 
         return Almacen::query()->orderBy('nombre')->pluck('nombre', 'id')->all();
+    }
+
+    /** @param array<int, string> $opciones */
+    private function nombreParaRevision(array $opciones, mixed $seleccion, mixed $nombre): ?string
+    {
+        $nombreNuevo = is_string($nombre) ? trim($nombre) : null;
+
+        return is_int($seleccion) || is_string($seleccion)
+            ? ($opciones[$seleccion] ?? $nombreNuevo)
+            : $nombreNuevo;
     }
 }

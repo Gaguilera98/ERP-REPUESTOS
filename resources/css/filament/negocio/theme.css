@@ -6,6 +6,34 @@
 @source '../../../../resources/views/livewire/**/*';
 @source '../../../../resources/views/components/negocio/**/*';
 
+.fi-sc-wizard.configuracion-inicial-wizard {
+    @apply lg:grid lg:grid-cols-[15.5rem_minmax(0,1fr)] lg:items-start lg:gap-x-6;
+
+    & > .fi-sc-wizard-header {
+        @apply lg:row-span-2 lg:grid-flow-row lg:overflow-visible;
+
+        & .fi-sc-wizard-header-step-separator {
+            @apply lg:hidden;
+        }
+
+        & .fi-sc-wizard-header-step-btn {
+            @apply lg:w-full lg:gap-x-3 lg:px-4;
+        }
+
+        & .fi-sc-wizard-header-step-text {
+            @apply lg:w-auto;
+        }
+    }
+
+    & > .fi-sc-wizard-step.fi-active {
+        @apply lg:col-start-2 lg:row-start-1 lg:mt-0;
+    }
+
+    & > .fi-sc-wizard-footer {
+        @apply lg:col-start-2 lg:row-start-2;
+    }
+}
+
 .producto-stock {
     @apply min-w-0 overflow-x-auto p-px;
 

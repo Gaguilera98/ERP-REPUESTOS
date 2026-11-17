@@ -47,17 +47,23 @@ it('redirige desde el inicio y permite crear y vincular la primera sucursal y su
 
     $this->get('http://inicio.localhost/negocio/configuracion-inicial')
         ->assertOk()
-        ->assertSee('Guardar y continuar')
+        ->assertSee('Definí tu sucursal')
         ->assertSee('Cerrar sesión')
         ->assertDontSee('fi-main-sidebar', escape: false)
         ->assertDontSee('fi-topbar-ctn', escape: false);
 
     tenancy()->initialize($tenant);
     Livewire::actingAs($supervisor, 'tenant')->test(ConfiguracionInicial::class)
-        ->assertSee('Guardar y continuar')
+        ->assertWizardCurrentStep(1)
         ->set('data.nombre_sucursal', '')
-        ->call('guardar')->assertHasErrors(['data.nombre_sucursal' => 'required'])
+        ->goToNextWizardStep()->assertHasErrors(['data.nombre_sucursal' => 'required'])
         ->set('data.nombre_sucursal', 'Local Centro')
+        ->goToNextWizardStep()->assertWizardCurrentStep(2)
+        ->set('data.nombre_almacen', '')
+        ->goToWizardStep(3)->assertHasErrors(['data.nombre_almacen' => 'required'])
+        ->set('data.nombre_almacen', 'Almacén principal')
+        ->goToWizardStep(3)->assertWizardCurrentStep(3)
+        ->assertSee('Revisá tu configuración')
         ->call('guardar')->assertHasNoErrors()->assertRedirect(Dashboard::getUrl());
 
     $sucursal = Sucursal::query()->sole();
@@ -111,7 +117,7 @@ it('muestra la situación al cajero y rechaza el guardado sin permisos', functio
 
     Livewire::actingAs($cajero, 'tenant')->test(ConfiguracionInicial::class)
         ->assertSee('Pedile a la persona encargada')
-        ->assertDontSee('Guardar y continuar')
+        ->assertDontSee('Guardar y entrar')
         ->call('guardar')->assertForbidden();
 
     expect(Sucursal::query()->exists())->toBeFalse()
