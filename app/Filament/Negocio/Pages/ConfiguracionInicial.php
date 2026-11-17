@@ -14,6 +14,8 @@ use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Support\Components\Attributes\Unexposed;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +26,10 @@ class ConfiguracionInicial extends Page
     protected static ?string $title = 'Configuración inicial';
 
     protected static bool $shouldRegisterNavigation = false;
+
+    protected static string $layout = 'filament-panels::components.layout.simple';
+
+    protected Width|string|null $maxContentWidth = Width::ThreeExtraLarge;
 
     protected string $view = 'filament.negocio.pages.configuracion-inicial';
 
@@ -49,6 +55,17 @@ class ConfiguracionInicial extends Page
         return $usuario instanceof TenantUser
             && $usuario->can('create', Sucursal::class)
             && $usuario->can('create', Almacen::class);
+    }
+
+    #[Unexposed]
+    public function hasLogo(): bool
+    {
+        return true;
+    }
+
+    protected function getLayoutData(): array
+    {
+        return ['hasTopbar' => false];
     }
 
     public function mount(): void

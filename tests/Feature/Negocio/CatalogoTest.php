@@ -21,6 +21,7 @@ use App\Models\OrdenCompra;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
 use App\Models\Sucursal;
+use App\Models\SucursalAlmacen;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
@@ -500,7 +501,8 @@ it('el supervisor crea productos y el cajero no puede editar el catálogo', func
     tenancy()->initialize($tenant);
 
     $categoria = Categoria::factory()->create(['nombre' => 'Rodamientos']);
-    Almacen::factory()->create(['nombre' => 'Depósito']);
+    $almacen = Almacen::factory()->create(['nombre' => 'Depósito']);
+    SucursalAlmacen::factory()->for($almacen)->create(['es_principal' => true]);
     $cajero = TenantUser::factory()->create();
     $cajero->assignRole('vendedor');
     $supervisor = TenantUser::factory()->create();

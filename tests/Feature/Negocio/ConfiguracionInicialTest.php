@@ -38,8 +38,19 @@ it('redirige desde el inicio y permite crear y vincular la primera sucursal y su
     $supervisor->assignRole('administrador');
     tenancy()->end();
 
-    $this->actingAs($supervisor, 'tenant')->get('http://inicio.localhost/negocio')
-        ->assertRedirect('http://inicio.localhost/negocio/configuracion-inicial');
+    $this->actingAs($supervisor, 'tenant');
+
+    foreach (['/negocio', '/negocio/productos', '/negocio/mostrador', '/negocio/caja'] as $ruta) {
+        $this->get('http://inicio.localhost'.$ruta)
+            ->assertRedirect('http://inicio.localhost/negocio/configuracion-inicial');
+    }
+
+    $this->get('http://inicio.localhost/negocio/configuracion-inicial')
+        ->assertOk()
+        ->assertSee('Guardar y continuar')
+        ->assertSee('Cerrar sesión')
+        ->assertDontSee('fi-main-sidebar', escape: false)
+        ->assertDontSee('fi-topbar-ctn', escape: false);
 
     tenancy()->initialize($tenant);
     Livewire::actingAs($supervisor, 'tenant')->test(ConfiguracionInicial::class)
@@ -61,6 +72,8 @@ it('redirige desde el inicio y permite crear y vincular la primera sucursal y su
     Livewire::test(Dashboard::class)->assertNoRedirect();
     Livewire::test(ConfiguracionInicial::class)->assertRedirect(Dashboard::getUrl());
     tenancy()->end();
+
+    $this->get('http://inicio.localhost/negocio/productos')->assertOk();
 });
 
 it('reutiliza los registros del negocio y rechaza un almacén de otro tenant', function () {
@@ -91,6 +104,7 @@ it('reutiliza los registros del negocio y rechaza un almacén de otro tenant', f
 
 it('muestra la situación al cajero y rechaza el guardado sin permisos', function () {
     $tenant = Tenant::factory()->create();
+    $tenant->domains()->create(['domain' => 'inicio']);
     tenancy()->initialize($tenant);
     $cajero = TenantUser::factory()->create();
     $cajero->assignRole('vendedor');
@@ -103,4 +117,10 @@ it('muestra la situación al cajero y rechaza el guardado sin permisos', functio
     expect(Sucursal::query()->exists())->toBeFalse()
         ->and(Almacen::query()->exists())->toBeFalse();
     tenancy()->end();
+
+    $this->actingAs($cajero, 'tenant')->get('http://inicio.localhost/negocio/productos')
+        ->assertRedirect('http://inicio.localhost/negocio/configuracion-inicial');
+    $this->post('http://inicio.localhost/negocio/logout')->assertRedirect();
+    $this->assertGuest('tenant');
+    $this->get('http://inicio.localhost/negocio/login')->assertOk();
 });

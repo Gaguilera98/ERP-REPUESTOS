@@ -24,6 +24,7 @@ use App\Models\ProductoUnidad;
 use App\Models\ProductoVariante;
 use App\Models\Proveedor;
 use App\Models\ProveedorContacto;
+use App\Models\SucursalAlmacen;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\Trabajador;
@@ -379,6 +380,7 @@ it('rechaza un producto de otro negocio', function () {
 
 it('muestra el costo por unidad y no escribe kardex hasta confirmarlo', function () {
     ['supervisor' => $supervisor, 'almacen' => $almacen, 'variante' => $variante, 'ocasional' => $ocasional] = negocioConPieza();
+    SucursalAlmacen::factory()->for($almacen)->create(['es_principal' => true]);
     $cajero = TenantUser::factory()->create();
     $cajero->assignRole('vendedor');
 

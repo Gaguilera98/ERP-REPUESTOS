@@ -16,9 +16,7 @@ class Dashboard extends BaseDashboard
             return;
         }
 
-        if (ConfiguracionInicial::estaPendiente()) {
-            $this->redirect(ConfiguracionInicial::getUrl());
-        } elseif (app(AccesoSucursales::class)->activa($usuario) === null) {
+        if (app(AccesoSucursales::class)->activa($usuario) === null) {
             $this->redirect(ElegirSucursal::getUrl());
         }
     }

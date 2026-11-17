@@ -5,6 +5,7 @@ namespace App\Providers\Filament;
 use App\Filament\Negocio\Pages\ElegirSucursal;
 use App\Filament\Negocio\Pages\MostradorDelNegocio;
 use App\Filament\Paleta;
+use App\Http\Middleware\RequerirConfiguracionInicial;
 use App\Models\TenantUser;
 use App\Tenancy\AccesoSucursales;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
@@ -86,6 +87,9 @@ class NegocioPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])
+            ->authMiddleware([
+                RequerirConfiguracionInicial::class,
+            ], isPersistent: true)
             ->plugins([
                 FilamentShieldPlugin::make()
                     ->centralApp(fn (): bool => FilamentFacade::getCurrentPanel()?->getId() === 'admin'),

@@ -215,6 +215,7 @@ it('lets the supervisor manage roles and keeps the cashier out', function () {
     $cajero->assignRole('vendedor');
     $supervisor = TenantUser::factory()->create();
     $supervisor->assignRole('administrador');
+    SucursalAlmacen::factory()->create(['es_principal' => true]);
 
     expect($cajero->can('viewAny', NegocioRole::class))->toBeFalse()
         ->and($cajero->can('create', Sucursal::class))->toBeFalse()

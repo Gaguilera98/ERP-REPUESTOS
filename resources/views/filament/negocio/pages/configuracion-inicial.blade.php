@@ -1,4 +1,4 @@
-<x-filament-panels::page>
+<x-filament-panels::page.simple>
     @if ($this->puedeConfigurar())
         <form wire:submit="guardar">
             {{ $this->form }}
@@ -13,4 +13,11 @@
             <x-slot name="description">Pedile a la persona encargada que complete la configuración inicial para poder operar.</x-slot>
         </x-filament::section>
     @endif
-</x-filament-panels::page>
+
+    <form method="POST" action="{{ filament()->getLogoutUrl() }}">
+        @csrf
+        <x-filament::button type="submit" color="gray" outlined>
+            Cerrar sesión
+        </x-filament::button>
+    </form>
+</x-filament-panels::page.simple>
