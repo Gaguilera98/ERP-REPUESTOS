@@ -149,6 +149,8 @@ class SeedNegocioRoles
             'Ampliar:Reserva',
             'Registrar:Devolucion',
             'Autorizar:ExcepcionDevolucion',
+            'Importar:Productos',
+            'Cargar:InventarioInicial',
             'Cargar:Conteo',
             'Cerrar:Conteo',
             'Ajustar:Inventario',

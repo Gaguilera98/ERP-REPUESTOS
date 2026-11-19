@@ -23,6 +23,8 @@ return [
     ],
 
     'tables' => [
+        'inventario_inicial_detalles',
+        'importaciones_productos',
         'model_has_permissions',
         'model_has_roles',
         'role_has_permissions',

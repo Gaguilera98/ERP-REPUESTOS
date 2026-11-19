@@ -62,20 +62,25 @@ class KardexProductoMaestro extends Page implements HasTable
     public function table(Table $table): Table
     {
         $producto = $this->getRecord();
-        $puedeVerCompras = Filament::auth()->user()?->can('View:OrdenCompra') ?? false;
+        $puedeVerCompras = (Filament::auth()->user()?->can('View:OrdenCompra') ?? false)
+            || (Filament::auth()->user()?->can('Cargar:InventarioInicial') ?? false);
         $moneda = $puedeVerCompras ? NegocioConfiguracion::codigoMoneda() : '';
         $unidad = $producto->unidadBase?->simbolo;
 
         return $table
             ->query(app(AccesoSucursales::class)->filtrarAlmacen(MovimientoInventario::query(), auth('tenant')->user())
                 ->whereHas('variante', fn (Builder $variantes): Builder => $variantes->where('producto_maestro_id', $producto->getKey()))
-                ->with($puedeVerCompras ? ['variante', 'almacen', 'ordenCompraReferenciada'] : ['variante', 'almacen']))
+                ->with($puedeVerCompras ? ['variante', 'almacen', 'ordenCompraReferenciada', 'loteInicialReferenciado.importacion', 'loteInicialReferenciado.proveedor'] : ['variante', 'almacen']))
             ->defaultSort('id', 'desc')
             ->paginationPageOptions([10, 25, 50])
             ->columns([
                 TextColumn::make('created_at')->label('Fecha y hora')->dateTime('d/m/Y H:i')->sortable(),
                 TextColumn::make('variante.sku')->label('SKU'),
                 TextColumn::make('almacen.nombre')->label('Almacén'),
+                TextColumn::make('carga_inicial')->label('Carga inicial / proveedor')->visible($puedeVerCompras)
+                    ->state(fn (MovimientoInventario $record): ?string => $record->referencia_tipo === 'inventario_inicial'
+                        ? $record->loteInicialReferenciado?->importacion?->codigo().' · Lote '.$record->referencia_id.' · '.($record->loteInicialReferenciado?->proveedor?->nombre_empresa ?? 'Sin proveedor especificado')
+                        : null)->placeholder('—')->wrap(),
                 TextColumn::make('tipo_movimiento')->label('Movimiento')->badge()
                     ->formatStateUsing(fn (TipoMovimientoInventario $state): string => $state->etiqueta())
                     ->color(fn (MovimientoInventario $record): string => match (bccomp($record->stock_posterior, $record->stock_previo, 4)) {
@@ -108,6 +113,11 @@ class KardexProductoMaestro extends Page implements HasTable
                     ->placeholder('—'),
             ])
             ->recordActions([
+                Action::make('verInventarioInicial')->label('Ver carga inicial')->icon(Heroicon::OutlinedEye)
+                    ->visible(fn (MovimientoInventario $record): bool => $puedeVerCompras && $record->referencia_tipo === 'inventario_inicial'
+                        && $record->loteInicialReferenciado?->importacion?->user_id === auth('tenant')->id()
+                        && ImportarProductos::canAccess())
+                    ->url(fn (MovimientoInventario $record): string => ProductoMaestroResource::getUrl('importar', ['importacion' => $record->loteInicialReferenciado->importacion_id])),
                 Action::make('verCompra')->label('Ver compra')->icon(Heroicon::OutlinedEye)
                     ->visible(fn (MovimientoInventario $record): bool => $puedeVerCompras
                         && self::esEntradaDeCompra($record)
@@ -142,6 +152,7 @@ class KardexProductoMaestro extends Page implements HasTable
     private static function esEntradaDeCompra(MovimientoInventario $movimiento): bool
     {
         return in_array($movimiento->tipo_movimiento, [
+            TipoMovimientoInventario::InventarioInicial,
             TipoMovimientoInventario::EntradaCompra,
             TipoMovimientoInventario::EntradaFlashEmergencia,
         ], true);

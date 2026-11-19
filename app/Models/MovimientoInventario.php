@@ -81,4 +81,9 @@ class MovimientoInventario extends Model
     {
         return $this->belongsTo(TenantUser::class, 'user_id');
     }
+
+    public function loteInicialReferenciado(): BelongsTo
+    {
+        return $this->belongsTo(InventarioInicialDetalle::class, 'referencia_id');
+    }
 }

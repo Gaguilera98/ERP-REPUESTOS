@@ -21,15 +21,21 @@ class NormalizarAtributosVariante
             return [];
         }
 
+        return $this->paraCategoria($maestro->categoria_id, is_array($variante->atributos_json) ? $variante->atributos_json : []);
+    }
+
+    /**
+     * @param  array<string, mixed>  $entrada
+     * @return array<string, int|float|string|list<string>>
+     */
+    public function paraCategoria(int $categoriaId, array $entrada): array
+    {
         $definiciones = CategoriaAtributo::query()
-            ->where('categoria_id', $maestro->categoria_id)
+            ->where('categoria_id', $categoriaId)
             ->orderBy('orden')
             ->orderBy('id')
             ->get()
             ->keyBy('clave');
-
-        $entrada = $variante->atributos_json;
-        $entrada = is_array($entrada) ? $entrada : [];
 
         $salida = [];
         $errores = [];

@@ -4,6 +4,7 @@ namespace App\Enums;
 
 enum TipoMovimientoInventario: string
 {
+    case InventarioInicial = 'inventario_inicial';
     case EntradaCompra = 'entrada_compra';
     case SalidaVenta = 'salida_venta';
     case Devolucion = 'devolucion';
@@ -16,6 +17,7 @@ enum TipoMovimientoInventario: string
     public function etiqueta(): string
     {
         return match ($this) {
+            self::InventarioInicial => 'Entrada por inventario inicial',
             self::EntradaCompra => 'Entrada por compra',
             self::SalidaVenta => 'Salida por venta',
             self::Devolucion => 'Devolución',

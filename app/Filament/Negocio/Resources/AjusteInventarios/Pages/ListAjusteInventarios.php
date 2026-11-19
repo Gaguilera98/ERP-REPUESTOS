@@ -3,6 +3,8 @@
 namespace App\Filament\Negocio\Resources\AjusteInventarios\Pages;
 
 use App\Filament\Negocio\Resources\AjusteInventarios\AjusteInventarioResource;
+use App\Filament\Negocio\Resources\ProductoMaestros\ProductoMaestroResource;
+use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 
@@ -13,6 +15,9 @@ class ListAjusteInventarios extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('inventarioInicial')->label('Cargar stock inicial')->color('gray')->icon('heroicon-o-arrow-up-tray')
+                ->visible(fn (): bool => auth('tenant')->user()->can('Importar:Productos') && auth('tenant')->user()->can('Cargar:InventarioInicial'))
+                ->url(ProductoMaestroResource::getUrl('importar', ['inventario' => true])),
             AjusteInventarioResource::ajustePuntual(),
             CreateAction::make()
                 ->label('Nuevo conteo')

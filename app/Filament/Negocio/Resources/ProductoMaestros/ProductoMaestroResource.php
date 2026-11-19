@@ -56,6 +56,7 @@ class ProductoMaestroResource extends Resource
     {
         return [
             'index' => ListProductoMaestros::route('/'),
+            'importar' => Pages\ImportarProductos::route('/importar'),
             'create' => CreateProductoMaestro::route('/create'),
             'edit' => EditProductoMaestro::route('/{record}/edit'),
             'kardex' => KardexProductoMaestro::route('/{record}/kardex'),

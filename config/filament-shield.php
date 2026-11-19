@@ -253,6 +253,8 @@ return [
     */
 
     'custom_permissions' => [
+        'Importar:Productos' => 'Importar productos desde Excel',
+        'Cargar:InventarioInicial' => 'Cargar inventario inicial desde Excel',
         'Corregir:Venta' => 'Corregir productos o cantidades de una venta',
         'Reembolsar:Sena' => 'Reembolsar una seña vencida',
         'Ampliar:Reserva' => 'Ampliar el vencimiento de una reserva',

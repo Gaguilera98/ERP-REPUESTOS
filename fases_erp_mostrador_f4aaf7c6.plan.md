@@ -213,6 +213,20 @@ En Administración → Configuración se habilita el dólar de referencia. Quien
 
 En Compras, una línea nueva en USD guarda el costo original y la cotización comercial vigente al registrarla. El formulario muestra la cotización y la equivalencia por unidad. Las líneas guardadas conservan su cotización, también al editar o recibir por partes.
 
+## Importación de productos e inventario inicial
+
+Desde Productos → Importar productos se descarga una plantilla `.xlsx` con instrucciones, ejemplo y los catálogos del negocio. La hoja Productos admite hasta 1000 filas y el archivo hasta 5 MB. Las columnas SKU y código de barras tienen formato Texto para conservar ceros iniciales. Categorías, marcas, proveedores y unidades se resuelven dentro del tenant. La unidad tiene que ser de cantidad. La ficha técnica opcional usa JSON y respeta los atributos obligatorios de la categoría.
+
+La revisión muestra errores por fila, productos nuevos, actualizaciones y productos cuyos datos se conservarán. Actualizar existentes requiere confirmación explícita y el permiso de actualización del catálogo. Las celdas opcionales vacías conservan los valores existentes. Los importes de esta versión se expresan en la moneda local. Un SKU con precios referenciados en USD conserva esa configuración y su actualización de precios se realiza desde la ficha.
+
+Al activar inventario inicial se elige un almacén autorizado y la fecha del inventario. El acceso también está disponible desde Inventario → Cargar stock inicial. Cada fila con cantidad inicial exige costo unitario. El proveedor es opcional. Un SKU repetido con datos de catálogo iguales puede representar varios lotes con distintos costos o proveedores. El sistema calcula el valor y el costo promedio. La fecha elegida describe el inventario de origen y el Kardex registra el momento real de la carga.
+
+Cada carga conserva un borrador, las filas revisadas, el responsable y su resultado en `importaciones_productos`. Los lotes iniciales se guardan en `inventario_inicial_detalles`. La entrada del Kardex se identifica como Entrada por inventario inicial y permite consultar el lote, costo, proveedor y la carga. Una carga inicial requiere un SKU sin movimientos ni saldo previo en el almacén elegido. Las reposiciones posteriores utilizan compras o ajustes según su origen.
+
+Al confirmar se despacha `ProcesarImportacionProductos` a la cola predeterminada. El worker restaura el tenant, vuelve a verificar permisos, almacén, conteos y catálogo, y aplica la carga completa en una transacción. Un cambio relevante exige revisar otra vez. La huella del archivo, el bloqueo de la carga y sus estados protegen contra reintentos duplicados. Si el despacho o la ejecución falla, la revisión permite reintentar. Los errores se descargan como Excel con las filas pendientes y una hoja con sus mensajes.
+
+Los permisos `Importar:Productos` y `Cargar:InventarioInicial` se asignan inicialmente a administrador y supervisor. Pueden administrarse por rol o usuario. La migración se ejecuta en cada pool mediante el procedimiento de despliegue existente. Para procesar las cargas se requiere un worker de la cola predeterminada. En desarrollo se puede usar `php artisan queue:work --tries=3 --timeout=60`. La importación de líneas dentro de una compra queda como ampliación posterior.
+
 ## Qué no entra en estas fases
 
 Cobrar el mostrador con billetes de dólar. El dólar solo convierte. El cliente de otro país paga en la moneda de la tienda.

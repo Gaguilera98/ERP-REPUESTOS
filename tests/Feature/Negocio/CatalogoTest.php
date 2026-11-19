@@ -1,7 +1,6 @@
 <?php
 
 use App\Catalogo\VariantesProducto;
-use App\Enums\MagnitudUnidad;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\TipoMovimientoInventario;
 use App\Filament\Negocio\Resources\Categorias\Pages\ManageCategorias;
@@ -45,6 +44,12 @@ beforeEach(function () {
         '--realpath' => true,
         '--force' => true,
     ]);
+});
+
+afterEach(function () {
+    if (tenancy()->initialized) {
+        tenancy()->end();
+    }
 });
 
 it('muestra el stock total del producto y separa las reservas por almacén y SKU en su ficha', function () {
@@ -270,11 +275,7 @@ it('guarda los atributos de la categoría como número o texto, sin claves de m�
 
     /** @var Categoria $categoria */
     $categoria = Categoria::factory()->create(['nombre' => 'Rodamientos']);
-    $milimetro = UnidadMedida::factory()->create([
-        'nombre' => 'Milímetro',
-        'simbolo' => 'mm',
-        'magnitud' => MagnitudUnidad::Longitud,
-    ]);
+    $milimetro = UnidadMedida::query()->where('simbolo', 'mm')->firstOrFail();
 
     CategoriaAtributo::factory()->decimal()->create([
         'categoria_id' => $categoria->id,
@@ -428,16 +429,8 @@ it('rechaza un texto en un decimal y una unidad en un atributo que no se mide', 
     tenancy()->initialize($tenant);
 
     $categoria = Categoria::factory()->create(['nombre' => 'Rodamientos']);
-    $milimetro = UnidadMedida::factory()->create([
-        'nombre' => 'Milímetro',
-        'simbolo' => 'mm',
-        'magnitud' => MagnitudUnidad::Longitud,
-    ]);
-    $voltio = UnidadMedida::factory()->create([
-        'nombre' => 'Voltio',
-        'simbolo' => 'V',
-        'magnitud' => MagnitudUnidad::Electrico,
-    ]);
+    $milimetro = UnidadMedida::query()->where('simbolo', 'mm')->firstOrFail();
+    $voltio = UnidadMedida::query()->where('simbolo', 'V')->firstOrFail();
 
     $diametro = CategoriaAtributo::factory()->decimal()->create([
         'categoria_id' => $categoria->id,
