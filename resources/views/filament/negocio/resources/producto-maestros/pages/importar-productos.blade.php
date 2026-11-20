@@ -65,6 +65,12 @@
         @if (filled($carga->resultado['aviso'] ?? null))
             <p role="alert" class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">{{ $carga->resultado['aviso'] }}</p>
         @endif
+        @if ($carga->almacen_id !== null && $revision['lotes'] === 0 && in_array($carga->estado, ['revision', 'fallida'], true))
+            <p role="alert" class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">{{ \App\Catalogo\ImportarProductos::EXISTENCIAS_REQUERIDAS }}</p>
+        @endif
+        @if ($revision['actualizados'] > 0 && in_array($carga->estado, ['revision', 'fallida'], true))
+            <p class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">Se actualizarán productos existentes por coincidencia de SKU. Abrí Revisar fila para comparar los valores actuales y propuestos antes de confirmar.</p>
+        @endif
         @if ($revision['errores'] !== [])
             <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-danger-500/10 p-4">
                 <p class="text-sm text-danger-700 dark:text-danger-300">{{ count($revision['errores']) }} filas necesitan corrección. Corregilas en la tabla o seleccioná varias para asignar un valor en grupo.</p>
@@ -77,7 +83,7 @@
         </x-filament::section>
         <div class="flex flex-wrap items-center justify-between gap-3">
             <x-filament::button color="gray" wire:click="nuevaCarga">Volver a mis importaciones</x-filament::button>
-            @if (in_array($carga->estado, ['revision', 'fallida'], true) && $revision['errores'] === [])
+            @if (in_array($carga->estado, ['revision', 'fallida'], true) && $revision['errores'] === [] && ($carga->almacen_id === null || $revision['lotes'] > 0))
                 {{ $this->confirmarAction }}
             @endif
         </div>

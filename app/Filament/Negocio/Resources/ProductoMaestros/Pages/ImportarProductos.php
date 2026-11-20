@@ -97,11 +97,11 @@ class ImportarProductos extends Page implements HasTable
                     FileUpload::make('archivo')->label('Archivo de productos')->required()->storeFiles(false)
                         ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])
                         ->maxSize(5120)->columnSpanFull(),
-                    Toggle::make('actualizar_existentes')->label('Actualizar datos de los SKU existentes')
-                        ->helperText('Apagado, los productos existentes conservan sus datos. Los SKU nuevos se crean.')
+                    Toggle::make('actualizar_existentes')->label('Actualizar productos existentes por SKU')
+                        ->helperText('Activado, puede reemplazar nombre, marca, precios, código de barras y ficha técnica de los SKU encontrados. Revisá los cambios antes de confirmar. Apagado, conservan sus datos. Los SKU nuevos se crean en ambos casos.')
                         ->visible(fn (): bool => auth('tenant')->user()->can('Update:ProductoMaestro')),
-                    Toggle::make('inventario')->label('Incluir inventario inicial')->live()
-                        ->helperText('Para mercadería que ya tenés. Cada fila con cantidad y costo registra un lote en el almacén elegido.')
+                    Toggle::make('inventario')->label('Cargar existencias iniciales')->live()
+                        ->helperText('Para mercadería que ya tenés. Requiere almacén, fecha y al menos una fila con cantidad y costo válidos. Podés incluir productos sin stock dejando cantidad, costo y proveedor vacíos.')
                         ->disabled(fn (): bool => ! auth('tenant')->user()->can('Cargar:InventarioInicial')),
                     Select::make('almacen_id')->label('Almacén que tiene la mercadería')
                         ->options(fn (): array => app(AccesoSucursales::class)->almacenes(auth('tenant')->user())->orderBy('nombre')->pluck('nombre', 'id')->all())

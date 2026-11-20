@@ -23,6 +23,8 @@ use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Infolists\Components\RepeatableEntry;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -107,6 +109,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                 ...$fila,
                 'accion' => $errores !== [] ? 'corregir' : ($resuelta['accion'] ?? 'conservar'),
                 'errores' => $errores,
+                'cambios' => $resuelta['cambios'] ?? [],
                 'precio_menor' => $resuelta['precio_menor'] ?? $fila['precio_menor'],
                 'precio_mayor' => $resuelta['precio_mayor'] ?? $fila['precio_mayor'],
                 'valor_lote' => isset($resuelta['cantidad']) ? Montos::multiplicar($resuelta['cantidad'], $resuelta['costo'], 2) : null,
@@ -151,7 +154,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                     'corregir' => 'Corregir', 'crear' => 'Crear', 'actualizar' => 'Actualizar', default => 'Conservar',
                 })->color(fn (string $state): string => match ($state) {
                     'corregir' => 'danger', 'crear' => 'success', default => 'gray'
-                })->description(fn (array $record): ?string => $record['errores'] === [] ? null : count($record['errores']).' pendiente(s)')
+                })->description(fn (array $record): ?string => $record['errores'] !== [] ? count($record['errores']).' pendiente(s)' : ($record['cambios'] !== [] ? count($record['cambios']).' cambio(s) · Revisar fila' : null))
                     ->tooltip(fn (array $record): ?string => $record['errores'] === [] ? null : implode(' ', $record['errores'])),
                 $this->selector('categoria'),
                 $this->selector('marca')->toggleable(isToggledHiddenByDefault: true),
@@ -223,6 +226,16 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                 return $fila;
             })
             ->schema([
+                Section::make('Cambios propuestos')->description('Compará los datos actuales con los que se aplicarán al confirmar la importación. Si editás esta fila, guardala para recalcular la comparación.')
+                    ->visible(fn (array $record): bool => $this->cambiosFila($record['fila']) !== [])
+                    ->schema([
+                        RepeatableEntry::make('cambios_propuestos')->hiddenLabel()->state(fn (array $record): array => $this->cambiosFila($record['fila']))
+                            ->schema([
+                                TextEntry::make('campo')->label('Campo'),
+                                TextEntry::make('anterior')->label('Actual')->wrap(),
+                                TextEntry::make('nuevo')->label('Al confirmar')->wrap(),
+                            ])->columns(3),
+                    ]),
                 Section::make('Qué falta corregir')->description(fn (array $record): string => implode(' ', $this->erroresFila($record['fila'])))
                     ->visible(fn (array $record): bool => $this->erroresFila($record['fila']) !== [])->schema([]),
                 Section::make('Ficha recibida del archivo')->collapsible()->collapsed()
@@ -318,6 +331,12 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
     private function erroresFila(int $numero): array
     {
         return $this->importacion->revision['errores'][$numero] ?? [];
+    }
+
+    /** @return list<array{campo: string, anterior: string, nuevo: string}> */
+    private function cambiosFila(int $numero): array
+    {
+        return collect($this->importacion->revision['filas'])->firstWhere('fila', $numero)['cambios'] ?? [];
     }
 
     private function camposFicha(?string $nombre): array

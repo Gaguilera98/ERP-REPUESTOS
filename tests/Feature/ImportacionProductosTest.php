@@ -717,3 +717,64 @@ it('conserva las importaciones confirmadas y sus resultados al intentar eliminar
         ->and(InventarioInicialDetalle::query()->count())->toBe($enCola ? 0 : 1)
         ->and(ProductoVariante::query()->count())->toBe($enCola ? 0 : 1);
 })->with(['en cola' => true, 'completada' => false]);
+
+it('exige al menos un lote válido para confirmar una carga de existencias iniciales', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion()], 'sin-stock.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    expect($importacion->revision['errores'])->toBe([]);
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->call('verImportacion', $importacion->id)->assertSee(ImportarProductos::EXISTENCIAS_REQUERIDAS)
+        ->assertDontSee('Confirmar importación')->call('confirmar')->assertHasErrors(['archivo']);
+    expect($importacion->refresh()->estado)->toBe('revision')
+        ->and(ProductoVariante::query()->count())->toBe(0)->and(MovimientoInventario::query()->count())->toBe(0);
+});
+
+it('admite mezclar productos con existencias y otros de solo catálogo', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([
+        filaImportacion(['cantidad_inicial' => '2', 'costo_unitario' => '10']),
+        filaImportacion(['fila' => 3, 'sku' => 'SIN-STOCK', 'codigo_barras' => '']),
+    ], 'mixto.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    expect($importacion->revision['errores'])->toBe([])->and($importacion->revision['lotes'])->toBe(1);
+    $servicio->confirmar($importacion->id, $usuario);
+    expect($importacion->refresh()->estado)->toBe('completada')
+        ->and(ProductoVariante::query()->count())->toBe(2)
+        ->and(InventarioInicialDetalle::query()->count())->toBe(1);
+});
+
+it('bloquea en el worker una carga antigua de inventario sin existencias', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([filaImportacion()], 'antigua.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    $importacion->update(['estado' => 'en_cola']);
+    $servicio->ejecutar($importacion->id);
+    expect($importacion->refresh()->estado)->toBe('revision')
+        ->and(ProductoVariante::query()->count())->toBe(0)->and(MovimientoInventario::query()->count())->toBe(0);
+});
+
+it('muestra los valores actuales y propuestos antes de actualizar un SKU existente', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'diametro', 'etiqueta' => 'Diámetro']);
+    $servicio = app(ImportarProductos::class);
+    $original = $servicio->preparar([filaImportacion(['atributos' => '{"diametro":5}'])], 'original.xlsx', null, null, false, $usuario);
+    $servicio->confirmar($original->id, $usuario);
+    $marca = Marca::factory()->create(['nombre' => 'Marca nueva']);
+    $fila = filaImportacion(['nombre' => 'Nombre actualizado', 'marca' => $marca->nombre, 'precio_menor' => '55', 'atributos' => '{"diametro":8}']);
+    $conservada = $servicio->revisar([$fila], null, false, $usuario);
+    expect($conservada['filas'][0]['cambios'])->toBe([]);
+    $importacion = $servicio->preparar([$fila], 'actualizacion.xlsx', null, null, true, $usuario);
+    $cambios = collect($importacion->revision['filas'][0]['cambios'])->keyBy('campo');
+    expect($cambios['Nombre'])->toBe(['campo' => 'Nombre', 'anterior' => 'Rodamiento 6206', 'nuevo' => 'Nombre actualizado'])
+        ->and($cambios['Marca']['anterior'])->toBe('Sin especificar')
+        ->and($cambios['Precio al por menor']['anterior'])->toBe('45.00')
+        ->and($cambios['Precio al por menor']['nuevo'])->toBe('55.00')
+        ->and($cambios)->toHaveCount(4)
+        ->and(ProductoVariante::query()->sole()->precio_venta)->toBe('45.00');
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->mountAction(TestAction::make('corregirFila')->table('2'))
+        ->call('forceRender')
+        ->assertSee('Cambios propuestos')->assertSee('Al confirmar')->assertSee('45.00')->assertSee('55.00');
+    $servicio->confirmar($importacion->id, $usuario);
+    expect(ProductoVariante::query()->sole()->precio_venta)->toBe('55.00');
+});

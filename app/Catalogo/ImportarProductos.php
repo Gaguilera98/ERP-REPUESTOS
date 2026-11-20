@@ -21,6 +21,7 @@ use App\Models\TenantUser;
 use App\Models\UnidadMedida;
 use App\Tenancy\AccesoSucursales;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -31,6 +32,8 @@ use Throwable;
 
 class ImportarProductos
 {
+    public const EXISTENCIAS_REQUERIDAS = 'Agregá al menos una fila con cantidad inicial positiva y costo unitario válidos, o volvé a la carga y desactivá Cargar existencias iniciales.';
+
     public function __construct(
         private RegistrarMovimiento $movimientos,
         private AccesoSucursales $acceso,
@@ -63,7 +66,7 @@ class ImportarProductos
         $marcas = Marca::query()->get()->groupBy(fn (Marca $modelo): string => mb_strtolower($modelo->nombre));
         $unidades = UnidadMedida::query()->where('uso', UsoUnidad::Cantidad)->get()->keyBy('simbolo');
         $proveedores = Proveedor::query()->get()->groupBy(fn (Proveedor $modelo): string => mb_strtolower($modelo->nombre_empresa));
-        $existentes = ProductoVariante::query()->with(['productoMaestro.variantes', 'productoMaestro.unidadBase'])
+        $existentes = ProductoVariante::query()->with(['productoMaestro.variantes', 'productoMaestro.unidadBase', 'productoMaestro.marca'])
             ->whereIn('sku', array_column($filas, 'sku'))->get()->keyBy('sku');
         $conMovimiento = $almacenId === null ? [] : MovimientoInventario::query()->where('almacen_id', $almacenId)
             ->whereIn('producto_variante_id', $existentes->pluck('id'))->pluck('producto_variante_id')->all();
@@ -197,6 +200,7 @@ class ImportarProductos
                     'precio_menor' => $precios['precio_venta'] ?? $variante?->precio_venta,
                     'precio_mayor' => $precios['precio_mayor'] ?? $variante?->precio_mayor,
                     'unidad' => $unidad->simbolo,
+                    'cambios' => $accion === 'actualizar' ? $this->cambiosPropuestos($producto, $variante, $datos, $precios, $marcas, $columnasFicha) : [],
                 ];
             } catch (ValidationException $exception) {
                 $revision['errores'][$numero] = Arr::flatten($exception->errors());
@@ -216,6 +220,36 @@ class ImportarProductos
         }
 
         return Montos::redondear($texto, $decimales);
+    }
+
+    /** @return list<array{campo: string, anterior: string, nuevo: string}> */
+    private function cambiosPropuestos(ProductoMaestro $producto, ProductoVariante $variante, array $datos, array $precios, Collection $marcas, array $columnasFicha): array
+    {
+        $marca = $marcas->flatten()->firstWhere('id', $datos['marca_id']);
+        $campos = [
+            ['Nombre', $producto->nombre, $datos['nombre']],
+            ['Marca', $producto->marca?->nombre, $marca?->nombre],
+            ['Precio al por menor', $variante->precio_venta, $precios['precio_venta']],
+            ['Precio al por mayor', $variante->precio_mayor, $precios['precio_mayor']],
+            ['Código de barras', $variante->codigo_barras, $precios['codigo_barras']],
+        ];
+        foreach ($columnasFicha as $definicion) {
+            if (isset($definicion['categorias'][$producto->categoria_id])) {
+                $clave = $definicion['clave'];
+                $campos[] = [$definicion['label'], $variante->atributos_json[$clave] ?? null, $precios['atributos_json'][$clave] ?? null];
+            }
+        }
+        $cambios = [];
+        $mostrar = fn (mixed $valor): string => blank($valor) ? 'Sin especificar' : (is_array($valor) ? implode(', ', $valor) : (string) $valor);
+        foreach ($campos as [$campo, $anterior, $nuevo]) {
+            $iguales = (is_array($anterior) || is_array($nuevo)) ? $anterior == $nuevo : (string) $anterior === (string) $nuevo;
+            if ($iguales) {
+                continue;
+            }
+            $cambios[] = ['campo' => $campo, 'anterior' => $mostrar($anterior), 'nuevo' => $mostrar($nuevo)];
+        }
+
+        return $cambios;
     }
 
     /** @param list<array<string, string|int>> $filas */
@@ -346,6 +380,9 @@ class ImportarProductos
             if ($importacion->revision['errores'] !== []) {
                 throw ValidationException::withMessages(['archivo' => 'Corregí las filas con errores antes de confirmar.']);
             }
+            if ($importacion->almacen_id !== null && $importacion->revision['lotes'] === 0) {
+                throw ValidationException::withMessages(['archivo' => self::EXISTENCIAS_REQUERIDAS]);
+            }
             $importacion->update(['estado' => 'en_cola', 'resultado' => null]);
             $tenantId = (string) tenant('id');
             DB::afterCommit(function () use ($tenantId, $id): void {
@@ -430,7 +467,7 @@ class ImportarProductos
             }
             ProductoVariante::query()->whereIn('sku', $skus)->orderBy('id')->lockForUpdate()->get();
             $revision = $this->revisar($importacion->filas, $importacion->almacen_id, $importacion->actualizar_existentes, $usuario);
-            if ($revision['errores'] !== []) {
+            if ($revision['errores'] !== [] || ($importacion->almacen_id !== null && $revision['lotes'] === 0)) {
                 $importacion->update(['estado' => 'revision', 'revision' => $revision]);
 
                 return;
