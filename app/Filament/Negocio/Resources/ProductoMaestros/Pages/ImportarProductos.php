@@ -263,7 +263,19 @@ class ImportarProductos extends Page implements HasTable
                     'completada' => 'success', 'en_cola' => 'info', 'fallida' => 'danger', default => 'warning'
                 }),
                 TextColumn::make('created_at')->label('Fecha de carga')->dateTime('d/m/Y H:i'),
-            ])->recordActions([Action::make('ver')->label('Revisar')->icon('heroicon-o-eye')->action(fn (ImportacionProducto $record) => $this->verImportacion($record->id))])
+            ])->recordActions([
+                Action::make('ver')->label('Revisar')->icon('heroicon-o-eye')->action(fn (ImportacionProducto $record) => $this->verImportacion($record->id)),
+                Action::make('eliminarBorrador')->label('Eliminar borrador')->icon('heroicon-o-trash')->color('danger')
+                    ->visible(fn (ImportacionProducto $record): bool => in_array($record->estado, ['revision', 'fallida'], true) && $record->completada_at === null)
+                    ->requiresConfirmation()->modalHeading('Eliminar borrador de importación')
+                    ->modalDescription('Se eliminarán esta carga y sus filas de revisión. Las marcas, categorías y otros datos creados en el catálogo se conservarán. Podés volver a subir el Excel después.')
+                    ->modalSubmitActionLabel('Eliminar borrador')
+                    ->action(function (ImportacionProducto $record): void {
+                        app(Importador::class)->eliminarBorrador($record->id, auth('tenant')->user());
+                        $this->flushCachedTableRecords();
+                        Notification::make()->title('Borrador eliminado')->success()->send();
+                    }),
+            ])
             ->paginated([10, 25])->emptyStateHeading('Todavía no hay importaciones');
     }
 

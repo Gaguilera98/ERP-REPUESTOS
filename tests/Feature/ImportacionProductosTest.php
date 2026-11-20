@@ -11,6 +11,7 @@ use App\Livewire\Negocio\RevisionImportacionProductos;
 use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
+use App\Models\ImportacionProducto;
 use App\Models\InventarioInicialDetalle;
 use App\Models\Marca;
 use App\Models\MovimientoInventario;
@@ -673,3 +674,46 @@ it('actualiza una revisión anterior cuando la marca ya fue creada sin volver a 
     expect($importacion->refresh()->revision['errores'])->toBe([])
         ->and($importacion->filas)->toBe($filas)->and(ProductoVariante::query()->count())->toBe(0);
 });
+
+it('elimina un borrador propio sin borrar catálogos y permite volver a cargar el mismo archivo', function (string $estado) {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $marca = Marca::factory()->create(['nombre' => 'Marca conservada']);
+    $filas = [filaImportacion(['marca' => $marca->nombre])];
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar($filas, 'borrador.xlsx', null, null, false, $usuario);
+    $importacion->update(['estado' => $estado]);
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->callTableAction('eliminarBorrador', $importacion)->assertHasNoErrors();
+
+    expect(ImportacionProducto::query()->find($importacion->id))->toBeNull()
+        ->and(Marca::query()->find($marca->id))->not->toBeNull()
+        ->and(ProductoVariante::query()->count())->toBe(0)
+        ->and(MovimientoInventario::query()->count())->toBe(0);
+    $nueva = $servicio->preparar($filas, 'borrador.xlsx', null, null, false, $usuario);
+    expect($nueva->estado)->toBe('revision')->and($nueva->id)->not->toBe($importacion->id);
+})->with(['revision', 'fallida']);
+
+it('no permite eliminar una importación ajena', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([filaImportacion()], 'ajena.xlsx', null, null, false, $usuario);
+    $otro = TenantUser::factory()->create();
+    $otro->assignRole('administrador');
+    expect(fn () => $servicio->eliminarBorrador($importacion->id, $otro))->toThrow(ModelNotFoundException::class);
+    expect($importacion->fresh())->not->toBeNull();
+});
+
+it('conserva las importaciones confirmadas y sus resultados al intentar eliminar el borrador', function (bool $enCola) {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    if ($enCola) {
+        Queue::fake();
+    }
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([filaImportacion(['cantidad_inicial' => '2', 'costo_unitario' => '25'])], 'confirmada.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    $servicio->confirmar($importacion->id, $usuario);
+    expect(fn () => $servicio->eliminarBorrador($importacion->id, $usuario))->toThrow(ValidationException::class, 'Solo podés eliminar un borrador');
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)->assertTableActionHidden('eliminarBorrador', $importacion);
+    expect($importacion->refresh()->estado)->toBe($enCola ? 'en_cola' : 'completada')
+        ->and(InventarioInicialDetalle::query()->count())->toBe($enCola ? 0 : 1)
+        ->and(ProductoVariante::query()->count())->toBe($enCola ? 0 : 1);
+})->with(['en cola' => true, 'completada' => false]);

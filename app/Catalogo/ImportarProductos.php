@@ -301,6 +301,19 @@ class ImportarProductos
         });
     }
 
+    public function eliminarBorrador(int $id, TenantUser $usuario): void
+    {
+        $this->consultar($id, $usuario);
+        DB::transaction(function () use ($id, $usuario): void {
+            $importacion = ImportacionProducto::query()->where('user_id', $usuario->id)->lockForUpdate()->findOrFail($id);
+            if (! in_array($importacion->estado, ['revision', 'fallida'], true)
+                || $importacion->completada_at !== null || $importacion->lotes()->exists()) {
+                throw ValidationException::withMessages(['importacion' => 'Solo podés eliminar un borrador sin resultados aplicados. Las cargas en proceso o completadas se conservan.']);
+            }
+            $importacion->delete();
+        });
+    }
+
     public function revalidar(int $id, TenantUser $usuario): ImportacionProducto
     {
         $this->consultar($id, $usuario);
