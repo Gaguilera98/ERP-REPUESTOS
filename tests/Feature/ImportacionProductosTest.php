@@ -25,6 +25,7 @@ use App\Models\TenantUser;
 use App\Models\UnidadMedida;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
@@ -588,6 +589,7 @@ it('crea una marca desde el selector de la fila y la conserva seleccionada', fun
         ], ['nombre' => 'MASAKI'])->assertHasNoErrors();
     expect(Marca::query()->where('nombre', 'MASAKI')->count())->toBe(1)
         ->and($tabla->get('mountedActions')[0]['data']['marca'])->toBe('MASAKI')
+        ->and($importacion->refresh()->revision['errores'])->toBe([])
         ->and(ProductoVariante::query()->count())->toBe(0);
     $tabla->callMountedAction()->assertHasNoErrors();
     expect($importacion->refresh()->revision['errores'])->toBe([]);
@@ -625,4 +627,49 @@ it('oculta la creación junto al selector cuando no tiene permiso de crear catá
             TestAction::make('createOption')->schemaComponent($campo),
         ]);
     }
+});
+
+it('retira el error de marca creada aunque falte la categoría y el guardado quede bloqueado', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $filas = [
+        filaImportacion(['categoria' => 'Motor y Refrigeración', 'marca' => 'EXACT CARS']),
+        filaImportacion(['fila' => 3, 'sku' => 'ABC', 'codigo_barras' => '', 'categoria' => 'Motor y Refrigeración', 'marca' => 'EXACT CARS']),
+    ];
+    $importacion = app(ImportarProductos::class)->preparar($filas, 'pendientes.xlsx', null, null, false, $usuario);
+    $tabla = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callAction([
+            TestAction::make('corregirFila')->table('2'),
+            TestAction::make('createOption')->schemaComponent('marca'),
+        ], ['nombre' => 'EXACT CARS'])->assertHasNoErrors();
+    foreach ($importacion->refresh()->revision['errores'] as $errores) {
+        expect($errores)->toHaveCount(1)->and($errores[0])->toContain('categoría');
+    }
+    $tabla->assertDontSee('La marca «EXACT CARS»');
+    $tabla->callMountedAction()->assertHasErrors(['mountedActions.0.data.categoria']);
+    expect($tabla->instance()->getErrorBag()->first('mountedActions.0.data.categoria'))->toBe('Elegí una categoría activa del negocio o creala con el botón +.');
+    expect($importacion->refresh()->filas)->toBe($filas)->and(ProductoVariante::query()->count())->toBe(0);
+});
+
+it('protege la revalidación de cargas ajenas y confirmadas', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([filaImportacion()], 'revalidar.xlsx', null, null, false, $usuario);
+    $otro = TenantUser::factory()->create();
+    $otro->assignRole('administrador');
+    expect(fn () => $servicio->revalidar($importacion->id, $otro))->toThrow(ModelNotFoundException::class);
+    Queue::fake();
+    $servicio->confirmar($importacion->id, $usuario);
+    expect(fn () => $servicio->revalidar($importacion->id, $usuario))->toThrow(ValidationException::class, 'confirmada o en proceso');
+});
+
+it('actualiza una revisión anterior cuando la marca ya fue creada sin volver a subir el Excel', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $filas = [filaImportacion(['marca' => 'EXACT CARS'])];
+    $importacion = app(ImportarProductos::class)->preparar($filas, 'anterior.xlsx', null, null, false, $usuario);
+    Marca::factory()->create(['nombre' => 'EXACT CARS']);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callTableAction('revalidar')->assertHasNoErrors()->assertDispatched('importacion-corregida')
+        ->assertDontSee('La marca «EXACT CARS»');
+    expect($importacion->refresh()->revision['errores'])->toBe([])
+        ->and($importacion->filas)->toBe($filas)->and(ProductoVariante::query()->count())->toBe(0);
 });

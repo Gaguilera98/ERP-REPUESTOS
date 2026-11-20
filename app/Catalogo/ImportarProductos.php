@@ -301,6 +301,23 @@ class ImportarProductos
         });
     }
 
+    public function revalidar(int $id, TenantUser $usuario): ImportacionProducto
+    {
+        $this->consultar($id, $usuario);
+
+        return DB::transaction(function () use ($id, $usuario): ImportacionProducto {
+            $importacion = ImportacionProducto::query()->where('user_id', $usuario->id)->lockForUpdate()->findOrFail($id);
+            $this->autorizar($usuario, $importacion->almacen_id);
+            if (! in_array($importacion->estado, ['revision', 'fallida'], true)) {
+                throw ValidationException::withMessages(['importacion' => 'Esta carga ya está confirmada o en proceso. Volvé a consultar su resultado.']);
+            }
+            $revision = $this->revisar($importacion->filas, $importacion->almacen_id, $importacion->actualizar_existentes, $usuario);
+            $importacion->update(['revision' => $revision, 'estado' => 'revision', 'resultado' => null]);
+
+            return $importacion;
+        });
+    }
+
     public function confirmar(int $id, TenantUser $usuario, ?string $versionRevision = null): void
     {
         DB::transaction(function () use ($id, $usuario, $versionRevision): void {

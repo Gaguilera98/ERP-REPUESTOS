@@ -168,7 +168,16 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                 'corregir' => 'Con errores', 'crear' => 'Productos nuevos', 'actualizar' => 'Se actualizarán', 'conservar' => 'Conservar existentes',
             ])])->deferFilters(false)
             ->recordActions([$this->editarFila()])
-            ->headerActions([$this->resolverCatalogos()])
+            ->headerActions([
+                $this->resolverCatalogos(),
+                Action::make('revalidar')->label('Actualizar revisión')->icon('heroicon-o-arrow-path')->color('gray')
+                    ->visible(fn (): bool => $this->puedeCorregir())
+                    ->action(function (): void {
+                        app(ImportarProductos::class)->revalidar($this->importacionId, auth('tenant')->user());
+                        unset($this->opcionesCatalogos);
+                        $this->actualizarRevision();
+                    }),
+            ])
             ->toolbarActions([$this->asignarEnLote()])
             ->emptyStateHeading('No hay filas para esta consulta');
     }
@@ -214,8 +223,8 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                 return $fila;
             })
             ->schema([
-                Section::make('Qué falta corregir')->description(fn (array $record): string => implode(' ', $record['errores']))
-                    ->visible(fn (array $record): bool => $record['errores'] !== [])->schema([]),
+                Section::make('Qué falta corregir')->description(fn (array $record): string => implode(' ', $this->erroresFila($record['fila'])))
+                    ->visible(fn (array $record): bool => $this->erroresFila($record['fila']) !== [])->schema([]),
                 Section::make('Ficha recibida del archivo')->collapsible()->collapsed()
                     ->description(function (array $record): string {
                         $opciones = app(MapearColumnasProductos::class)->opciones();
@@ -250,6 +259,11 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
     {
         $selector = Select::make($campo)->label($label)
             ->options(fn (): array => $this->opcionesCatalogos[$campo])->searchable()->native(false)->live(condition: $campo === 'categoria')
+            ->validationMessages(['in' => match ($campo) {
+                'categoria' => 'Elegí una categoría activa del negocio o creala con el botón +.',
+                'marca' => 'Elegí una marca del negocio o creala con el botón +.',
+                default => 'Elegí una unidad de stock del negocio.',
+            }])
             ->afterStateUpdated(function (Set $set) use ($campo): void {
                 if ($campo === 'categoria') {
                     $set('ficha', []);
@@ -277,9 +291,15 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                     $schema->model($registro)->saveRelationships();
                 }
 
+                app(ImportarProductos::class)->revalidar($this->importacionId, auth('tenant')->user());
+
                 return $registro;
             });
             unset($this->opcionesCatalogos);
+            unset($this->importacion);
+            $this->flushCachedTableRecords();
+            $this->dispatch('importacion-corregida', id: $this->importacionId);
+            $this->forceRender();
 
             return $registro->nombre;
         })->createOptionAction(fn (Action $action): Action => $action
@@ -292,6 +312,12 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             ])
             ->modalDescription('El registro se agrega al catálogo al crearlo. Guardá la fila para aplicar la selección a esta revisión.')
             ->stickyModalHeader()->stickyModalFooter());
+    }
+
+    /** @return list<string> */
+    private function erroresFila(int $numero): array
+    {
+        return $this->importacion->revision['errores'][$numero] ?? [];
     }
 
     private function camposFicha(?string $nombre): array
