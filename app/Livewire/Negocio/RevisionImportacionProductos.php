@@ -212,6 +212,14 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             ->disabledSchema(fn (): bool => ! $this->puedeCorregir())->modalSubmitAction(fn (Action $action): Action => $action->visible(fn (): bool => $this->puedeCorregir()))
             ->fillForm(function (array $record): array {
                 $fila = collect($this->importacion->filas)->firstWhere('fila', $record['fila']);
+                foreach (array_keys(self::CATALOGOS) as $campo) {
+                    $valor = (string) $fila[$campo];
+                    $coincidencias = array_filter(array_keys($this->opcionesCatalogos[$campo]), fn (string $opcion): bool => $campo === 'unidad_stock'
+                        ? $opcion === $valor : mb_strtolower($opcion) === mb_strtolower($valor));
+                    if (count($coincidencias) === 1) {
+                        $fila[$campo] = (string) array_values($coincidencias)[0];
+                    }
+                }
                 $categorias = Categoria::query()->with('atributos')->whereRaw('lower(nombre) = lower(?)', [$fila['categoria']])->get();
                 $categoria = $categorias->count() === 1 ? $categorias->first() : null;
                 $resuelta = collect($this->importacion->revision['filas'])->firstWhere('fila', $fila['fila']);
@@ -256,8 +264,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                     ->visible(fn (): bool => $this->importacion->almacen_id !== null),
                 TextInput::make('costo_unitario')->label('Costo unitario')->maxLength(20)->inputMode('decimal')
                     ->visible(fn (): bool => $this->importacion->almacen_id !== null),
-                Select::make('proveedor')->label('Proveedor')->options(fn (): array => $this->opcionesCatalogos['proveedor'])
-                    ->searchable()->native(false)->visible(fn (): bool => $this->importacion->almacen_id !== null),
+                $this->selectorFormulario('proveedor', 'Proveedor')->visible(fn (): bool => $this->importacion->almacen_id !== null),
                 Section::make('Ficha técnica')->description('Campos de la categoría elegida. Las unidades y las opciones corresponden a su configuración.')
                     ->schema(fn (Get $get): array => $this->camposFicha($get('categoria'))),
             ])->modalSubmitActionLabel('Guardar y validar')
@@ -271,7 +278,12 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
     private function selectorFormulario(string $campo, string $label): Select
     {
         $selector = Select::make($campo)->label($label)
-            ->options(fn (): array => $this->opcionesCatalogos[$campo])->searchable()->native(false)->live(condition: $campo === 'categoria')
+            ->options(fn (): array => $this->opcionesCatalogos[$campo])->searchable()->native(false)->live()
+            ->hint(fn (mixed $state): ?string => $this->avisoCatalogo($campo, $state) ? (blank($state) ? 'Falta seleccionar' : 'Sin coincidencia') : null)
+            ->hintColor('warning')
+            ->prefixIcon(fn (mixed $state): ?string => $this->avisoCatalogo($campo, $state) ? 'heroicon-o-exclamation-triangle' : null)
+            ->prefixIconColor('warning')
+            ->helperText(fn (mixed $state): ?string => $this->avisoCatalogo($campo, $state))
             ->validationMessages(['in' => match ($campo) {
                 'categoria' => 'Elegí una categoría activa del negocio o creala con el botón +.',
                 'marca' => 'Elegí una marca del negocio o creala con el botón +.',
@@ -325,6 +337,29 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             ])
             ->modalDescription('El registro se agrega al catálogo al crearlo. Guardá la fila para aplicar la selección a esta revisión.')
             ->stickyModalHeader()->stickyModalFooter());
+    }
+
+    private function avisoCatalogo(string $campo, mixed $valor): ?string
+    {
+        if (blank($valor)) {
+            return match ($campo) {
+                'categoria' => 'Elegí una categoría del negocio para este producto.',
+                'unidad_stock' => 'Elegí la unidad con la que se contará el stock.',
+                default => null,
+            };
+        }
+        if (array_key_exists((string) $valor, $this->opcionesCatalogos[$campo])) {
+            return null;
+        }
+
+        $crear = $this->puedeCorregir() && $this->puedeCrearCatalogo($campo);
+
+        return 'Del Excel: «'.$valor.'». '.match ($campo) {
+            'categoria' => $crear ? 'Elegí una categoría del negocio o creala con +.' : 'Elegí una categoría existente del negocio.',
+            'marca' => ($crear ? 'Elegí una marca del negocio o creala con +.' : 'Elegí una marca existente del negocio.').' También podés dejarla sin especificar.',
+            'proveedor' => 'Elegí un proveedor del negocio o dejalo sin especificar.',
+            default => 'Elegí una unidad de stock del negocio.',
+        };
     }
 
     /** @return list<string> */

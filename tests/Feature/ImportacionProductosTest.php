@@ -778,3 +778,38 @@ it('muestra los valores actuales y propuestos antes de actualizar un SKU existen
     $servicio->confirmar($importacion->id, $usuario);
     expect(ProductoVariante::query()->sole()->precio_venta)->toBe('55.00');
 });
+
+it('señala junto al selector los valores del Excel sin coincidencia y retira el aviso al corregirlos', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    $marca = Marca::factory()->create(['nombre' => 'Marca registrada']);
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['categoria' => 'Categoría del Excel', 'marca' => 'Marca del Excel'])], 'valores.xlsx', null, null, false, $usuario);
+    $tabla = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->mountAction(TestAction::make('corregirFila')->table('2'))->call('forceRender')
+        ->assertSee('Sin coincidencia')->assertSee('Del Excel: «Categoría del Excel».')
+        ->assertSee('Del Excel: «Marca del Excel».');
+    $tabla->setActionData(['categoria' => $categoria->nombre, 'marca' => $marca->nombre])->call('forceRender')
+        ->assertDontSee('Sin coincidencia')->assertDontSee('Del Excel: «Categoría del Excel».')
+        ->assertDontSee('Del Excel: «Marca del Excel».');
+    expect(ProductoVariante::query()->count())->toBe(0);
+});
+
+it('reconoce nombres existentes con otras mayúsculas y permite guardar la selección canónica', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $marca = Marca::factory()->create(['nombre' => 'Marca registrada']);
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['categoria' => 'rodamientos', 'marca' => 'MARCA REGISTRADA'])], 'mayusculas.xlsx', null, null, false, $usuario);
+    $tabla = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->mountAction(TestAction::make('corregirFila')->table('2'))->call('forceRender')->assertDontSee('Sin coincidencia');
+    expect($tabla->get('mountedActions')[0]['data']['categoria'])->toBe('Rodamientos')
+        ->and($tabla->get('mountedActions')[0]['data']['marca'])->toBe($marca->nombre);
+    $tabla->callMountedAction()->assertHasNoErrors();
+    expect($importacion->refresh()->revision['errores'])->toBe([]);
+});
+
+it('distingue campos requeridos vacíos de la marca opcional sin especificar', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['categoria' => '', 'unidad_stock' => '', 'marca' => ''])], 'vacios.xlsx', null, null, false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->mountAction(TestAction::make('corregirFila')->table('2'))->call('forceRender')
+        ->assertSee('Falta seleccionar')->assertSee('Elegí una categoría del negocio para este producto.')
+        ->assertSee('Elegí la unidad con la que se contará el stock.')->assertDontSee('Sin coincidencia');
+});
