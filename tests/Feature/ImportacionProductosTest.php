@@ -2,6 +2,7 @@
 
 use App\Catalogo\ArchivoProductos;
 use App\Catalogo\ImportarProductos;
+use App\Catalogo\MapearColumnasProductos;
 use App\Enums\TipoMovimientoInventario;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\ImportarProductos as ImportarPagina;
 use App\Inventario\AjustarInventario;
@@ -11,6 +12,7 @@ use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
 use App\Models\InventarioInicialDetalle;
+use App\Models\Marca;
 use App\Models\MovimientoInventario;
 use App\Models\OrdenCompra;
 use App\Models\ProductoMaestro;
@@ -20,6 +22,7 @@ use App\Models\Sucursal;
 use App\Models\SucursalAlmacen;
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use App\Models\UnidadMedida;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -31,6 +34,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use OpenSpout\Common\Entity\Row;
+use OpenSpout\Reader\XLSX\Reader;
 use OpenSpout\Writer\XLSX\Writer;
 
 uses(RefreshDatabase::class);
@@ -416,4 +420,159 @@ it('asigna y quita el proveedor de varios lotes desde la acción masiva', functi
         ->and(collect($importacion->filas)->pluck('proveedor')->all())->toBe([$proveedor->nombre_empresa, $proveedor->nombre_empresa]);
     $tabla->callTableBulkAction('asignarCampo', ['2', '3'], ['campo' => 'proveedor', 'quitar' => true])->assertHasNoErrors();
     expect(collect($importacion->refresh()->filas)->pluck('proveedor')->all())->toBe(['', '']);
+});
+
+it('relaciona un Excel propio y confirma atributos decimales y listas sin JSON', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'diametro', 'etiqueta' => 'Diámetro', 'obligatorio' => true]);
+    CategoriaAtributo::factory()->lista(['2RS', 'ZZ'])->create(['categoria_id' => $categoria->id, 'clave' => 'sellos', 'etiqueta' => 'Sellos']);
+    $ruta = tempnam(sys_get_temp_dir(), 'excel-propio-');
+    $writer = new Writer;
+    try {
+        $writer->openToFile($ruta);
+        $writer->addRow(Row::fromValues(['Producto', 'Código', 'Familia', 'Unidad', 'Precio', 'Diámetro', 'Sellos', 'Nota personal']));
+        $writer->addRow(ArchivoProductos::filaDeTexto(['Rodamiento', '000008', 'Rodamientos', 'pza', '45', '5,5', '2RS|ZZ', 'No importar']));
+        $writer->close();
+        $archivo = UploadedFile::fake()->createWithContent('mi-catalogo.xlsx', file_get_contents($ruta));
+    } finally {
+        unlink($ruta);
+    }
+    $mapeador = app(MapearColumnasProductos::class);
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->fillForm(['archivo' => $archivo])->call('revisar')->assertHasNoErrors()->assertSee('Relacionar columnas');
+    expect(ProductoVariante::query()->count())->toBe(0);
+    $mapa = $pagina->get('columnasData')['mapa'];
+    $mapa[2] = 'categoria';
+    $mapa[7] = 'ignorar';
+    $pagina->set('columnasData.mapa', $mapa)->call('relacionarColumnas')->assertHasNoErrors()->call('confirmar')->assertHasNoErrors();
+
+    $variante = ProductoVariante::query()->sole();
+    expect($variante->sku)->toBe('000008')->and($variante->atributos_json)->toBe(['diametro' => 5.5, 'sellos' => ['2RS', 'ZZ']]);
+});
+
+it('exige omitir columnas desconocidas y rechaza destinos repetidos o ajenos', function () {
+    escenarioImportacion();
+    $mapeador = app(MapearColumnasProductos::class);
+    $archivo = ['columnas' => ['SKU', 'Nota'], 'filas' => [['fila' => 2, 'valores' => ['ABC', 'privado']]]];
+
+    expect(fn () => $mapeador->aplicar($archivo, ['sku', '']))->toThrow(ValidationException::class, 'Elegí un campo')
+        ->and(fn () => $mapeador->aplicar($archivo, ['sku', 'sku']))->toThrow(ValidationException::class, 'sin repetirlo')
+        ->and(fn () => $mapeador->aplicar($archivo, ['sku', 'ficha_999999']))->toThrow(ValidationException::class)
+        ->and(fn () => $mapeador->aplicar($archivo, ['ignorar', 'nombre']))->toThrow(ValidationException::class, 'SKU');
+    expect($mapeador->aplicar($archivo, ['sku', 'ignorar'])[0]['sku'])->toBe('ABC');
+});
+
+it('valida atributos por categoría y permite completar la ficha desde el panel lateral', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    $otra = Categoria::factory()->create(['nombre' => 'Correas']);
+    $diametro = CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'diametro', 'etiqueta' => 'Diámetro', 'obligatorio' => true]);
+    $largo = CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $otra->id, 'clave' => 'largo', 'etiqueta' => 'Largo', 'obligatorio' => true]);
+    $mapeador = app(MapearColumnasProductos::class);
+    $archivo = ['columnas' => ['sku', 'nombre', 'categoria', 'unidad_stock', 'precio_menor', 'Diámetro', 'Largo'], 'filas' => [
+        ['fila' => 2, 'valores' => ['ROD', 'Rodamiento', 'Rodamientos', 'pza', '45', 'incorrecto', '']],
+        ['fila' => 3, 'valores' => ['COR', 'Correa', 'Correas', 'pza', '40', '', '15']],
+    ]];
+    $filas = $mapeador->aplicar($archivo, $mapeador->sugerir($archivo['columnas']));
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar($filas, 'mixto.xlsx', null, null, false, $usuario);
+    expect(array_keys($importacion->revision['errores']))->toBe([2]);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callTableAction('corregirFila', '2', ['ficha' => ['diametro' => '8.5']])->assertHasNoErrors();
+    expect($importacion->refresh()->revision['errores'])->toBe([])
+        ->and($importacion->filas[0])->not->toHaveKey('_ficha_columnas');
+    $servicio->confirmar($importacion->id, $usuario);
+    expect(ProductoVariante::query()->where('sku', 'ROD')->sole()->atributos_json)->toBe(['diametro' => 8.5])
+        ->and(ProductoVariante::query()->where('sku', 'COR')->sole()->atributos_json)->toBe(['largo' => 15]);
+});
+
+it('no mezcla atributos homónimos con unidades distintas ni descarta valores de otra categoría', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    $otra = Categoria::factory()->create(['nombre' => 'Otra categoría']);
+    $milimetros = UnidadMedida::query()->where('simbolo', 'mm')->sole();
+    $otraUnidad = UnidadMedida::factory()->create();
+    CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'medida', 'etiqueta' => 'Medida', 'unidad_medida_id' => $milimetros->id]);
+    $segundo = CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $otra->id, 'clave' => 'medida', 'etiqueta' => 'Medida', 'unidad_medida_id' => $otraUnidad->id]);
+    $mapeador = app(MapearColumnasProductos::class);
+    expect($mapeador->sugerir(['medida']))->toBe(['']);
+    $revision = app(ImportarProductos::class)->revisar([filaImportacion(['_ficha_columnas' => json_encode(['ficha_'.$segundo->id => 'dato'])])], null, false, $usuario);
+    expect(implode(' ', $revision['errores'][2]))->toContain('no corresponde a la categoría');
+});
+
+it('comparte una columna de lista entre categorías y valida las opciones de cada una', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    $otra = Categoria::factory()->create(['nombre' => 'Correas']);
+    $definicion = CategoriaAtributo::factory()->lista(['Rojo', 'Azul'])->create(['categoria_id' => $categoria->id, 'clave' => 'color', 'etiqueta' => 'Color']);
+    CategoriaAtributo::factory()->lista(['Negro', 'Blanco'])->create(['categoria_id' => $otra->id, 'clave' => 'color', 'etiqueta' => 'Color']);
+    $mapa = app(MapearColumnasProductos::class)->sugerir(['Color']);
+    expect($mapa)->toBe(['ficha_'.$definicion->id]);
+    $servicio = app(ImportarProductos::class);
+    $filas = [
+        filaImportacion(['_ficha_columnas' => json_encode([$mapa[0] => 'Rojo'])]),
+        filaImportacion(['fila' => 3, 'sku' => 'COR', 'codigo_barras' => '', 'categoria' => 'Correas', '_ficha_columnas' => json_encode([$mapa[0] => 'Negro'])]),
+    ];
+    expect($servicio->revisar($filas, null, false, $usuario)['errores'])->toBe([]);
+    $filas[1]['_ficha_columnas'] = json_encode([$mapa[0] => 'Rojo']);
+    expect(array_keys($servicio->revisar($filas, null, false, $usuario)['errores']))->toBe([3]);
+});
+
+it('muestra juntos los catálogos incorrectos en lugar de esconderlos detrás del primero', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $revision = app(ImportarProductos::class)->revisar([filaImportacion([
+        'categoria' => 'Inexistente', 'marca' => 'Sin marca registrada', 'unidad_stock' => 'no-existe',
+        'proveedor' => 'Sin proveedor registrado', 'cantidad_inicial' => '2', 'costo_unitario' => '20',
+    ])], $almacen->id, false, $usuario);
+
+    expect($revision['errores'][2])->toHaveCount(4)->and($revision['nuevos'])->toBe(0);
+});
+
+it('crea una marca con autorización y la asigna a todas las coincidencias del Excel', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([
+        filaImportacion(['marca' => 'Marca nueva']),
+        filaImportacion(['fila' => 3, 'sku' => 'ABC', 'codigo_barras' => '', 'marca' => 'MARCA NUEVA']),
+    ], 'marcas.xlsx', null, null, false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callTableAction('resolverCatalogos', data: ['campo' => 'marca', 'origen' => 'Marca nueva', 'crear' => true])->assertHasNoErrors();
+    expect(Marca::query()->where('nombre', 'Marca nueva')->count())->toBe(1)
+        ->and($importacion->refresh()->revision['errores'])->toBe([])
+        ->and(collect($importacion->filas)->pluck('marca')->all())->toBe(['Marca nueva', 'Marca nueva'])
+        ->and(ProductoVariante::query()->count())->toBe(0);
+});
+
+it('rechaza crear catálogos sin permiso aunque el usuario pueda corregir su carga', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([filaImportacion(['marca' => 'Sin permiso'])], 'marca.xlsx', null, null, false, $usuario);
+    $usuario->syncRoles([]);
+    $usuario->givePermissionTo(['Importar:Productos', 'ViewAny:ProductoMaestro']);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callTableAction('resolverCatalogos', data: ['campo' => 'marca', 'origen' => 'Sin permiso', 'crear' => true])->assertForbidden();
+    expect(Marca::query()->where('nombre', 'Sin permiso')->exists())->toBeFalse();
+});
+
+it('genera una plantilla personalizada legible que vuelve a reconocer sus atributos', function () {
+    ['categoria' => $categoria] = escenarioImportacion();
+    CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'diametro', 'etiqueta' => 'Diámetro']);
+    $ruta = tempnam(sys_get_temp_dir(), 'plantilla-ficha-');
+    try {
+        app(ArchivoProductos::class)->plantilla($ruta, 'BOB', [$categoria->id], ['nombre', 'precio_menor']);
+        $reader = new Reader;
+        $reader->open($ruta);
+        $columnas = [];
+        foreach ($reader->getSheetIterator() as $sheet) {
+            foreach ($sheet->getRowIterator() as $row) {
+                $columnas = $row->toArray();
+                break;
+            }
+            break;
+        }
+        $reader->close();
+        unset($sheet, $reader);
+        gc_collect_cycles();
+        $mapa = app(MapearColumnasProductos::class)->sugerir($columnas);
+        expect($columnas)->toHaveCount(4)->not->toContain('atributos')->and($mapa[0])->toBe('sku')->and($mapa[3])->toStartWith('ficha_');
+    } finally {
+        unlink($ruta);
+    }
 });

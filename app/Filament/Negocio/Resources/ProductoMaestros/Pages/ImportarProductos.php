@@ -4,11 +4,14 @@ namespace App\Filament\Negocio\Resources\ProductoMaestros\Pages;
 
 use App\Catalogo\ArchivoProductos;
 use App\Catalogo\ImportarProductos as Importador;
+use App\Catalogo\MapearColumnasProductos;
 use App\Filament\Negocio\Resources\ProductoMaestros\ProductoMaestroResource;
+use App\Models\Categoria;
 use App\Models\ImportacionProducto;
 use App\Models\NegocioConfiguracion;
 use App\Tenancy\AccesoSucursales;
 use Filament\Actions\Action;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
@@ -41,6 +44,14 @@ class ImportarProductos extends Page implements HasTable
     protected string $view = 'filament.negocio.resources.producto-maestros.pages.importar-productos';
 
     public ?array $data = [];
+
+    public ?array $columnasData = [];
+
+    #[Locked]
+    public ?array $archivoPendiente = null;
+
+    #[Locked]
+    public array $opcionesPendientes = [];
 
     #[Url]
     public bool $inventario = false;
@@ -81,7 +92,7 @@ class ImportarProductos extends Page implements HasTable
     public function form(Schema $schema): Schema
     {
         return $schema->statePath('data')->components([
-            Section::make('Subir Excel')->description('Usá nuestra plantilla. Los precios y costos se expresan en '.$this->moneda().'. Hasta '.ArchivoProductos::MAX_FILAS.' filas por archivo.')
+            Section::make('Subir Excel')->description('Usá una plantilla o tu propio Excel. Podrás relacionar sus columnas antes de revisar. Precios y costos en '.$this->moneda().'. Hasta '.ArchivoProductos::MAX_FILAS.' filas.')
                 ->schema([
                     FileUpload::make('archivo')->label('Archivo de productos')->required()->storeFiles(false)
                         ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])
@@ -106,7 +117,16 @@ class ImportarProductos extends Page implements HasTable
     protected function getHeaderActions(): array
     {
         return [Action::make('plantilla')->label('Descargar plantilla')->color('gray')->icon('heroicon-o-arrow-down-tray')
-            ->action(fn (): StreamedResponse => $this->descargarPlantilla())];
+            ->modalHeading('Preparar plantilla')->modalSubmitActionLabel('Descargar Excel')
+            ->schema([Select::make('categorias')->label('Incluir ficha técnica de estas categorías')->multiple()->searchable()->native(false)
+                ->options(fn (): array => Categoria::query()->where('is_active', true)->orderBy('nombre')->pluck('nombre', 'id')->all())
+                ->helperText('Sin categorías, se descarga la plantilla básica. Podés mezclar productos de varias categorías en una hoja.'),
+                CheckboxList::make('campos')->label('Columnas del catálogo y del inventario')->columns(2)
+                    ->options(array_diff_key(MapearColumnasProductos::CAMPOS, ['atributos' => true]))
+                    ->default(array_values(array_diff(ArchivoProductos::COLUMNAS, ['atributos'])))
+                    ->helperText('El SKU siempre se incluye. Los campos obligatorios que falten se deberán completar durante la revisión.'),
+            ])
+            ->action(fn (array $data): StreamedResponse => $this->descargarPlantilla($data['categorias'] ?? [], $data['campos'] ?? []))];
     }
 
     public function moneda(): string
@@ -125,16 +145,44 @@ class ImportarProductos extends Page implements HasTable
         $local = tempnam(sys_get_temp_dir(), 'productos-');
         try {
             file_put_contents($local, $archivo->get());
-            $filas = app(ArchivoProductos::class)->leer($local);
+            $contenido = app(ArchivoProductos::class)->inspeccionar($local);
         } finally {
             unlink($local);
         }
+        $this->archivoPendiente = $contenido;
+        $this->opcionesPendientes = [...array_diff_key($data, ['archivo' => true]), 'nombre_archivo' => $archivo->getClientOriginalName()];
+        $this->columnasForm->fill(['mapa' => app(MapearColumnasProductos::class)->sugerir($contenido['columnas'])]);
+        if ($contenido['columnas'] === ArchivoProductos::COLUMNAS) {
+            $this->relacionarColumnas();
+        }
+    }
+
+    public function columnasForm(Schema $schema): Schema
+    {
+        $opciones = ['ignorar' => 'No importar esta columna', ...app(MapearColumnasProductos::class)->opciones()];
+
+        return $schema->statePath('columnasData')->components([
+            Section::make('Relacionar columnas')->description('Comprobá las sugerencias. Cada campo se puede elegir una vez. Marcá explícitamente las columnas que no querés importar.')
+                ->schema(collect($this->archivoPendiente['columnas'] ?? [])->map(fn (string $columna, int $indice): Select => Select::make('mapa.'.$indice)
+                    ->label($columna)->helperText('Ejemplo: '.mb_substr(implode(' · ', array_slice(array_filter(array_column(array_column($this->archivoPendiente['filas'], 'valores'), $indice), fn (string $valor): bool => $valor !== ''), 0, 2)), 0, 160))
+                    ->options($opciones)->required()->searchable()->native(false))->all())->columns(2),
+        ]);
+    }
+
+    public function relacionarColumnas(): void
+    {
+        abort_unless(static::canAccess() && $this->archivoPendiente !== null, 403);
+        $mapa = $this->columnasForm->getState()['mapa'];
+        $filas = app(MapearColumnasProductos::class)->aplicar($this->archivoPendiente, $mapa);
+        $data = $this->opcionesPendientes;
         $conInventario = (bool) ($data['inventario'] ?? false);
         $importacion = app(Importador::class)->preparar(
-            $filas, $archivo->getClientOriginalName(), $conInventario ? (int) $data['almacen_id'] : null,
+            $filas, $data['nombre_archivo'], $conInventario ? (int) $data['almacen_id'] : null,
             $conInventario ? $data['fecha_inventario'] : null, (bool) ($data['actualizar_existentes'] ?? false), auth('tenant')->user(),
         );
         $this->importacionId = $importacion->id;
+        $this->archivoPendiente = null;
+        $this->opcionesPendientes = [];
         unset($this->importacion);
     }
 
@@ -175,6 +223,8 @@ class ImportarProductos extends Page implements HasTable
 
     public function nuevaCarga(): void
     {
+        $this->archivoPendiente = null;
+        $this->opcionesPendientes = [];
         $this->importacionId = null;
         $this->versionRevision = null;
         unset($this->importacion);
@@ -217,15 +267,20 @@ class ImportarProductos extends Page implements HasTable
             ->paginated([10, 25])->emptyStateHeading('Todavía no hay importaciones');
     }
 
-    public function descargarPlantilla(): StreamedResponse
+    public function descargarPlantilla(array $categorias = [], ?array $campos = null): StreamedResponse
     {
         abort_unless(static::canAccess(), 403);
         $moneda = $this->moneda();
+        $ruta = tempnam(sys_get_temp_dir(), 'plantilla-');
+        try {
+            app(ArchivoProductos::class)->plantilla($ruta, $moneda, $categorias, $campos);
+        } catch (\Throwable $exception) {
+            unlink($ruta);
+            throw $exception;
+        }
 
-        return response()->streamDownload(function () use ($moneda): void {
-            $ruta = tempnam(sys_get_temp_dir(), 'plantilla-');
+        return response()->streamDownload(function () use ($ruta): void {
             try {
-                app(ArchivoProductos::class)->plantilla($ruta, $moneda);
                 readfile($ruta);
             } finally {
                 unlink($ruta);
@@ -236,17 +291,23 @@ class ImportarProductos extends Page implements HasTable
     public function descargarErrores(): StreamedResponse
     {
         $importacion = $this->getImportacion();
+        $opciones = app(MapearColumnasProductos::class)->opciones();
+        $adicionales = collect($importacion->filas)->flatMap(fn (array $fila): array => array_keys(json_decode($fila['_ficha_columnas'] ?? '{}', true)))->unique()->values()->all();
 
-        return response()->streamDownload(function () use ($importacion): void {
+        return response()->streamDownload(function () use ($importacion, $opciones, $adicionales): void {
             $ruta = tempnam(sys_get_temp_dir(), 'errores-');
             $writer = new Writer;
             try {
                 $writer->openToFile($ruta);
                 $writer->getCurrentSheet()->setName('Productos');
-                $writer->addRow(Row::fromValues(ArchivoProductos::COLUMNAS));
+                $writer->addRow(ArchivoProductos::filaDeTexto([...ArchivoProductos::COLUMNAS, ...array_map(fn (string $campo): string => $opciones[$campo] ?? $campo, $adicionales)]));
                 foreach ($importacion->filas as $fila) {
                     if (isset($importacion->revision['errores'][$fila['fila']])) {
-                        $writer->addRow(ArchivoProductos::filaDeTexto(array_map(fn (string $columna): string => (string) $fila[$columna], ArchivoProductos::COLUMNAS)));
+                        $ficha = json_decode($fila['_ficha_columnas'] ?? '{}', true);
+                        $writer->addRow(ArchivoProductos::filaDeTexto([
+                            ...array_map(fn (string $columna): string => (string) $fila[$columna], ArchivoProductos::COLUMNAS),
+                            ...array_map(fn (string $campo): string => (string) ($ficha[$campo] ?? ''), $adicionales),
+                        ]));
                     }
                 }
                 $writer->addNewSheetAndMakeItCurrent()->setName('Errores por fila original');

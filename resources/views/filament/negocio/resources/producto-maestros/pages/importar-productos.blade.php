@@ -7,7 +7,15 @@
         </div>
     @endif
 
-    @if (! $this->importacion)
+    @if ($this->archivoPendiente)
+        <form wire:submit="relacionarColumnas" class="space-y-6">
+            {{ $this->columnasForm }}
+            <div class="flex flex-wrap items-center gap-3">
+                <x-filament::button type="submit" wire:loading.attr="disabled" wire:target="relacionarColumnas">Continuar a revisión</x-filament::button>
+                <x-filament::button color="gray" wire:click="nuevaCarga">Cambiar archivo</x-filament::button>
+            </div>
+        </form>
+    @elseif (! $this->importacion)
         <form wire:submit="revisar" class="space-y-6">
             {{ $this->form }}
             <div class="flex flex-wrap items-center gap-3">

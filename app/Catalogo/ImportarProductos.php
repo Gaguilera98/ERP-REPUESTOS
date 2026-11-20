@@ -75,6 +75,7 @@ class ImportarProductos
         $vistas = [];
         $barras = [];
         $cantidades = [];
+        $columnasFicha = app(MapearColumnasProductos::class)->atributos();
         foreach ($filas as $fila) {
             $numero = (int) $fila['fila'];
             try {
@@ -95,14 +96,21 @@ class ImportarProductos
                     $categoria = $categorias->get(mb_strtolower((string) $fila['categoria']));
                     $marca = filled($fila['marca']) ? $marcas->get(mb_strtolower((string) $fila['marca'])) : null;
                     $unidad = $unidades->get($fila['unidad_stock']);
+                    $catalogos = [];
                     if ($categoria?->count() !== 1) {
-                        throw ValidationException::withMessages(['categoria' => 'La categoría «'.$fila['categoria'].'» no coincide con una categoría activa y única del negocio. Elegí la categoría correcta.']);
+                        $catalogos['categoria'] = 'La categoría «'.$fila['categoria'].'» no coincide con una categoría activa y única del negocio. Elegí la categoría correcta.';
                     }
                     if (! $unidad) {
-                        throw ValidationException::withMessages(['unidad_stock' => 'El símbolo de unidad «'.$fila['unidad_stock'].'» no corresponde a una unidad de stock del negocio.']);
+                        $catalogos['unidad_stock'] = 'El símbolo de unidad «'.$fila['unidad_stock'].'» no corresponde a una unidad de stock del negocio.';
                     }
                     if (filled($fila['marca']) && $marca?->count() !== 1) {
-                        throw ValidationException::withMessages(['marca' => 'La marca «'.$fila['marca'].'» no coincide con una marca única del negocio. Elegí la marca correcta.']);
+                        $catalogos['marca'] = 'La marca «'.$fila['marca'].'» no coincide con una marca única del negocio. Elegí la marca correcta.';
+                    }
+                    if (filled($fila['cantidad_inicial']) && filled($fila['proveedor']) && $proveedores->get(mb_strtolower((string) $fila['proveedor']))?->count() !== 1) {
+                        $catalogos['proveedor'] = 'Elegí un nombre de proveedor existente y único del negocio.';
+                    }
+                    if ($catalogos !== []) {
+                        throw ValidationException::withMessages($catalogos);
                     }
                     $datos = ['nombre' => $fila['nombre'], 'categoria_id' => $categoria->first()->id, 'unidad_base_id' => $unidad->id,
                         'marca_id' => $marca?->first()?->id ?? $producto?->marca_id];
@@ -124,6 +132,7 @@ class ImportarProductos
                     if (! is_array($ficha) || (filled($fila['atributos']) && ! str_starts_with(trim((string) $fila['atributos']), '{'))) {
                         throw ValidationException::withMessages(['atributos' => 'La ficha debe ser un objeto JSON con las claves de la categoría.']);
                     }
+                    $ficha = app(MapearColumnasProductos::class)->ficha($fila, $datos['categoria_id'], $ficha, $columnasFicha);
                     $ficha = $this->atributos->paraCategoria($datos['categoria_id'], $ficha);
                     $codigo = filled($fila['codigo_barras']) ? (string) $fila['codigo_barras'] : $variante?->codigo_barras;
                     if ($codigo !== null) {
@@ -278,7 +287,11 @@ class ImportarProductos
                 if (! $filas->has($numero)) {
                     throw ValidationException::withMessages(['filas' => 'La selección contiene una fila que no pertenece a esta carga.']);
                 }
-                $filas->put($numero, array_replace($filas->get($numero), array_map(fn (?string $valor): string => trim($valor ?? ''), $cambios)));
+                $fila = array_replace($filas->get($numero), array_map(fn (?string $valor): string => trim($valor ?? ''), $cambios));
+                if (array_key_exists('atributos', $cambios)) {
+                    unset($fila['_ficha_columnas']);
+                }
+                $filas->put($numero, $fila);
             }
             $entrada = $filas->values()->all();
             $revision = $this->revisar($entrada, $importacion->almacen_id, $importacion->actualizar_existentes, $usuario);
@@ -301,7 +314,7 @@ class ImportarProductos
                 throw ValidationException::withMessages(['archivo' => 'La revisión cambió. Revisá los datos actualizados antes de confirmar.']);
             }
             if ($importacion->revision['errores'] !== []) {
-                throw ValidationException::withMessages(['archivo' => 'Corregí las filas con errores y subí nuevamente el Excel.']);
+                throw ValidationException::withMessages(['archivo' => 'Corregí las filas con errores antes de confirmar.']);
             }
             $importacion->update(['estado' => 'en_cola', 'resultado' => null]);
             $tenantId = (string) tenant('id');
@@ -317,6 +330,58 @@ class ImportarProductos
                     throw ValidationException::withMessages(['archivo' => 'No se pudo iniciar la importación. Revisá la conexión de la cola y reintentá.']);
                 }
             });
+        });
+    }
+
+    public function resolverCatalogo(int $id, string $campo, string $origen, ?string $destino, bool $crear, TenantUser $usuario): ImportacionProducto
+    {
+        $this->consultar($id, $usuario);
+        $modelos = ['categoria' => Categoria::class, 'marca' => Marca::class, 'unidad_stock' => UnidadMedida::class, 'proveedor' => Proveedor::class];
+        Validator::make(compact('campo', 'origen', 'destino'), [
+            'campo' => ['required', 'in:'.implode(',', array_keys($modelos))],
+            'origen' => ['required', 'string', 'max:255'], 'destino' => ['nullable', 'string', 'max:255'],
+        ])->validate();
+
+        return DB::transaction(function () use ($id, $campo, $origen, $destino, $crear, $usuario, $modelos): ImportacionProducto {
+            $importacion = ImportacionProducto::query()->where('user_id', $usuario->id)->lockForUpdate()->findOrFail($id);
+            $this->autorizar($usuario, $importacion->almacen_id);
+            if (! in_array($importacion->estado, ['revision', 'fallida'], true)) {
+                throw ValidationException::withMessages(['importacion' => 'Esta carga ya está confirmada o en proceso.']);
+            }
+            $numeros = collect($importacion->filas)->filter(fn (array $fila): bool => mb_strtolower(trim((string) $fila[$campo])) === mb_strtolower(trim($origen)))->pluck('fila')->all();
+            if ($numeros === []) {
+                throw ValidationException::withMessages(['origen' => 'Este valor ya no aparece en la carga. Volvé a revisar.']);
+            }
+            $modelo = $modelos[$campo];
+            $columna = match ($campo) {
+                'unidad_stock' => 'simbolo', 'proveedor' => 'nombre_empresa', default => 'nombre'
+            };
+            if ($crear) {
+                abort_if($campo === 'unidad_stock', 403);
+                Gate::forUser($usuario)->authorize('create', $modelo);
+                $destino = trim($origen);
+            }
+            if (filled($destino)) {
+                $query = $modelo::query()->whereRaw('lower('.$columna.') = lower(?)', [trim($destino)]);
+                if ($campo === 'unidad_stock') {
+                    $query->where('uso', UsoUnidad::Cantidad);
+                } elseif ($campo === 'categoria') {
+                    $query->where('is_active', true);
+                }
+                $coincidencias = $query->lockForUpdate()->get();
+                if ($coincidencias->isEmpty() && $crear) {
+                    $registro = $modelo::query()->create([$columna => $destino]);
+                } elseif ($coincidencias->count() === 1) {
+                    $registro = $coincidencias->first();
+                } else {
+                    throw ValidationException::withMessages(['destino' => 'Elegí un valor existente y único del negocio.']);
+                }
+                $destino = $registro->{$columna};
+            } elseif (! in_array($campo, ['marca', 'proveedor'], true)) {
+                throw ValidationException::withMessages(['destino' => 'Este campo es obligatorio. Elegí un valor.']);
+            }
+
+            return $this->corregirFilas($id, $numeros, [$campo => $destino], $usuario);
         });
     }
 

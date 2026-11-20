@@ -2,8 +2,11 @@
 
 namespace App\Livewire\Negocio;
 
+use App\Catalogo\ArchivoProductos;
 use App\Catalogo\ImportarProductos;
+use App\Catalogo\MapearColumnasProductos;
 use App\Compras\Montos;
+use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
 use App\Models\Categoria;
 use App\Models\ImportacionProducto;
@@ -16,10 +19,10 @@ use Filament\Actions\BulkAction;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
@@ -32,8 +35,9 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
-use Illuminate\Support\HtmlString;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
@@ -136,30 +140,30 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             ->queryStringIdentifier('revision')->paginationPageOptions([10, 25, 50])->defaultPaginationPageOption(25)
             ->columns([
                 TextColumn::make('fila')->label('Fila'),
-                TextColumn::make('nombre')->label('Producto')->wrap()->searchable()
-                    ->description(fn (array $record): HtmlString => new HtmlString(
-                        '<div>'.e($record['sku']).'</div>'.($record['errores'] === [] ? '' : '<div class="mt-1 text-danger-600 dark:text-danger-400">'.e(implode(' ', $record['errores'])).'</div>'),
-                    )),
+                TextColumn::make('nombre')->label('Producto')->limit(65)->tooltip(fn (array $record): string => $record['nombre'])->wrap()->searchable()
+                    ->description(fn (array $record): string => $record['sku']),
                 TextColumn::make('accion')->label('Revisión')->badge()->formatStateUsing(fn (string $state): string => match ($state) {
                     'corregir' => 'Corregir', 'crear' => 'Crear', 'actualizar' => 'Actualizar', default => 'Conservar',
                 })->color(fn (string $state): string => match ($state) {
                     'corregir' => 'danger', 'crear' => 'success', default => 'gray'
-                }),
+                })->description(fn (array $record): ?string => $record['errores'] === [] ? null : count($record['errores']).' pendiente(s)')
+                    ->tooltip(fn (array $record): ?string => $record['errores'] === [] ? null : implode(' ', $record['errores'])),
                 $this->selector('categoria'),
                 $this->selector('marca')->toggleable(isToggledHiddenByDefault: true),
-                $this->selector('unidad_stock')->toggleable(),
-                TextColumn::make('precio_menor')->label('Precio menor')->alignEnd()->toggleable(),
+                $this->selector('unidad_stock')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('precio_menor')->label('Precio menor')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('precio_mayor')->label('Precio mayor')->alignEnd()->placeholder('—')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('cantidad_inicial')->label('Cantidad inicial')->alignEnd()->visible(fn (): bool => $this->importacion->almacen_id !== null),
-                TextColumn::make('costo_unitario')->label('Costo unitario')->alignEnd()->visible(fn (): bool => $this->importacion->almacen_id !== null),
+                TextColumn::make('costo_unitario')->label('Costo unitario')->alignEnd()->toggleable(isToggledHiddenByDefault: true)->visible(fn (): bool => $this->importacion->almacen_id !== null),
                 TextColumn::make('valor_lote')->label('Valor del lote')->alignEnd()->placeholder('—')->toggleable(isToggledHiddenByDefault: true)
                     ->visible(fn (): bool => $this->importacion->almacen_id !== null),
-                $this->selector('proveedor')->visible(fn (): bool => $this->importacion->almacen_id !== null),
+                $this->selector('proveedor')->toggleable(isToggledHiddenByDefault: true)->visible(fn (): bool => $this->importacion->almacen_id !== null),
             ])
             ->filters([SelectFilter::make('accion')->label('Revisión')->options([
                 'corregir' => 'Con errores', 'crear' => 'Productos nuevos', 'actualizar' => 'Se actualizarán', 'conservar' => 'Conservar existentes',
             ])])->deferFilters(false)
             ->recordActions([$this->editarFila()])
+            ->headerActions([$this->resolverCatalogos()])
             ->toolbarActions([$this->asignarEnLote()])
             ->emptyStateHeading('No hay filas para esta consulta');
     }
@@ -186,16 +190,44 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
 
     private function editarFila(): Action
     {
-        return Action::make('corregirFila')->label('Corregir fila')->icon('heroicon-o-pencil-square')->color('gray')
-            ->visible(fn (): bool => $this->puedeCorregir())->modalHeading('Corregir datos de la fila')
+        return Action::make('corregirFila')->label(fn (): string => $this->puedeCorregir() ? 'Revisar fila' : 'Ver detalle')->icon('heroicon-o-eye')->color('gray')
+            ->modalHeading('Revisar producto')->slideOver()->modalWidth('3xl')
+            ->disabledSchema(fn (): bool => ! $this->puedeCorregir())->modalSubmitAction(fn (Action $action): Action => $action->visible(fn (): bool => $this->puedeCorregir()))
             ->fillForm(function (array $record): array {
-                return collect($this->importacion->filas)->firstWhere('fila', $record['fila']);
+                $fila = collect($this->importacion->filas)->firstWhere('fila', $record['fila']);
+                $categorias = Categoria::query()->with('atributos')->whereRaw('lower(nombre) = lower(?)', [$fila['categoria']])->get();
+                $categoria = $categorias->count() === 1 ? $categorias->first() : null;
+                $resuelta = collect($this->importacion->revision['filas'])->firstWhere('fila', $fila['fila']);
+                $ficha = filled($fila['atributos']) ? json_decode($fila['atributos'], true) : ($resuelta['variante']['atributos_json'] ?? []);
+                $fila['ficha'] = app(MapearColumnasProductos::class)->ficha($fila, (int) $categoria?->id, is_array($ficha) ? $ficha : [], app(MapearColumnasProductos::class)->atributos(), false);
+                foreach ($categoria?->atributos ?? [] as $atributo) {
+                    if ($atributo->tipo === TipoAtributoCategoria::Lista && isset($fila['ficha'][$atributo->clave])) {
+                        $fila['ficha'][$atributo->clave] = Arr::wrap($fila['ficha'][$atributo->clave]);
+                    }
+                }
+
+                return $fila;
             })
             ->schema([
+                Section::make('Qué falta corregir')->description(fn (array $record): string => implode(' ', $record['errores']))
+                    ->visible(fn (array $record): bool => $record['errores'] !== [])->schema([]),
+                Section::make('Ficha recibida del archivo')->collapsible()->collapsed()
+                    ->description(function (array $record): string {
+                        $opciones = app(MapearColumnasProductos::class)->opciones();
+
+                        return collect(json_decode($record['_ficha_columnas'] ?? '{}', true))
+                            ->filter(fn (string $valor): bool => $valor !== '')
+                            ->map(fn (string $valor, string $campo): string => ($opciones[$campo] ?? $campo).': '.$valor)->implode(' · ');
+                    })->schema([])->visible(fn (array $record): bool => filled($record['_ficha_columnas'] ?? null)),
                 TextInput::make('sku')->label('SKU')->maxLength(255),
                 TextInput::make('nombre')->label('Nombre')->maxLength(255),
                 ...collect(self::CATALOGOS)->except('proveedor')->map(fn (string $label, string $campo): Select => Select::make($campo)->label($label)
-                    ->options(fn (): array => $this->opcionesCatalogos[$campo])->searchable()->native(false))->values()->all(),
+                    ->options(fn (): array => $this->opcionesCatalogos[$campo])->searchable()->native(false)->live(condition: $campo === 'categoria')
+                    ->afterStateUpdated(function (Set $set) use ($campo): void {
+                        if ($campo === 'categoria') {
+                            $set('ficha', []);
+                        }
+                    }))->values()->all(),
                 TextInput::make('codigo_barras')->label('Código de barras')->maxLength(255),
                 TextInput::make('precio_menor')->label('Precio menor')->maxLength(20)->inputMode('decimal'),
                 TextInput::make('precio_mayor')->label('Precio mayor')->maxLength(20)->inputMode('decimal'),
@@ -205,9 +237,70 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                     ->visible(fn (): bool => $this->importacion->almacen_id !== null),
                 Select::make('proveedor')->label('Proveedor')->options(fn (): array => $this->opcionesCatalogos['proveedor'])
                     ->searchable()->native(false)->visible(fn (): bool => $this->importacion->almacen_id !== null),
-                Textarea::make('atributos')->label('Ficha técnica en JSON')->maxLength(10000)->rows(3),
+                Section::make('Ficha técnica')->description('Campos de la categoría elegida. Las unidades y las opciones corresponden a su configuración.')
+                    ->schema(fn (Get $get): array => $this->camposFicha($get('categoria'))),
             ])->modalSubmitActionLabel('Guardar y validar')
-            ->action(fn (array $record, array $data) => $this->guardar([$record['fila']], $data));
+            ->action(function (array $record, array $data): void {
+                $datos = Arr::only($data, ArchivoProductos::COLUMNAS);
+                $datos['atributos'] = json_encode((object) ($data['ficha'] ?? []), JSON_THROW_ON_ERROR);
+                $this->guardar([$record['fila']], $datos);
+            });
+    }
+
+    private function camposFicha(?string $nombre): array
+    {
+        $categorias = Categoria::query()->with('atributos.unidadMedida')->where('is_active', true)->whereRaw('lower(nombre) = lower(?)', [$nombre ?? ''])->get();
+        if ($categorias->count() !== 1) {
+            return [];
+        }
+
+        return $categorias->first()->atributos->map(function ($atributo) {
+            $campo = $atributo->tipo === TipoAtributoCategoria::Lista
+                ? Select::make('ficha.'.$atributo->clave)->multiple()->options(array_combine($atributo->opciones, $atributo->opciones))->native(false)
+                : TextInput::make('ficha.'.$atributo->clave)->maxLength(255);
+            if ($atributo->tipo === TipoAtributoCategoria::Decimal) {
+                $campo->maxLength(null)->numeric()->minValue(0)->suffix($atributo->unidadMedida?->simbolo);
+            }
+
+            return $campo->label($atributo->etiqueta)->required($atributo->obligatorio);
+        })->all();
+    }
+
+    private function resolverCatalogos(): Action
+    {
+        return Action::make('resolverCatalogos')->label('Resolver catálogos')->icon('heroicon-o-squares-plus')->color('gray')->slideOver()
+            ->visible(fn (): bool => $this->puedeCorregir())->modalHeading('Resolver un valor para toda la carga')
+            ->modalDescription('Por ejemplo, relacioná una marca del Excel con la del negocio y se corregirán todas sus filas. Crear un registro agrega ese dato al catálogo, aunque luego no confirmes la carga.')
+            ->schema([
+                Select::make('campo')->label('Catálogo')->options(self::CATALOGOS)->required()->native(false)->live()
+                    ->afterStateUpdated(function (Set $set): void {
+                        $set('origen', null);
+                        $set('destino', null);
+                        $set('crear', false);
+                    }),
+                Select::make('origen')->label('Valor del archivo')->required()->searchable()->native(false)->live()
+                    ->options(fn (Get $get): array => ! isset(self::CATALOGOS[$get('campo') ?? '']) ? [] : collect($this->importacion->filas)
+                        ->pluck($get('campo'))->filter(fn ($valor): bool => filled($valor))->countBy()->map(fn (int $cantidad, string $valor): string => $valor.' · '.$cantidad.' fila(s)')->all()),
+                Toggle::make('crear')->label('Crear en el catálogo con el nombre del archivo')->live()
+                    ->visible(fn (Get $get): bool => $this->puedeCrearCatalogo($get('campo'))),
+                Select::make('destino')->label('Usar este valor del negocio')->options(fn (Get $get): array => $this->opcionesCatalogos[$get('campo')] ?? [])
+                    ->placeholder('Sin especificar')->searchable()->native(false)->visible(fn (Get $get): bool => ! $get('crear'))
+                    ->required(fn (Get $get): bool => ! $get('crear') && ! in_array($get('campo'), ['marca', 'proveedor'], true)),
+            ])->modalSubmitActionLabel('Aplicar a todas las coincidencias')
+            ->action(function (array $data): void {
+                app(ImportarProductos::class)->resolverCatalogo($this->importacionId, $data['campo'], $data['origen'], $data['destino'] ?? null, (bool) ($data['crear'] ?? false), auth('tenant')->user());
+                unset($this->opcionesCatalogos);
+                $this->actualizarRevision();
+            });
+    }
+
+    private function puedeCrearCatalogo(?string $campo): bool
+    {
+        $modelo = match ($campo) {
+            'marca' => Marca::class, 'categoria' => Categoria::class, 'proveedor' => Proveedor::class, default => null
+        };
+
+        return $modelo !== null && Gate::forUser(auth('tenant')->user())->allows('create', $modelo);
     }
 
     private function asignarEnLote(): BulkAction
@@ -241,6 +334,11 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
     private function guardar(array $filas, array $cambios): void
     {
         app(ImportarProductos::class)->corregirFilas($this->importacionId, $filas, $cambios, auth('tenant')->user());
+        $this->actualizarRevision();
+    }
+
+    private function actualizarRevision(): void
+    {
         unset($this->importacion);
         $this->flushCachedTableRecords();
         $this->dispatch('importacion-corregida', id: $this->importacionId);
