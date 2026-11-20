@@ -23,6 +23,7 @@ use App\Models\SucursalAlmacen;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -574,5 +575,54 @@ it('genera una plantilla personalizada legible que vuelve a reconocer sus atribu
         expect($columnas)->toHaveCount(4)->not->toContain('atributos')->and($mapa[0])->toBe('sku')->and($mapa[3])->toStartWith('ficha_');
     } finally {
         unlink($ruta);
+    }
+});
+
+it('crea una marca desde el selector de la fila y la conserva seleccionada', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['marca' => 'MASAKI'])], 'marca.xlsx', null, null, false, $usuario);
+    $tabla = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callAction([
+            TestAction::make('corregirFila')->table('2'),
+            TestAction::make('createOption')->schemaComponent('marca'),
+        ], ['nombre' => 'MASAKI'])->assertHasNoErrors();
+    expect(Marca::query()->where('nombre', 'MASAKI')->count())->toBe(1)
+        ->and($tabla->get('mountedActions')[0]['data']['marca'])->toBe('MASAKI')
+        ->and(ProductoVariante::query()->count())->toBe(0);
+    $tabla->callMountedAction()->assertHasNoErrors();
+    expect($importacion->refresh()->revision['errores'])->toBe([]);
+});
+
+it('crea la categoría completa desde el selector y solicita su ficha antes de guardar la fila', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $unidad = UnidadMedida::query()->where('simbolo', 'mm')->sole();
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['categoria' => 'Especiales'])], 'categoria.xlsx', null, null, false, $usuario);
+    $tabla = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->mountAction([
+            TestAction::make('corregirFila')->table('2'),
+            TestAction::make('createOption')->schemaComponent('categoria'),
+        ])->setActionData(['nombre' => 'Especiales'])
+        ->set('mountedActions.1.data.atributos', ['nuevo' => [
+            'etiqueta' => 'Diámetro', 'clave' => 'diametro', 'tipo' => 'decimal', 'obligatorio' => true, 'unidad_medida_id' => $unidad->id,
+        ]])->callMountedAction()->assertHasNoErrors();
+    $categoria = Categoria::query()->where('nombre', 'Especiales')->sole();
+    expect($categoria->atributos->sole()->unidad_medida_id)->toBe($unidad->id)
+        ->and($tabla->get('mountedActions')[0]['data']['categoria'])->toBe('Especiales');
+    $tabla->setActionData(['ficha' => ['diametro' => '5']])->callMountedAction()->assertHasNoErrors();
+    expect($importacion->refresh()->revision['errores'])->toBe([])
+        ->and($importacion->revision['filas'][0]['variante']['atributos_json'])->toBe(['diametro' => 5]);
+});
+
+it('oculta la creación junto al selector cuando no tiene permiso de crear catálogos', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion()], 'revisar.xlsx', null, null, false, $usuario);
+    $usuario->syncRoles([]);
+    $usuario->givePermissionTo(['Importar:Productos', 'ViewAny:ProductoMaestro']);
+    $tabla = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id]);
+    foreach (['marca', 'categoria'] as $campo) {
+        $tabla->assertActionHidden([
+            TestAction::make('corregirFila')->table('2'),
+            TestAction::make('createOption')->schemaComponent($campo),
+        ]);
     }
 });

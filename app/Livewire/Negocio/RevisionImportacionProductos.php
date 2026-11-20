@@ -8,6 +8,8 @@ use App\Catalogo\MapearColumnasProductos;
 use App\Compras\Montos;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
+use App\Filament\Negocio\Resources\Categorias\Schemas\CategoriaForm;
+use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
 use App\Models\Categoria;
 use App\Models\ImportacionProducto;
 use App\Models\Marca;
@@ -27,6 +29,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
+use Filament\Schemas\Schema;
 use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -34,9 +37,11 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
@@ -221,13 +226,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                     })->schema([])->visible(fn (array $record): bool => filled($record['_ficha_columnas'] ?? null)),
                 TextInput::make('sku')->label('SKU')->maxLength(255),
                 TextInput::make('nombre')->label('Nombre')->maxLength(255),
-                ...collect(self::CATALOGOS)->except('proveedor')->map(fn (string $label, string $campo): Select => Select::make($campo)->label($label)
-                    ->options(fn (): array => $this->opcionesCatalogos[$campo])->searchable()->native(false)->live(condition: $campo === 'categoria')
-                    ->afterStateUpdated(function (Set $set) use ($campo): void {
-                        if ($campo === 'categoria') {
-                            $set('ficha', []);
-                        }
-                    }))->values()->all(),
+                ...collect(self::CATALOGOS)->except('proveedor')->map(fn (string $label, string $campo): Select => $this->selectorFormulario($campo, $label))->values()->all(),
                 TextInput::make('codigo_barras')->label('Código de barras')->maxLength(255),
                 TextInput::make('precio_menor')->label('Precio menor')->maxLength(20)->inputMode('decimal'),
                 TextInput::make('precio_mayor')->label('Precio mayor')->maxLength(20)->inputMode('decimal'),
@@ -245,6 +244,54 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                 $datos['atributos'] = json_encode((object) ($data['ficha'] ?? []), JSON_THROW_ON_ERROR);
                 $this->guardar([$record['fila']], $datos);
             });
+    }
+
+    private function selectorFormulario(string $campo, string $label): Select
+    {
+        $selector = Select::make($campo)->label($label)
+            ->options(fn (): array => $this->opcionesCatalogos[$campo])->searchable()->native(false)->live(condition: $campo === 'categoria')
+            ->afterStateUpdated(function (Set $set) use ($campo): void {
+                if ($campo === 'categoria') {
+                    $set('ficha', []);
+                }
+            });
+        if (! in_array($campo, ['marca', 'categoria'], true)) {
+            return $selector;
+        }
+        $modelo = $campo === 'marca' ? Marca::class : Categoria::class;
+        if ($campo === 'categoria') {
+            $selector->createOptionForm(fn (Schema $schema): Schema => CategoriaForm::configure($schema->model(Categoria::class)));
+        } else {
+            $selector->createOptionForm([MarcaForm::nombre()]);
+        }
+
+        return $selector->createOptionUsing(function (array $data, Schema $schema) use ($campo, $modelo): string {
+            $usuario = auth('tenant')->user();
+            $importacion = app(ImportarProductos::class)->consultar($this->importacionId, $usuario);
+            app(ImportarProductos::class)->autorizar($usuario, $importacion->almacen_id);
+            abort_unless(in_array($importacion->estado, ['revision', 'fallida'], true), 403);
+            Gate::forUser($usuario)->authorize('create', $modelo);
+            $registro = DB::transaction(function () use ($campo, $modelo, $data, $schema): Model {
+                $registro = $modelo::query()->create(Arr::only($data, $campo === 'marca' ? ['nombre'] : ['nombre', 'is_active', 'sin_devolucion_comercial']));
+                if ($campo === 'categoria') {
+                    $schema->model($registro)->saveRelationships();
+                }
+
+                return $registro;
+            });
+            unset($this->opcionesCatalogos);
+
+            return $registro->nombre;
+        })->createOptionAction(fn (Action $action): Action => $action
+            ->authorize(fn (): bool => $this->puedeCorregir() && Gate::forUser(auth('tenant')->user())->allows('create', $modelo))
+            ->visible(fn (): bool => $this->puedeCorregir() && Gate::forUser(auth('tenant')->user())->allows('create', $modelo))
+            ->modalHeading($campo === 'marca' ? 'Nueva marca' : 'Nueva categoría')
+            ->fillForm(fn (Select $component): array => [
+                'nombre' => $component->getState(),
+                ...($campo === 'categoria' ? ['is_active' => true, 'sin_devolucion_comercial' => false, 'atributos' => []] : []),
+            ])
+            ->modalDescription('El registro se agrega al catálogo al crearlo. Guardá la fila para aplicar la selección a esta revisión.')
+            ->stickyModalHeader()->stickyModalFooter());
     }
 
     private function camposFicha(?string $nombre): array
