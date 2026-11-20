@@ -28,6 +28,11 @@ class ImportacionProducto extends Model
         return ($this->almacen_id ? 'INI-' : 'IMP-').str_pad((string) $this->id, 6, '0', STR_PAD_LEFT);
     }
 
+    public function huellaRevision(): string
+    {
+        return hash('sha256', json_encode([$this->filas, $this->revision], JSON_THROW_ON_ERROR));
+    }
+
     public function almacen(): BelongsTo
     {
         return $this->belongsTo(Almacen::class);

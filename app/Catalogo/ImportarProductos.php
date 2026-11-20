@@ -95,8 +95,14 @@ class ImportarProductos
                     $categoria = $categorias->get(mb_strtolower((string) $fila['categoria']));
                     $marca = filled($fila['marca']) ? $marcas->get(mb_strtolower((string) $fila['marca'])) : null;
                     $unidad = $unidades->get($fila['unidad_stock']);
-                    if ($categoria?->count() !== 1 || ! $unidad || (filled($fila['marca']) && $marca?->count() !== 1)) {
-                        throw ValidationException::withMessages(['catalogo' => 'Revisá categoría, marca y símbolo de unidad. Deben existir y ser únicos en el negocio.']);
+                    if ($categoria?->count() !== 1) {
+                        throw ValidationException::withMessages(['categoria' => 'La categoría «'.$fila['categoria'].'» no coincide con una categoría activa y única del negocio. Elegí la categoría correcta.']);
+                    }
+                    if (! $unidad) {
+                        throw ValidationException::withMessages(['unidad_stock' => 'El símbolo de unidad «'.$fila['unidad_stock'].'» no corresponde a una unidad de stock del negocio.']);
+                    }
+                    if (filled($fila['marca']) && $marca?->count() !== 1) {
+                        throw ValidationException::withMessages(['marca' => 'La marca «'.$fila['marca'].'» no coincide con una marca única del negocio. Elegí la marca correcta.']);
                     }
                     $datos = ['nombre' => $fila['nombre'], 'categoria_id' => $categoria->first()->id, 'unidad_base_id' => $unidad->id,
                         'marca_id' => $marca?->first()?->id ?? $producto?->marca_id];
@@ -230,14 +236,69 @@ class ImportarProductos
         });
     }
 
-    public function confirmar(int $id, TenantUser $usuario): void
+    public function consultar(int $id, TenantUser $usuario): ImportacionProducto
     {
-        DB::transaction(function () use ($id, $usuario): void {
+        abort_unless($usuario->is_active && (string) $usuario->tenant_id === (string) tenant('id')
+            && $usuario->can('Importar:Productos') && $usuario->can('ViewAny:ProductoMaestro'), 403);
+        $importacion = ImportacionProducto::query()->where('user_id', $usuario->id)->with(['almacen', 'usuario'])->findOrFail($id);
+        if ($importacion->almacen_id !== null) {
+            abort_unless($usuario->can('Cargar:InventarioInicial') && $usuario->can('ViewAny:InventarioStock')
+                && $this->acceso->autorizaAlmacen($usuario, $importacion->almacen_id), 403);
+        }
+
+        return $importacion;
+    }
+
+    /**
+     * @param  list<int>  $numeros
+     * @param  array<string, string|null>  $cambios
+     */
+    public function corregirFilas(int $id, array $numeros, array $cambios, TenantUser $usuario): ImportacionProducto
+    {
+        $this->consultar($id, $usuario);
+        $columnas = ArchivoProductos::COLUMNAS;
+        $reglas = [
+            'filas' => ['required', 'array', 'min:1', 'max:'.ArchivoProductos::MAX_FILAS],
+            'filas.*' => ['required', 'integer', 'min:2'],
+            'cambios' => ['required', 'array:'.implode(',', $columnas), 'min:1'],
+        ];
+        foreach ($columnas as $columna) {
+            $reglas['cambios.'.$columna] = ['nullable', 'string', 'max:'.($columna === 'atributos' ? 10000 : 255)];
+        }
+        Validator::make(['filas' => $numeros, 'cambios' => $cambios], $reglas)->validate();
+
+        return DB::transaction(function () use ($id, $numeros, $cambios, $usuario): ImportacionProducto {
+            $importacion = ImportacionProducto::query()->where('user_id', $usuario->id)->lockForUpdate()->findOrFail($id);
+            $this->autorizar($usuario, $importacion->almacen_id);
+            if (! in_array($importacion->estado, ['revision', 'fallida'], true)) {
+                throw ValidationException::withMessages(['importacion' => 'Esta carga ya está confirmada o en proceso. Volvé a consultar su resultado.']);
+            }
+            $filas = collect($importacion->filas)->keyBy('fila');
+            foreach ($numeros as $numero) {
+                if (! $filas->has($numero)) {
+                    throw ValidationException::withMessages(['filas' => 'La selección contiene una fila que no pertenece a esta carga.']);
+                }
+                $filas->put($numero, array_replace($filas->get($numero), array_map(fn (?string $valor): string => trim($valor ?? ''), $cambios)));
+            }
+            $entrada = $filas->values()->all();
+            $revision = $this->revisar($entrada, $importacion->almacen_id, $importacion->actualizar_existentes, $usuario);
+            $importacion->update(['filas' => $entrada, 'revision' => $revision, 'estado' => 'revision', 'resultado' => null]);
+
+            return $importacion;
+        });
+    }
+
+    public function confirmar(int $id, TenantUser $usuario, ?string $versionRevision = null): void
+    {
+        DB::transaction(function () use ($id, $usuario, $versionRevision): void {
             $importacion = ImportacionProducto::query()->lockForUpdate()->findOrFail($id);
             abort_unless($importacion->user_id === $usuario->id, 403);
             $this->autorizar($usuario, $importacion->almacen_id);
             if (in_array($importacion->estado, ['completada', 'en_cola'], true)) {
                 return;
+            }
+            if ($versionRevision !== null && ! hash_equals($importacion->huellaRevision(), $versionRevision)) {
+                throw ValidationException::withMessages(['archivo' => 'La revisión cambió. Revisá los datos actualizados antes de confirmar.']);
             }
             if ($importacion->revision['errores'] !== []) {
                 throw ValidationException::withMessages(['archivo' => 'Corregí las filas con errores y subí nuevamente el Excel.']);

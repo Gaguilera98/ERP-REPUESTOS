@@ -23,10 +23,6 @@
             $carga = $this->importacion;
             $revision = $carga->revision;
             $moneda = $carga->moneda;
-            $paginas = max(1, (int) ceil(count($carga->filas) / 20));
-            $pagina = max(1, min($paginas, $this->paginaRevision));
-            $filas = array_slice($carga->filas, ($pagina - 1) * 20, 20);
-            $resueltas = collect($revision['filas'])->keyBy('fila');
         @endphp
         <x-filament::section>
             <x-slot name="heading">{{ $carga->codigo() }} · {{ $carga->archivo }}</x-slot>
@@ -63,60 +59,13 @@
         @endif
         @if ($revision['errores'] !== [])
             <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-danger-500/10 p-4">
-                <p class="text-sm text-danger-700 dark:text-danger-300">{{ count($revision['errores']) }} filas necesitan corrección. Revisá sus mensajes y volvé a subir el archivo.</p>
+                <p class="text-sm text-danger-700 dark:text-danger-300">{{ count($revision['errores']) }} filas necesitan corrección. Corregilas en la tabla o seleccioná varias para asignar un valor en grupo.</p>
                 <x-filament::button color="gray" wire:click="descargarErrores" icon="heroicon-o-arrow-down-tray">Descargar filas con errores</x-filament::button>
             </div>
         @endif
 
         <x-filament::section heading="Revisión de las filas">
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm">
-                    <thead class="bg-gray-50 text-gray-600 dark:bg-white/5 dark:text-gray-300">
-                        <tr>
-                            <th scope="col" class="p-3">Fila</th><th scope="col" class="p-3">Producto</th><th scope="col" class="p-3">Acción</th>
-                            <th scope="col" class="p-3 text-right">Precio menor</th><th scope="col" class="p-3 text-right">Precio mayor</th>
-                            @if ($carga->almacen_id)
-                                <th scope="col" class="p-3 text-right">Cantidad inicial</th><th scope="col" class="p-3 text-right">Costo unitario</th><th scope="col" class="p-3 text-right">Valor del lote</th><th scope="col" class="p-3">Proveedor</th>
-                            @endif
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-200 dark:divide-white/10">
-                        @foreach ($filas as $fila)
-                            @php
-                                $resuelta = $resueltas->get($fila['fila']);
-                                $erroresFila = $revision['errores'][$fila['fila']] ?? [];
-                            @endphp
-                            <tr wire:key="importacion-fila-{{ $carga->id }}-{{ $fila['fila'] }}" @class(['bg-danger-500/5' => $erroresFila !== []])>
-                                <td class="p-3 text-gray-500 dark:text-gray-400">{{ $fila['fila'] }}</td>
-                                <th scope="row" class="min-w-48 p-3 font-medium">{{ $resuelta['nombre'] ?? $fila['nombre'] }}<span class="block text-xs font-normal text-gray-500 dark:text-gray-400">{{ $fila['sku'] }}</span></th>
-                                <td class="p-3">
-                                    <x-filament::badge :color="$erroresFila !== [] ? 'danger' : (($resuelta['accion'] ?? '') === 'crear' ? 'success' : 'gray')">
-                                        {{ $erroresFila !== [] ? 'Corregir' : match ($resuelta['accion'] ?? '') { 'crear' => 'Crear', 'actualizar' => 'Actualizar', default => 'Conservar' } }}
-                                    </x-filament::badge>
-                                </td>
-                                <td class="whitespace-nowrap p-3 text-right tabular-nums">{{ $resuelta['precio_menor'] ?? $fila['precio_menor'] }}</td>
-                                <td class="whitespace-nowrap p-3 text-right tabular-nums">{{ $resuelta['precio_mayor'] ?? ($fila['precio_mayor'] ?: '—') }}</td>
-                                @if ($carga->almacen_id)
-                                    <td class="whitespace-nowrap p-3 text-right tabular-nums">{{ $fila['cantidad_inicial'] ?: '—' }} {{ $resuelta['unidad'] ?? '' }}</td>
-                                    <td class="whitespace-nowrap p-3 text-right tabular-nums">{{ filled($fila['costo_unitario']) ? $fila['costo_unitario'] : '—' }}</td>
-                                    <td class="whitespace-nowrap p-3 text-right tabular-nums">{{ isset($resuelta['cantidad']) ? $moneda.' '.\App\Compras\Montos::multiplicar($resuelta['cantidad'], $resuelta['costo'], 2) : '—' }}</td>
-                                    <td class="p-3">{{ $fila['proveedor'] ?: 'Sin especificar' }}</td>
-                                @endif
-                            </tr>
-                            @if ($erroresFila !== [])
-                                <tr><td colspan="{{ $carga->almacen_id ? 9 : 5 }}" class="px-3 pb-3 text-sm text-danger-600 dark:text-danger-400">{{ implode(' ', $erroresFila) }}</td></tr>
-                            @endif
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-            <div class="mt-4 flex items-center justify-between gap-3">
-                <span class="text-sm text-gray-500 dark:text-gray-400">Página {{ $pagina }} de {{ $paginas }} · {{ count($carga->filas) }} filas</span>
-                <div class="flex gap-2">
-                    <x-filament::button color="gray" size="sm" wire:click="$set('paginaRevision', {{ $pagina - 1 }})" :disabled="$pagina <= 1">Anterior</x-filament::button>
-                    <x-filament::button color="gray" size="sm" wire:click="$set('paginaRevision', {{ $pagina + 1 }})" :disabled="$pagina >= $paginas">Siguiente</x-filament::button>
-                </div>
-            </div>
+            <livewire:negocio.revision-importacion-productos :importacion-id="$carga->id" :key="'revision-importacion-'.$carga->id.'-'.$carga->estado" />
         </x-filament::section>
         <div class="flex flex-wrap items-center justify-between gap-3">
             <x-filament::button color="gray" wire:click="nuevaCarga">Volver a mis importaciones</x-filament::button>

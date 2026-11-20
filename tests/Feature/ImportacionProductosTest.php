@@ -6,6 +6,7 @@ use App\Enums\TipoMovimientoInventario;
 use App\Filament\Negocio\Resources\ProductoMaestros\Pages\ImportarProductos as ImportarPagina;
 use App\Inventario\AjustarInventario;
 use App\Jobs\ProcesarImportacionProductos;
+use App\Livewire\Negocio\RevisionImportacionProductos;
 use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
@@ -307,4 +308,112 @@ it('deja recuperable la carga si el negocio fue desactivado mientras esperaba en
     $servicio->confirmar($importacion->id, $usuario);
     $job->handle($servicio);
     expect($importacion->refresh()->estado)->toBe('completada')->and(ProductoVariante::query()->count())->toBe(1);
+});
+
+it('corrige categoría y proveedor desde los selectores de la fila y recalcula la revisión', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen, 'categoria' => $categoria] = escenarioImportacion();
+    $proveedor = Proveedor::factory()->create(['nombre_empresa' => 'Proveedor seleccionado']);
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([filaImportacion(['categoria' => 'Nombre del Excel', 'cantidad_inicial' => '4', 'costo_unitario' => '20'])], 'corregir.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->assertSee('La categoría «Nombre del Excel»')
+        ->call('updateTableColumnState', 'categoria', '2', $categoria->nombre)
+        ->assertHasNoErrors()->assertDontSee('La categoría «Nombre del Excel»')
+        ->call('updateTableColumnState', 'proveedor', '2', $proveedor->nombre_empresa)
+        ->assertHasNoErrors()->assertDispatched('importacion-corregida');
+    expect($importacion->refresh()->revision['errores'])->toBe([])
+        ->and($importacion->revision['valor'])->toBe('80.0000')
+        ->and($importacion->filas[0]['proveedor'])->toBe($proveedor->nombre_empresa)
+        ->and(ProductoVariante::query()->count())->toBe(0);
+    $servicio->confirmar($importacion->id, $usuario);
+    expect(InventarioInicialDetalle::query()->sole()->proveedor_id)->toBe($proveedor->id);
+});
+
+it('aplica una categoría a filas seleccionadas de distintas páginas y conserva las demás', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    $filas = [];
+    for ($indice = 0; $indice < 32; $indice++) {
+        $filas[] = filaImportacion(['fila' => $indice + 2, 'sku' => 'SKU-'.$indice, 'codigo_barras' => '', 'nombre' => 'Producto '.$indice, 'categoria' => 'Categoría del Excel']);
+    }
+    $importacion = app(ImportarProductos::class)->preparar($filas, 'muchos.xlsx', null, null, false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->assertCountTableRecords(32)
+        ->callTableBulkAction('asignarCampo', ['2', '30'], ['campo' => 'categoria', 'valor' => $categoria->nombre])
+        ->assertHasNoErrors();
+    $guardadas = collect($importacion->refresh()->filas)->keyBy('fila');
+    expect($guardadas[2]['categoria'])->toBe($categoria->nombre)
+        ->and($guardadas[30]['categoria'])->toBe($categoria->nombre)
+        ->and($guardadas[3]['categoria'])->toBe('Categoría del Excel')
+        ->and(count($importacion->revision['errores']))->toBe(30);
+});
+
+it('selecciona todas las filas filtradas conservando las desmarcadas al aplicar en grupo', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    $filas = [];
+    for ($indice = 0; $indice < 32; $indice++) {
+        $filas[] = filaImportacion(['fila' => $indice + 2, 'sku' => 'SKU-'.$indice, 'codigo_barras' => '', 'nombre' => $indice === 31 ? 'Otra familia' : 'Filtro producto '.$indice, 'categoria' => 'Sin resolver']);
+    }
+    $importacion = app(ImportarProductos::class)->preparar($filas, 'filtrar.xlsx', null, null, false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->searchTable('Filtro')->assertCountTableRecords(31)
+        ->set('isTrackingDeselectedTableRecords', true)->set('deselectedTableRecords', ['2'])
+        ->callTableBulkAction('asignarCampo', [], ['campo' => 'categoria', 'valor' => $categoria->nombre])
+        ->assertHasNoErrors();
+    $guardadas = collect($importacion->refresh()->filas)->keyBy('fila');
+    expect($guardadas[2]['categoria'])->toBe('Sin resolver')
+        ->and($guardadas[33]['categoria'])->toBe('Sin resolver')
+        ->and($guardadas[30]['categoria'])->toBe($categoria->nombre)
+        ->and(count($importacion->revision['errores']))->toBe(2);
+});
+
+it('permite corregir cantidades y costos en el modal individual sin volver a subir el Excel', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['cantidad_inicial' => '5', 'costo_unitario' => 'pendiente'])], 'costo.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callTableAction('corregirFila', '2', ['cantidad_inicial' => '3', 'costo_unitario' => '28'])
+        ->assertHasNoErrors();
+    expect($importacion->refresh()->revision['errores'])->toBe([])
+        ->and($importacion->revision['valor'])->toBe('84.0000')
+        ->and($importacion->filas[0]['sku'])->toBe('0006206');
+});
+
+it('protege los borradores ajenos y las cargas confirmadas ante correcciones', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([filaImportacion()], 'catalogo.xlsx', null, null, false, $usuario);
+    $otro = TenantUser::factory()->create();
+    $otro->assignRole('administrador');
+    Livewire::actingAs($otro, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])->assertNotFound();
+    expect(fn () => $servicio->corregirFilas($importacion->id, [999], ['categoria' => 'Otra'], $usuario))->toThrow(ValidationException::class, 'no pertenece');
+    $servicio->confirmar($importacion->id, $usuario);
+    expect(fn () => $servicio->corregirFilas($importacion->id, [2], ['precio_menor' => '55'], $usuario))->toThrow(ValidationException::class, 'confirmada o en proceso');
+    expect(ProductoVariante::query()->sole()->precio_venta)->toBe('45.00');
+});
+
+it('pide revisar los nuevos importes si otra pestaña corrigió la carga antes de confirmar', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([filaImportacion()], 'catalogo.xlsx', null, null, false, $usuario);
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->call('verImportacion', $importacion->id);
+    $servicio->corregirFilas($importacion->id, [2], ['precio_menor' => '55'], $usuario);
+    $pagina->call('confirmar')->assertHasErrors(['archivo'])->assertSee('La revisión cambió');
+    expect(ProductoVariante::query()->count())->toBe(0);
+});
+
+it('asigna y quita el proveedor de varios lotes desde la acción masiva', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $proveedor = Proveedor::factory()->create();
+    $filas = [
+        filaImportacion(['cantidad_inicial' => '2', 'costo_unitario' => '20', 'proveedor' => 'Sin coincidencia']),
+        filaImportacion(['fila' => 3, 'cantidad_inicial' => '3', 'costo_unitario' => '22', 'proveedor' => 'Sin coincidencia']),
+    ];
+    $importacion = app(ImportarProductos::class)->preparar($filas, 'proveedores.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    $tabla = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callTableBulkAction('asignarCampo', ['2', '3'], ['campo' => 'proveedor', 'valor' => $proveedor->nombre_empresa])
+        ->assertHasNoErrors();
+    expect($importacion->refresh()->revision['errores'])->toBe([])
+        ->and(collect($importacion->filas)->pluck('proveedor')->all())->toBe([$proveedor->nombre_empresa, $proveedor->nombre_empresa]);
+    $tabla->callTableBulkAction('asignarCampo', ['2', '3'], ['campo' => 'proveedor', 'quitar' => true])->assertHasNoErrors();
+    expect(collect($importacion->refresh()->filas)->pluck('proveedor')->all())->toBe(['', '']);
 });

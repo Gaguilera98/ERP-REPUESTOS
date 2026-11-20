@@ -25,6 +25,7 @@ use Filament\Tables\Table;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use OpenSpout\Common\Entity\Row;
@@ -48,7 +49,8 @@ class ImportarProductos extends Page implements HasTable
     #[Locked]
     public ?int $importacionId = null;
 
-    public int $paginaRevision = 1;
+    #[Locked]
+    public ?string $versionRevision = null;
 
     public static function canAccess(array $parameters = []): bool
     {
@@ -133,32 +135,32 @@ class ImportarProductos extends Page implements HasTable
             $conInventario ? $data['fecha_inventario'] : null, (bool) ($data['actualizar_existentes'] ?? false), auth('tenant')->user(),
         );
         $this->importacionId = $importacion->id;
-        $this->paginaRevision = 1;
         unset($this->importacion);
     }
 
     #[Computed]
     public function importacion(): ?ImportacionProducto
     {
-        return $this->importacionId === null ? null : $this->getImportacion();
+        if ($this->importacionId === null) {
+            return null;
+        }
+        $importacion = $this->getImportacion();
+        $this->versionRevision = $importacion->huellaRevision();
+
+        return $importacion;
     }
 
     private function getImportacion(): ImportacionProducto
     {
-        abort_unless(static::canAccess(), 403);
-        $importacion = ImportacionProducto::query()->where('user_id', auth('tenant')->id())->with(['almacen', 'usuario'])->findOrFail($this->importacionId);
-        if ($importacion->almacen_id) {
-            abort_unless(auth('tenant')->user()->can('Cargar:InventarioInicial') && auth('tenant')->user()->can('ViewAny:InventarioStock')
-                && app(AccesoSucursales::class)->autorizaAlmacen(auth('tenant')->user(), $importacion->almacen_id), 403);
-        }
+        abort_if($this->importacionId === null, 404);
 
-        return $importacion;
+        return app(Importador::class)->consultar($this->importacionId, auth('tenant')->user());
     }
 
     public function confirmar(): void
     {
         $importacion = $this->getImportacion();
-        app(Importador::class)->confirmar($importacion->id, auth('tenant')->user());
+        app(Importador::class)->confirmar($importacion->id, auth('tenant')->user(), $this->versionRevision);
         unset($this->importacion);
         Notification::make()->title('Importación enviada')->body('Podés seguir trabajando y consultar el resultado aquí.')->success()->send();
     }
@@ -174,7 +176,7 @@ class ImportarProductos extends Page implements HasTable
     public function nuevaCarga(): void
     {
         $this->importacionId = null;
-        $this->paginaRevision = 1;
+        $this->versionRevision = null;
         unset($this->importacion);
         $this->form->fill(['inventario' => $this->inventario, 'fecha_inventario' => today()->format('Y-m-d'), 'actualizar_existentes' => false]);
         $this->resetValidation();
@@ -183,9 +185,16 @@ class ImportarProductos extends Page implements HasTable
     public function verImportacion(int $id): void
     {
         $this->importacionId = $id;
-        $this->paginaRevision = 1;
         unset($this->importacion);
         $this->getImportacion();
+    }
+
+    #[On('importacion-corregida')]
+    public function actualizarRevision(int $id): void
+    {
+        if ($this->importacionId === $id) {
+            unset($this->importacion);
+        }
     }
 
     public function table(Table $table): Table
