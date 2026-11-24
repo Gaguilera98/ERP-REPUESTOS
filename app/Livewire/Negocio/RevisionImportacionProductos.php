@@ -45,6 +45,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
@@ -145,25 +146,34 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
 
                 return $isTrackingDeselectedKeys ? $filas->except($deselectedKeys) : $filas->only($keys);
             })
-            ->queryStringIdentifier('revision')->paginationPageOptions([10, 25, 50])->defaultPaginationPageOption(25)
+            ->queryStringIdentifier('revision')->paginationPageOptions([10, 25, 50])->defaultPaginationPageOption(10)
+            ->stackedOnMobile()
+            ->columnManagerTriggerAction(fn (Action $action): Action => $action->extraAttributes(['class' => 'max-sm:hidden']))
             ->columns([
-                TextColumn::make('fila')->label('Fila'),
-                TextColumn::make('nombre')->label('Producto')->limit(65)->tooltip(fn (array $record): string => $record['nombre'])->wrap()->searchable()
+                TextColumn::make('fila')->label('Fila')->visibleFrom('sm'),
+                TextColumn::make('producto_movil')->label('Producto')->hiddenFrom('sm')
+                    ->state(fn (array $record): string => $record['nombre'])->wrap()->lineClamp(3)
+                    ->description(fn (array $record): string => 'Fila '.$record['fila'].' · '.$record['sku']),
+                TextColumn::make('revision_movil')->label('Revisión')->hiddenFrom('sm')->badge()
+                    ->state(fn (array $record): string => $record['errores'] !== [] ? count($record['errores']).' pendiente(s)' : ($record['cambios'] !== [] ? 'Con cambios' : 'Listo'))
+                    ->color(fn (array $record): string => $record['errores'] !== [] ? 'warning' : ($record['cambios'] !== [] ? 'info' : 'success'))
+                    ->description(fn (array $record): string => $this->resumenMovil($record))->wrap(),
+                TextColumn::make('nombre')->label('Producto')->visibleFrom('sm')->limit(65)->tooltip(fn (array $record): string => $record['nombre'])->wrap()->searchable()
                     ->description(fn (array $record): string => $record['sku']),
-                TextColumn::make('accion')->label('Revisión')->badge()->formatStateUsing(fn (string $state): string => match ($state) {
+                TextColumn::make('accion')->label('Revisión')->visibleFrom('sm')->badge()->formatStateUsing(fn (string $state): string => match ($state) {
                     'corregir' => 'Corregir', 'crear' => 'Crear', 'actualizar' => 'Actualizar', default => 'Conservar',
                 })->color(fn (string $state): string => match ($state) {
                     'corregir' => 'danger', 'crear' => 'success', default => 'gray'
-                })->description(fn (array $record): ?string => $record['errores'] !== [] ? count($record['errores']).' pendiente(s)' : ($record['cambios'] !== [] ? count($record['cambios']).' cambio(s) · Revisar fila' : null))
+                })->description(fn (array $record): ?string => $record['errores'] !== [] ? count($record['errores']).' pendiente(s)' : ($record['cambios'] !== [] ? count($record['cambios']).' cambio(s) · Revisar producto' : null))
                     ->tooltip(fn (array $record): ?string => $record['errores'] === [] ? null : implode(' ', $record['errores'])),
                 $this->selector('categoria'),
                 $this->selector('marca')->toggleable(isToggledHiddenByDefault: true),
                 $this->selector('unidad_stock')->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('precio_menor')->label('Precio menor')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('precio_mayor')->label('Precio mayor')->alignEnd()->placeholder('—')->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('cantidad_inicial')->label('Cantidad inicial')->alignEnd()->visible(fn (): bool => $this->importacion->almacen_id !== null),
-                TextColumn::make('costo_unitario')->label('Costo unitario')->alignEnd()->toggleable(isToggledHiddenByDefault: true)->visible(fn (): bool => $this->importacion->almacen_id !== null),
-                TextColumn::make('valor_lote')->label('Valor del lote')->alignEnd()->placeholder('—')->toggleable(isToggledHiddenByDefault: true)
+                TextColumn::make('precio_menor')->label('Precio menor')->visibleFrom('sm')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('precio_mayor')->label('Precio mayor')->visibleFrom('sm')->alignEnd()->placeholder('—')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('cantidad_inicial')->label('Cantidad inicial')->visibleFrom('sm')->alignEnd()->visible(fn (): bool => $this->importacion->almacen_id !== null),
+                TextColumn::make('costo_unitario')->label('Costo unitario')->visibleFrom('sm')->alignEnd()->toggleable(isToggledHiddenByDefault: true)->visible(fn (): bool => $this->importacion->almacen_id !== null),
+                TextColumn::make('valor_lote')->label('Valor del lote')->visibleFrom('sm')->alignEnd()->placeholder('—')->toggleable(isToggledHiddenByDefault: true)
                     ->visible(fn (): bool => $this->importacion->almacen_id !== null),
                 $this->selector('proveedor')->toggleable(isToggledHiddenByDefault: true)->visible(fn (): bool => $this->importacion->almacen_id !== null),
             ])
@@ -187,7 +197,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
 
     private function selector(string $campo): SelectColumn
     {
-        return SelectColumn::make($campo)->label(self::CATALOGOS[$campo])->native(false)->searchableOptions()
+        return SelectColumn::make($campo)->label(self::CATALOGOS[$campo])->visibleFrom('sm')->native(false)->searchableOptions()
             ->options(function (array $record) use ($campo): array {
                 $opciones = $this->opcionesCatalogos[$campo];
                 if (filled($record[$campo]) && ! array_key_exists($record[$campo], $opciones)) {
@@ -205,9 +215,32 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             });
     }
 
+    /** @param array<string, mixed> $fila */
+    private function resumenMovil(array $fila): string
+    {
+        if ($fila['errores'] === []) {
+            return $fila['cambios'] !== [] ? 'Revisá los '.count($fila['cambios']).' cambios propuestos.' : 'Sin pendientes de validación.';
+        }
+        $pendientes = [];
+        foreach (self::CATALOGOS as $campo => $etiqueta) {
+            $valor = (string) $fila[$campo];
+            if (blank($valor) && in_array($campo, ['marca', 'proveedor'], true)) {
+                continue;
+            }
+            $opciones = array_keys($this->opcionesCatalogos[$campo]);
+            $coincidencias = array_filter($opciones, fn (string $opcion): bool => $campo === 'unidad_stock'
+                ? $opcion === $valor : mb_strtolower($opcion) === mb_strtolower($valor));
+            if (count($coincidencias) !== 1) {
+                $pendientes[] = mb_strtolower($etiqueta);
+            }
+        }
+
+        return $pendientes !== [] ? 'Revisar '.implode(' y ', $pendientes).'.' : Str::limit($fila['errores'][0], 120);
+    }
+
     private function editarFila(): Action
     {
-        return Action::make('corregirFila')->label(fn (): string => $this->puedeCorregir() ? 'Revisar fila' : 'Ver detalle')->icon('heroicon-o-eye')->color('gray')
+        return Action::make('corregirFila')->label(fn (): string => $this->puedeCorregir() ? 'Revisar producto' : 'Ver detalle')->icon('heroicon-o-eye')->color('gray')->button()->outlined()
             ->modalHeading('Revisar producto')->slideOver()->modalWidth('3xl')
             ->disabledSchema(fn (): bool => ! $this->puedeCorregir())->modalSubmitAction(fn (Action $action): Action => $action->visible(fn (): bool => $this->puedeCorregir()))
             ->fillForm(function (array $record): array {

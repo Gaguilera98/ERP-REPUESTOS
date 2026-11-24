@@ -82,7 +82,9 @@ class ImportarProductos
         foreach ($filas as $fila) {
             $numero = (int) $fila['fila'];
             try {
-                Validator::make($fila, ['sku' => ['required', 'string', 'max:255']], ['sku.required' => 'Ingresá el SKU.'])->validate();
+                Validator::make($fila, ['sku' => ['required', 'string', 'max:255']], [
+                    'sku.required' => 'Ingresá el SKU.', 'sku.string' => 'El SKU debe ser un código de texto.', 'sku.max' => 'El SKU admite hasta 255 caracteres.',
+                ])->validate();
                 $sku = (string) $fila['sku'];
                 $variante = $existentes->get($sku);
                 $accion = $variante ? ($actualizar ? 'actualizar' : 'conservar') : 'crear';
@@ -95,7 +97,13 @@ class ImportarProductos
                         'nombre' => ['required', 'string', 'max:255'], 'categoria' => ['required', 'string', 'max:255'],
                         'unidad_stock' => ['required', 'string', 'max:255'], 'marca' => ['nullable', 'string', 'max:255'],
                         'codigo_barras' => ['nullable', 'string', 'max:255'], 'atributos' => ['nullable', 'json'],
-                    ], ['required' => 'Completá :attribute.', 'json' => 'La ficha de atributos debe ser un objeto JSON.'])->validate();
+                    ], [
+                        'required' => 'Completá :attribute.', 'json' => 'La ficha de atributos debe ser un objeto JSON.',
+                        'max' => ':attribute admite hasta :max caracteres.', 'string' => 'Revisá :attribute. Debe contener texto.',
+                    ], [
+                        'nombre' => 'el nombre del producto', 'categoria' => 'la categoría', 'unidad_stock' => 'la unidad de stock',
+                        'marca' => 'la marca', 'codigo_barras' => 'el código de barras',
+                    ])->validate();
                     $categoria = $categorias->get(mb_strtolower((string) $fila['categoria']));
                     $marca = filled($fila['marca']) ? $marcas->get(mb_strtolower((string) $fila['marca'])) : null;
                     $unidad = $unidades->get($fila['unidad_stock']);
@@ -216,7 +224,11 @@ class ImportarProductos
     {
         $texto = str_replace(',', '.', trim((string) $valor));
         if (! preg_match('/^\d{1,'.$enteros.'}(\.\d{1,'.$decimales.'})?$/', $texto)) {
-            throw ValidationException::withMessages([$campo => 'Revisá '.$campo.'. Ingresá un número positivo o cero con hasta '.$decimales.' decimales, sin separador de miles.']);
+            $etiqueta = match ($campo) {
+                'precio_menor' => 'el precio al por menor', 'precio_mayor' => 'el precio al por mayor',
+                'cantidad_inicial' => 'la cantidad inicial', 'costo_unitario' => 'el costo unitario', default => $campo,
+            };
+            throw ValidationException::withMessages([$campo => 'Revisá '.$etiqueta.'. Ingresá un número positivo o cero con hasta '.$decimales.' decimales, sin separador de miles.']);
         }
 
         return Montos::redondear($texto, $decimales);

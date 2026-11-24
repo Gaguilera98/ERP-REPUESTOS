@@ -79,15 +79,15 @@ function filaImportacion(array $cambios = []): array
     ], $cambios);
 }
 
-function excelImportacion(array $filas): UploadedFile
+function excelImportacion(array $filas, array $columnas = ArchivoProductos::COLUMNAS): UploadedFile
 {
     $ruta = tempnam(sys_get_temp_dir(), 'test-productos-');
     $writer = new Writer;
     try {
         $writer->openToFile($ruta);
-        $writer->addRow(Row::fromValues(ArchivoProductos::COLUMNAS));
+        $writer->addRow(Row::fromValues($columnas));
         foreach ($filas as $fila) {
-            $writer->addRow(Row::fromValues(array_map(fn (string $columna) => $fila[$columna], ArchivoProductos::COLUMNAS)));
+            $writer->addRow(Row::fromValues(array_map(fn (string $columna) => $fila[$columna], $columnas)));
         }
         $writer->close();
 
@@ -156,8 +156,10 @@ it('rechaza las filas incorrectas antes de crear productos', function (array $ca
     expect(implode(' ', $revision['errores'][2]))->toContain($mensaje);
     expect(ProductoMaestro::query()->count())->toBe(0);
 })->with([
-    'costo obligatorio' => [['cantidad_inicial' => '2'], 'costo_unitario'],
-    'cantidad negativa' => [['cantidad_inicial' => '-1', 'costo_unitario' => '20'], 'cantidad_inicial'],
+    'costo obligatorio' => [['cantidad_inicial' => '2'], 'costo unitario'],
+    'cantidad negativa' => [['cantidad_inicial' => '-1', 'costo_unitario' => '20'], 'cantidad inicial'],
+    'SKU faltante' => [['sku' => ''], 'Ingresá el SKU'],
+    'nombre faltante' => [['nombre' => ''], 'Completá el nombre del producto'],
     'piezas fraccionadas' => [['cantidad_inicial' => '1.5', 'costo_unitario' => '20'], 'unidad de stock'],
     'unidad de atributo' => [['unidad_stock' => 'mm'], 'símbolo de unidad'],
     'precio mayor' => [['precio_mayor' => '60'], 'Mayor supera'],
@@ -580,6 +582,77 @@ it('genera una plantilla personalizada legible que vuelve a reconocer sus atribu
     }
 });
 
+it('muestra los atributos de las categorías elegidas antes de descargar un solo Excel', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    $otra = Categoria::factory()->create(['nombre' => 'Filtros']);
+    $sinFicha = Categoria::factory()->create(['nombre' => 'General']);
+    $milimetros = UnidadMedida::query()->where('simbolo', 'mm')->sole();
+    CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'diametro', 'etiqueta' => 'Diámetro interno', 'unidad_medida_id' => $milimetros->id, 'obligatorio' => true]);
+    CategoriaAtributo::factory()->lista(['Papel', 'Metal'])->create(['categoria_id' => $otra->id, 'clave' => 'material', 'etiqueta' => 'Material filtrante']);
+
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->mountAction('plantilla')->call('forceRender')
+        ->assertSee('Se descargará un solo Excel')->assertSee('Plantilla básica, sin columnas de ficha técnica.')
+        ->set('mountedActions.0.data.categorias', [$categoria->id])->call('forceRender')
+        ->assertSee('Diámetro interno')->assertSee('Obligatorio')->assertSee('mm')->assertDontSee('Material filtrante')
+        ->set('mountedActions.0.data.categorias', [$categoria->id, $otra->id])->call('forceRender')
+        ->assertSee('Diámetro interno')->assertSee('Material filtrante')->assertSee('Opcional')->assertSee('Papel · Metal')
+        ->set('mountedActions.0.data.categorias', [$sinFicha->id])->call('forceRender')
+        ->assertSee('Esta categoría no tiene atributos configurados.')->assertDontSee('Diámetro interno')->assertDontSee('Material filtrante')
+        ->set('mountedActions.0.data.categorias', [])->call('forceRender')
+        ->assertSee('Plantilla básica, sin columnas de ficha técnica.');
+});
+
+it('regenera la plantilla con atributos nuevos y detalla sus reglas por categoría', function () {
+    ['categoria' => $categoria] = escenarioImportacion();
+    $otra = Categoria::factory()->create(['nombre' => 'Filtros']);
+    $ruta = tempnam(sys_get_temp_dir(), 'plantilla-dinamica-');
+    $leer = function () use ($ruta): array {
+        $reader = new Reader;
+        $reader->open($ruta);
+        $hojas = [];
+        try {
+            foreach ($reader->getSheetIterator() as $sheet) {
+                foreach ($sheet->getRowIterator() as $row) {
+                    $hojas[$sheet->getName()][] = $row->toArray();
+                    if ($sheet->getName() === 'Productos') {
+                        break;
+                    }
+                }
+            }
+        } finally {
+            $reader->close();
+        }
+
+        return $hojas;
+    };
+
+    try {
+        app(ArchivoProductos::class)->plantilla($ruta, 'BOB', [$categoria->id, $otra->id], ['nombre']);
+        expect($leer()['Productos'][0])->toBe(['sku', 'nombre']);
+
+        CategoriaAtributo::factory()->lista(['2RS', 'ZZ'])->create(['categoria_id' => $categoria->id, 'clave' => 'sello', 'etiqueta' => 'Sello', 'obligatorio' => true]);
+        CategoriaAtributo::factory()->lista(['AB'])->create(['categoria_id' => $otra->id, 'clave' => 'sello', 'etiqueta' => 'Sello', 'obligatorio' => false]);
+        $milimetros = UnidadMedida::query()->where('simbolo', 'mm')->sole();
+        CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'ancho', 'etiqueta' => 'Ancho', 'unidad_medida_id' => $milimetros->id, 'obligatorio' => true]);
+        app(ArchivoProductos::class)->plantilla($ruta, 'BOB', [$categoria->id, $otra->id], ['nombre']);
+        $hojas = $leer();
+
+        expect($hojas['Productos'][0])->toBe(['sku', 'nombre', 'Sello · Rodamientos, Filtros', 'Ancho [mm] · Rodamientos']);
+        expect($hojas['Ficha por categoría'])->toContain(
+            ['Rodamientos', 'Sello · Rodamientos, Filtros', 'Obligatorio', 'Lista', 'Sin unidad', '2RS | ZZ'],
+            ['Filtros', 'Sello · Rodamientos, Filtros', 'Opcional', 'Lista', 'Sin unidad', 'AB'],
+            ['Rodamientos', 'Ancho [mm] · Rodamientos', 'Obligatorio', 'Decimal', 'mm', 'Solo número; punto o coma decimal. Ejemplo: 5,5.'],
+        );
+        $mapa = app(MapearColumnasProductos::class)->sugerir($hojas['Productos'][0]);
+        expect($mapa[2])->toStartWith('ficha_');
+        expect($mapa[3])->toStartWith('ficha_');
+    } finally {
+        gc_collect_cycles();
+        unlink($ruta);
+    }
+});
+
 it('crea una marca desde el selector de la fila y la conserva seleccionada', function () {
     ['usuario' => $usuario] = escenarioImportacion();
     $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['marca' => 'MASAKI'])], 'marca.xlsx', null, null, false, $usuario);
@@ -812,4 +885,62 @@ it('distingue campos requeridos vacíos de la marca opcional sin especificar', f
         ->mountAction(TestAction::make('corregirFila')->table('2'))->call('forceRender')
         ->assertSee('Falta seleccionar')->assertSee('Elegí una categoría del negocio para este producto.')
         ->assertSee('Elegí la unidad con la que se contará el stock.')->assertDontSee('Sin coincidencia');
+});
+
+it('explica que falta el archivo sin mostrar claves de validación', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)->call('revisar')
+        ->assertHasErrors(['data.archivo'])->assertSee('Seleccioná un archivo Excel (.xlsx) antes de revisar.')
+        ->assertDontSee('validation.required');
+    expect(ImportacionProducto::query()->count())->toBe(0);
+});
+
+it('explica el almacén y la fecha faltantes al cargar existencias', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->fillForm(['archivo' => excelImportacion([filaImportacion()]), 'inventario' => true, 'almacen_id' => null, 'fecha_inventario' => null])
+        ->call('revisar')->assertHasErrors(['data.almacen_id', 'data.fecha_inventario'])
+        ->assertSee('Elegí el almacén para cargar las existencias iniciales.')
+        ->assertSee('Elegí la fecha de las existencias iniciales.')->assertDontSee('validation.required');
+    expect(ImportacionProducto::query()->count())->toBe(0);
+});
+
+it('pide relacionar u omitir una columna desconocida con un mensaje legible', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    $archivo = excelImportacion([['sku' => 'ABC', 'nota' => 'Información propia']], ['sku', 'nota']);
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->fillForm(['archivo' => $archivo])->call('revisar')->call('relacionarColumnas')
+        ->assertHasErrors(['columnasData.mapa.1'])
+        ->assertSee('Relacioná la columna «nota» con un campo del sistema o elegí No importar esta columna.')
+        ->assertDontSee('validation.required');
+    expect(ImportacionProducto::query()->count())->toBe(0);
+});
+
+it('explica los encabezados repetidos del Excel sin crear un borrador', function () {
+    ['usuario' => $usuario] = escenarioImportacion();
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->fillForm(['archivo' => excelImportacion([], ['sku', 'sku'])])->call('revisar')
+        ->assertHasErrors(['archivo'])->assertSee('La primera fila debe tener hasta 100 encabezados distintos, sin columnas vacías.');
+    expect(ImportacionProducto::query()->count())->toBe(0);
+});
+
+it('no pide agregar cantidades cuando el lote está pendiente por un catálogo incorrecto', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion([
+        'marca' => 'Pendiente de crear', 'cantidad_inicial' => '10', 'costo_unitario' => '20',
+    ])], 'catalogo-pendiente.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)->call('verImportacion', $importacion->id)
+        ->assertSee('Corregí las filas pendientes para validar las existencias iniciales.')
+        ->assertDontSee(ImportarProductos::EXISTENCIAS_REQUERIDAS)->assertDontSee('Confirmar importación');
+    expect(ProductoVariante::query()->count())->toBe(0);
+});
+
+it('resume los campos pendientes de la tarjeta móvil y conserva la corrección masiva', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
+    $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['categoria' => 'Sin categoría registrada', 'marca' => 'Marca del Excel'])], 'tarjetas.xlsx', null, null, false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->assertSee('Fila 2 · 0006206')->assertSee('Revisar categoría y marca.')
+        ->callTableBulkAction('asignarCampo', ['2'], ['campo' => 'categoria', 'valor' => $categoria->nombre])
+        ->assertHasNoErrors()->assertSee('Revisar marca.')->assertDontSee('Revisar categoría y marca.');
+    expect(ProductoVariante::query()->count())->toBe(0);
 });

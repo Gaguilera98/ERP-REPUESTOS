@@ -20,6 +20,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -96,6 +97,13 @@ class ImportarProductos extends Page implements HasTable
                 ->schema([
                     FileUpload::make('archivo')->label('Archivo de productos')->required()->storeFiles(false)
                         ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])
+                        ->validationMessages([
+                            'required' => 'Seleccioná un archivo Excel (.xlsx) antes de revisar.',
+                            'mimetypes' => 'El archivo debe ser un Excel con extensión .xlsx.',
+                            'mimes' => 'El archivo debe ser un Excel con extensión .xlsx.',
+                            'max' => 'El archivo no puede superar los 5 MB.',
+                            'uploaded' => 'No se pudo subir el archivo. Volvé a seleccionarlo e intentá otra vez.',
+                        ])
                         ->maxSize(5120)->columnSpanFull(),
                     Toggle::make('actualizar_existentes')->label('Actualizar productos existentes por SKU')
                         ->helperText('Activado, puede reemplazar nombre, marca, precios, código de barras y ficha técnica de los SKU encontrados. Revisá los cambios antes de confirmar. Apagado, conservan sus datos. Los SKU nuevos se crean en ambos casos.')
@@ -104,10 +112,12 @@ class ImportarProductos extends Page implements HasTable
                         ->helperText('Para mercadería que ya tenés. Requiere almacén, fecha y al menos una fila con cantidad y costo válidos. Podés incluir productos sin stock dejando cantidad, costo y proveedor vacíos.')
                         ->disabled(fn (): bool => ! auth('tenant')->user()->can('Cargar:InventarioInicial')),
                     Select::make('almacen_id')->label('Almacén que tiene la mercadería')
+                        ->validationMessages(['required' => 'Elegí el almacén para cargar las existencias iniciales.', 'in' => 'Elegí un almacén disponible entre tus sucursales autorizadas.'])
                         ->options(fn (): array => app(AccesoSucursales::class)->almacenes(auth('tenant')->user())->orderBy('nombre')->pluck('nombre', 'id')->all())
                         ->required(fn (Get $get): bool => (bool) $get('inventario'))->visible(fn (Get $get): bool => (bool) $get('inventario'))
                         ->searchable()->native(false),
                     DatePicker::make('fecha_inventario')->label('Fecha del inventario')->native(false)->displayFormat('d/m/Y')
+                        ->validationMessages(['required' => 'Elegí la fecha de las existencias iniciales.', 'date' => 'Ingresá una fecha válida.', 'before_or_equal' => 'La fecha del inventario no puede ser futura.'])
                         ->maxDate(today())->required(fn (Get $get): bool => (bool) $get('inventario'))
                         ->visible(fn (Get $get): bool => (bool) $get('inventario')),
                 ])->columns(2),
@@ -118,9 +128,12 @@ class ImportarProductos extends Page implements HasTable
     {
         return [Action::make('plantilla')->label('Descargar plantilla')->color('gray')->icon('heroicon-o-arrow-down-tray')
             ->modalHeading('Preparar plantilla')->modalSubmitActionLabel('Descargar Excel')
-            ->schema([Select::make('categorias')->label('Incluir ficha técnica de estas categorías')->multiple()->searchable()->native(false)
+            ->schema([Select::make('categorias')->label('Incluir ficha técnica de estas categorías')->multiple()->searchable()->native(false)->live()
                 ->options(fn (): array => Categoria::query()->where('is_active', true)->orderBy('nombre')->pluck('nombre', 'id')->all())
-                ->helperText('Sin categorías, se descarga la plantilla básica. Podés mezclar productos de varias categorías en una hoja.'),
+                ->helperText('Podés elegir una o varias. Sus atributos se incluyen automáticamente y se actualizan en cada descarga.'),
+                View::make('filament.negocio.resources.producto-maestros.pages.vista-previa-plantilla')
+                    ->viewData(fn (Get $get): array => ['categorias' => Categoria::query()->where('is_active', true)
+                        ->whereIn('id', $get('categorias') ?? [])->with('atributos.unidadMedida')->orderBy('nombre')->get()]),
                 CheckboxList::make('campos')->label('Columnas del catálogo y del inventario')->columns(2)
                     ->options(array_diff_key(MapearColumnasProductos::CAMPOS, ['atributos' => true]))
                     ->default(array_values(array_diff(ArchivoProductos::COLUMNAS, ['atributos'])))
@@ -165,7 +178,11 @@ class ImportarProductos extends Page implements HasTable
             Section::make('Relacionar columnas')->description('Comprobá las sugerencias. Cada campo se puede elegir una vez. Marcá explícitamente las columnas que no querés importar.')
                 ->schema(collect($this->archivoPendiente['columnas'] ?? [])->map(fn (string $columna, int $indice): Select => Select::make('mapa.'.$indice)
                     ->label($columna)->helperText('Ejemplo: '.mb_substr(implode(' · ', array_slice(array_filter(array_column(array_column($this->archivoPendiente['filas'], 'valores'), $indice), fn (string $valor): bool => $valor !== ''), 0, 2)), 0, 160))
-                    ->options($opciones)->required()->searchable()->native(false))->all())->columns(2),
+                    ->options($opciones)->required()->searchable()->native(false)
+                    ->validationMessages([
+                        'required' => 'Relacioná la columna «'.$columna.'» con un campo del sistema o elegí No importar esta columna.',
+                        'in' => 'Elegí un campo disponible del sistema o indicá que esta columna no se importa.',
+                    ]))->all())->columns(2),
         ]);
     }
 

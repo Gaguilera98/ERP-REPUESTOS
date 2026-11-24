@@ -2,6 +2,7 @@
 
 namespace App\Catalogo;
 
+use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
 use App\Models\Categoria;
 use App\Models\Marca;
@@ -148,14 +149,35 @@ class ArchivoProductos
                 ['Proveedor', 'Opcional. Escribí el nombre exacto del proveedor del negocio.'],
                 ['Ficha técnica', 'Completá las columnas de los atributos de la categoría de cada producto. Dejá vacíos los que no le correspondan. Las listas admiten varios valores separados por |.'],
                 ['Campos obligatorios', 'Se comprueban según la categoría de cada fila. Podés completarlos en la revisión antes de confirmar.'],
+                ['Plantilla dinámica', 'Los atributos se obtienen de la configuración actual de las categorías seleccionadas. Si cambia la ficha, descargá una plantilla nueva.'],
+                ['Guía de atributos', 'Consultá Ficha por categoría para ver obligatoriedad, tipo, unidad y opciones de cada categoría. Escribí solo el número en los campos decimales; no agregues la unidad al valor.'],
                 ['Solo catálogo', 'Dejá vacías cantidad_inicial, costo_unitario y proveedor.'],
                 $columnas,
                 array_map(fn (string $columna): string => $ejemplo[$columna] ?? '', $columnas),
             ] as $valores) {
                 $writer->addRow(self::filaDeTexto($valores));
             }
+            $ficha = $writer->addNewSheetAndMakeItCurrent();
+            $ficha->setName('Ficha por categoría');
+            $ficha->setColumnWidth(28, 1, 3, 4, 5);
+            $ficha->setColumnWidth(60, 2, 6);
+            $writer->addRow(self::filaDeTexto(['Categoría', 'Columna en Productos', 'Obligatoriedad', 'Tipo', 'Unidad', 'Valores permitidos / formato']));
+            if ($atributos === []) {
+                $writer->addRow(self::filaDeTexto(['No hay atributos para las categorías seleccionadas. Para incluir una ficha técnica, seleccioná sus categorías al descargar la plantilla.']));
+            }
             foreach ($atributos as $campo) {
-                $writer->addRow(self::filaDeTexto([$campo['label'], $campo['opciones'] === [] ? 'Respetá la unidad indicada en el encabezado.' : 'Opciones: '.implode(' | ', $campo['opciones'])]));
+                foreach (array_intersect_key($campo['categorias'], array_flip($categorias)) as $categoriaId => $nombreCategoria) {
+                    $regla = $campo['reglas'][$categoriaId];
+                    $writer->addRow(self::filaDeTexto([
+                        $nombreCategoria, $campo['label'], $regla['obligatorio'] ? 'Obligatorio' : 'Opcional',
+                        $campo['tipo']->etiqueta(), $campo['simbolo'] ?? 'Sin unidad',
+                        match ($campo['tipo']) {
+                            TipoAtributoCategoria::Decimal => 'Solo número; punto o coma decimal. Ejemplo: 5,5.',
+                            TipoAtributoCategoria::Lista => implode(' | ', $regla['opciones']),
+                            default => 'Texto libre.',
+                        },
+                    ]));
+                }
             }
             $writer->addNewSheetAndMakeItCurrent()->setName('Catálogos del negocio');
             $writer->addRow(Row::fromValues(['Tipo', 'Valor para copiar']));

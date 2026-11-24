@@ -66,10 +66,10 @@
             <p role="alert" class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">{{ $carga->resultado['aviso'] }}</p>
         @endif
         @if ($carga->almacen_id !== null && $revision['lotes'] === 0 && in_array($carga->estado, ['revision', 'fallida'], true))
-            <p role="alert" class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">{{ \App\Catalogo\ImportarProductos::EXISTENCIAS_REQUERIDAS }}</p>
+            <p role="alert" class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">{{ $revision['errores'] === [] ? \App\Catalogo\ImportarProductos::EXISTENCIAS_REQUERIDAS : 'Corregí las filas pendientes para validar las existencias iniciales. No se ingresará stock hasta confirmar una revisión válida.' }}</p>
         @endif
         @if ($revision['actualizados'] > 0 && in_array($carga->estado, ['revision', 'fallida'], true))
-            <p class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">Se actualizarán productos existentes por coincidencia de SKU. Abrí Revisar fila para comparar los valores actuales y propuestos antes de confirmar.</p>
+            <p class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">Se actualizarán productos existentes por coincidencia de SKU. Abrí Revisar producto para comparar los valores actuales y propuestos antes de confirmar.</p>
         @endif
         @if ($revision['errores'] !== [])
             <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-danger-500/10 p-4">

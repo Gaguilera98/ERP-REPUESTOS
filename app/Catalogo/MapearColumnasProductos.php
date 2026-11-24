@@ -17,7 +17,7 @@ class MapearColumnasProductos
         'proveedor' => 'Proveedor', 'atributos' => 'Ficha en JSON (compatibilidad)',
     ];
 
-    /** @return array<string, array{label: string, clave: string, tipo: TipoAtributoCategoria, unidad: ?int, opciones: array, categorias: array<int, string>}> */
+    /** @return array<string, array{label: string, clave: string, tipo: TipoAtributoCategoria, unidad: ?int, simbolo: ?string, opciones: array, categorias: array<int, string>, reglas: array<int, array{obligatorio: bool, opciones: array}>}> */
     public function atributos(): array
     {
         $campos = [];
@@ -31,8 +31,9 @@ class MapearColumnasProductos
             $categorias = $grupo->mapWithKeys(fn (CategoriaAtributo $item): array => [$item->categoria_id => $item->categoria->nombre])->all();
             $campos['ficha_'.$atributo->id] = [
                 'label' => $atributo->etiqueta.($atributo->unidadMedida ? ' ['.$atributo->unidadMedida->simbolo.']' : '').' · '.implode(', ', $categorias),
-                'clave' => $atributo->clave, 'tipo' => $atributo->tipo, 'unidad' => $atributo->unidad_medida_id,
+                'clave' => $atributo->clave, 'tipo' => $atributo->tipo, 'unidad' => $atributo->unidad_medida_id, 'simbolo' => $atributo->unidadMedida?->simbolo,
                 'opciones' => $grupo->flatMap(fn (CategoriaAtributo $item): array => $item->opciones ?? [])->unique()->values()->all(), 'categorias' => $categorias,
+                'reglas' => $grupo->mapWithKeys(fn (CategoriaAtributo $item): array => [$item->categoria_id => ['obligatorio' => $item->obligatorio, 'opciones' => $item->opciones ?? []]])->all(),
             ];
         }
 
