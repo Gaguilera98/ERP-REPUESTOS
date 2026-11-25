@@ -74,7 +74,7 @@
         @if ($revision['errores'] !== [])
             <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-danger-500/10 p-4">
                 <p class="text-sm text-danger-700 dark:text-danger-300">{{ count($revision['errores']) }} filas necesitan corrección. Corregilas en la tabla o seleccioná varias para asignar un valor en grupo.</p>
-                <x-filament::button color="gray" wire:click="descargarErrores" icon="heroicon-o-arrow-down-tray">Descargar filas con errores</x-filament::button>
+                <x-filament::button color="gray" wire:click="descargarErrores" wire:loading.attr="disabled" wire:target="descargarErrores" icon="heroicon-o-arrow-down-tray">Descargar pendientes para completar</x-filament::button>
             </div>
         @endif
 

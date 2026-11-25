@@ -157,28 +157,7 @@ class ArchivoProductos
             ] as $valores) {
                 $writer->addRow(self::filaDeTexto($valores));
             }
-            $ficha = $writer->addNewSheetAndMakeItCurrent();
-            $ficha->setName('Ficha por categoría');
-            $ficha->setColumnWidth(28, 1, 3, 4, 5);
-            $ficha->setColumnWidth(60, 2, 6);
-            $writer->addRow(self::filaDeTexto(['Categoría', 'Columna en Productos', 'Obligatoriedad', 'Tipo', 'Unidad', 'Valores permitidos / formato']));
-            if ($atributos === []) {
-                $writer->addRow(self::filaDeTexto(['No hay atributos para las categorías seleccionadas. Para incluir una ficha técnica, seleccioná sus categorías al descargar la plantilla.']));
-            }
-            foreach ($atributos as $campo) {
-                foreach (array_intersect_key($campo['categorias'], array_flip($categorias)) as $categoriaId => $nombreCategoria) {
-                    $regla = $campo['reglas'][$categoriaId];
-                    $writer->addRow(self::filaDeTexto([
-                        $nombreCategoria, $campo['label'], $regla['obligatorio'] ? 'Obligatorio' : 'Opcional',
-                        $campo['tipo']->etiqueta(), $campo['simbolo'] ?? 'Sin unidad',
-                        match ($campo['tipo']) {
-                            TipoAtributoCategoria::Decimal => 'Solo número; punto o coma decimal. Ejemplo: 5,5.',
-                            TipoAtributoCategoria::Lista => implode(' | ', $regla['opciones']),
-                            default => 'Texto libre.',
-                        },
-                    ]));
-                }
-            }
+            $this->escribirGuiaFicha($writer, $atributos, $categorias);
             $writer->addNewSheetAndMakeItCurrent()->setName('Catálogos del negocio');
             $writer->addRow(Row::fromValues(['Tipo', 'Valor para copiar']));
             foreach ([
@@ -193,6 +172,126 @@ class ArchivoProductos
             }
         } finally {
             $writer->close();
+        }
+    }
+
+    /** @param list<array<string, mixed>> $filas @param array<int, list<string>> $errores */
+    public function pendientes(string $ruta, array $filas, array $errores, string $codigo): void
+    {
+        $pendientes = array_values(array_filter($filas, fn (array $fila): bool => isset($errores[$fila['fila']])));
+        if ($pendientes === []) {
+            throw ValidationException::withMessages(['archivo' => 'Esta revisión no tiene filas pendientes para descargar.']);
+        }
+        $categorias = Categoria::query()->where('is_active', true)->get()->groupBy(fn (Categoria $categoria): string => mb_strtolower($categoria->nombre))
+            ->filter(fn ($grupo): bool => $grupo->count() === 1)->map(fn ($grupo): int => $grupo->first()->id);
+        $ids = collect($pendientes)->map(fn (array $fila): ?int => $categorias->get(mb_strtolower((string) $fila['categoria'])))->filter()->unique()->values()->all();
+        $campos = app(MapearColumnasProductos::class)->atributos();
+        $adicionales = collect($pendientes)->flatMap(fn (array $fila): array => array_keys(json_decode($fila['_ficha_columnas'] ?? '{}', true, flags: JSON_THROW_ON_ERROR)))->unique()->values()->all();
+        $atributos = array_filter($campos, fn (array $campo): bool => array_intersect(array_keys($campo['categorias']), $ids) !== []);
+        $destinos = array_values(array_unique([...array_keys($atributos), ...$adicionales]));
+        $columnas = [...self::COLUMNAS, ...array_map(fn (string $destino): string => $campos[$destino]['label'] ?? $destino, $destinos)];
+        if (count($columnas) > 100) {
+            throw ValidationException::withMessages(['archivo' => 'Los pendientes superan las 100 columnas admitidas. Corregí algunas categorías desde la revisión antes de descargar.']);
+        }
+
+        $writer = new Writer;
+        $writer->openToFile($ruta);
+        try {
+            $sheet = $writer->getCurrentSheet();
+            $sheet->setName('Productos');
+            $sheet->setColumnWidth(24, ...range(1, count($columnas)));
+            $writer->addRow(self::filaDeTexto($columnas));
+            $referencias = [];
+            foreach ($pendientes as $indice => $fila) {
+                $categoriaId = $categorias->get(mb_strtolower((string) $fila['categoria']));
+                $fila = $this->separarFichaParaCompletar($fila, $categoriaId, $campos);
+                $ficha = json_decode($fila['_ficha_columnas'] ?? '{}', true, flags: JSON_THROW_ON_ERROR);
+                $writer->addRow(self::filaDeTexto([
+                    ...array_map(fn (string $columna): string => (string) ($fila[$columna] ?? ''), self::COLUMNAS),
+                    ...array_map(fn (string $destino): string => (string) ($ficha[$destino] ?? ''), $destinos),
+                ]));
+                $referencias[] = [$indice + 2, $fila['fila'], $fila['sku'], implode(' ', $errores[$fila['fila']])];
+            }
+            $writer->addNewSheetAndMakeItCurrent()->setName('Qué completar');
+            $writer->addRow(self::filaDeTexto(['Fila en Productos', 'Fila del archivo original', 'SKU', 'Qué corregir']));
+            foreach ($referencias as $referencia) {
+                $writer->addRow(self::filaDeTexto($referencia));
+            }
+            $this->escribirGuiaFicha($writer, $atributos, $ids);
+            $writer->addNewSheetAndMakeItCurrent()->setName('Instrucciones');
+            foreach ([
+                ['Borrador de origen', $codigo],
+                ['Contenido', 'Solo filas pendientes, con las correcciones guardadas en el sistema. La descarga no crea productos ni mueve stock.'],
+                ['Dónde completar', 'Editá la hoja Productos. Qué completar relaciona cada fila de esta hoja con su fila original y sus errores.'],
+                ['Ficha técnica', 'Completá las columnas de la categoría de cada fila. Consultá Ficha por categoría para ver unidades, obligatoriedad y opciones.'],
+                ['Categoría sin coincidencia', 'Corregí o creá primero la categoría en el sistema y volvé a descargar para obtener sus atributos.'],
+                ['Compatibilidad', 'La columna atributos conserva datos JSON que no pudieron trasladarse a columnas. No la borres si tiene contenido.'],
+                ['Códigos', 'SKU y código de barras se conservan como texto. Mantené ese formato para no perder ceros iniciales.'],
+                ['Importante', 'Este archivo no reemplaza el borrador automáticamente. No confirmes otra carga parcial como si fuera la carga completa.'],
+            ] as $instruccion) {
+                $writer->addRow(self::filaDeTexto($instruccion));
+            }
+        } finally {
+            $writer->close();
+        }
+    }
+
+    /** @param array<string, mixed> $fila @param array<string, array> $campos @return array<string, mixed> */
+    private function separarFichaParaCompletar(array $fila, ?int $categoriaId, array $campos): array
+    {
+        $json = (string) ($fila['atributos'] ?? '');
+        $valores = json_decode($json, true);
+        if (! str_starts_with(trim($json), '{') || ! is_array($valores) || $categoriaId === null) {
+            return $fila;
+        }
+        $ficha = json_decode($fila['_ficha_columnas'] ?? '{}', true, flags: JSON_THROW_ON_ERROR);
+        foreach ($campos as $destino => $campo) {
+            if (! isset($campo['categorias'][$categoriaId]) || ! array_key_exists($campo['clave'], $valores)) {
+                continue;
+            }
+            $valor = $valores[$campo['clave']];
+            if (is_array($valor) && array_is_list($valor) && $campo['tipo'] === TipoAtributoCategoria::Lista
+                && count(array_filter($valor, fn (mixed $opcion): bool => is_string($opcion) && ! str_contains($opcion, '|'))) === count($valor)) {
+                $valor = implode('|', $valor);
+            }
+            if (! is_string($valor) && ! is_int($valor) && ! is_float($valor)) {
+                continue;
+            }
+            if (blank($ficha[$destino] ?? null)) {
+                $ficha[$destino] = (string) $valor;
+            }
+            unset($valores[$campo['clave']]);
+        }
+        $fila['atributos'] = $valores === [] ? '' : json_encode($valores, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        $fila['_ficha_columnas'] = json_encode($ficha, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+
+        return $fila;
+    }
+
+    /** @param array<string, array> $atributos @param list<int> $categorias */
+    private function escribirGuiaFicha(Writer $writer, array $atributos, array $categorias): void
+    {
+        $ficha = $writer->addNewSheetAndMakeItCurrent();
+        $ficha->setName('Ficha por categoría');
+        $ficha->setColumnWidth(28, 1, 3, 4, 5);
+        $ficha->setColumnWidth(60, 2, 6);
+        $writer->addRow(self::filaDeTexto(['Categoría', 'Columna en Productos', 'Obligatoriedad', 'Tipo', 'Unidad', 'Valores permitidos / formato']));
+        if ($atributos === []) {
+            $writer->addRow(self::filaDeTexto(['No hay atributos para las categorías seleccionadas. Para incluir una ficha técnica, seleccioná sus categorías al descargar la plantilla.']));
+        }
+        foreach ($atributos as $campo) {
+            foreach (array_intersect_key($campo['categorias'], array_flip($categorias)) as $categoriaId => $nombreCategoria) {
+                $regla = $campo['reglas'][$categoriaId];
+                $writer->addRow(self::filaDeTexto([
+                    $nombreCategoria, $campo['label'], $regla['obligatorio'] ? 'Obligatorio' : 'Opcional',
+                    $campo['tipo']->etiqueta(), $campo['simbolo'] ?? 'Sin unidad',
+                    match ($campo['tipo']) {
+                        TipoAtributoCategoria::Decimal => 'Solo número; punto o coma decimal. Ejemplo: 5,5.',
+                        TipoAtributoCategoria::Lista => implode(' | ', $regla['opciones']),
+                        default => 'Texto libre.',
+                    },
+                ]));
+            }
         }
     }
 }

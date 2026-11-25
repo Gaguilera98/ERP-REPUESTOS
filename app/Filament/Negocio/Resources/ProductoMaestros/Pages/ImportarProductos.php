@@ -32,8 +32,6 @@ use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
-use OpenSpout\Common\Entity\Row;
-use OpenSpout\Writer\XLSX\Writer;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ImportarProductos extends Page implements HasTable
@@ -320,35 +318,20 @@ class ImportarProductos extends Page implements HasTable
     public function descargarErrores(): StreamedResponse
     {
         $importacion = $this->getImportacion();
-        $opciones = app(MapearColumnasProductos::class)->opciones();
-        $adicionales = collect($importacion->filas)->flatMap(fn (array $fila): array => array_keys(json_decode($fila['_ficha_columnas'] ?? '{}', true)))->unique()->values()->all();
+        $ruta = tempnam(sys_get_temp_dir(), 'pendientes-');
+        try {
+            app(ArchivoProductos::class)->pendientes($ruta, $importacion->filas, $importacion->revision['errores'], $importacion->codigo());
+        } catch (\Throwable $exception) {
+            unlink($ruta);
+            throw $exception;
+        }
 
-        return response()->streamDownload(function () use ($importacion, $opciones, $adicionales): void {
-            $ruta = tempnam(sys_get_temp_dir(), 'errores-');
-            $writer = new Writer;
+        return response()->streamDownload(function () use ($ruta): void {
             try {
-                $writer->openToFile($ruta);
-                $writer->getCurrentSheet()->setName('Productos');
-                $writer->addRow(ArchivoProductos::filaDeTexto([...ArchivoProductos::COLUMNAS, ...array_map(fn (string $campo): string => $opciones[$campo] ?? $campo, $adicionales)]));
-                foreach ($importacion->filas as $fila) {
-                    if (isset($importacion->revision['errores'][$fila['fila']])) {
-                        $ficha = json_decode($fila['_ficha_columnas'] ?? '{}', true);
-                        $writer->addRow(ArchivoProductos::filaDeTexto([
-                            ...array_map(fn (string $columna): string => (string) $fila[$columna], ArchivoProductos::COLUMNAS),
-                            ...array_map(fn (string $campo): string => (string) ($ficha[$campo] ?? ''), $adicionales),
-                        ]));
-                    }
-                }
-                $writer->addNewSheetAndMakeItCurrent()->setName('Errores por fila original');
-                $writer->addRow(Row::fromValues(['Fila del archivo original', 'Qué corregir']));
-                foreach ($importacion->revision['errores'] as $fila => $mensajes) {
-                    $writer->addRow(ArchivoProductos::filaDeTexto([$fila, implode(' ', $mensajes)]));
-                }
-                $writer->close();
                 readfile($ruta);
             } finally {
                 unlink($ruta);
             }
-        }, 'productos-por-corregir.xlsx', ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+        }, 'productos-por-completar.xlsx', ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 }

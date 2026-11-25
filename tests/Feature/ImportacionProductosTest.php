@@ -173,7 +173,7 @@ it('muestra los errores en la revisión y bloquea la confirmación completa', fu
         ->call('revisar')->assertHasNoErrors()->assertSee('filas necesitan corrección')
         ->call('confirmar')->assertHasErrors(['archivo']);
     expect(ProductoVariante::query()->count())->toBe(0);
-    $pagina->call('descargarErrores')->assertFileDownloaded('productos-por-corregir.xlsx');
+    $pagina->call('descargarErrores')->assertFileDownloaded('productos-por-completar.xlsx');
 });
 
 it('requiere revisar otra vez si el catálogo cambió durante la espera en cola', function () {
@@ -188,6 +188,99 @@ it('requiere revisar otra vez si el catálogo cambió durante la espera en cola'
     expect($importacion->refresh()->estado)->toBe('revision')->and($importacion->resultado['aviso'])->toContain('cambiaron');
     expect(ProductoVariante::query()->count())->toBe(1);
 });
+
+it('exporta los pendientes con atributos faltantes y conserva las correcciones y los lotes sin aplicarlos', function () {
+    ['usuario' => $usuario, 'categoria' => $categoria, 'almacen' => $almacen] = escenarioImportacion();
+    $otra = Categoria::factory()->create(['nombre' => 'Correas']);
+    $milimetros = UnidadMedida::query()->where('simbolo', 'mm')->sole();
+    $diametro = CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'diametro', 'etiqueta' => 'Diámetro', 'unidad_medida_id' => $milimetros->id, 'obligatorio' => true]);
+    $ancho = CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'ancho', 'etiqueta' => 'Ancho', 'unidad_medida_id' => $milimetros->id, 'obligatorio' => true]);
+    $sello = CategoriaAtributo::factory()->lista()->create(['categoria_id' => $categoria->id, 'clave' => 'sello', 'etiqueta' => 'Sello']);
+    $largo = CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $otra->id, 'clave' => 'largo', 'etiqueta' => 'Largo', 'unidad_medida_id' => $milimetros->id, 'obligatorio' => true]);
+    $servicio = app(ImportarProductos::class);
+    $importacion = $servicio->preparar([
+        filaImportacion(['cantidad_inicial' => '2', 'costo_unitario' => '20', 'atributos' => '{"diametro":5.5,"sello":["ZZ"]}']),
+        filaImportacion(['fila' => 8, 'sku' => 'VALIDO', 'codigo_barras' => '', 'atributos' => '{"diametro":6,"ancho":1}']),
+        filaImportacion(['fila' => 15, 'sku' => 'CORREA', 'categoria' => 'Correas', 'codigo_barras' => '', 'precio_menor' => '-1', '_ficha_columnas' => json_encode(['ficha_'.$largo->id => '12'])]),
+    ], 'pendientes.xlsx', $almacen->id, today()->toDateString(), false, $usuario);
+    $importacion = $servicio->corregirFilas($importacion->id, [2], ['nombre' => 'Producto corregido'], $usuario);
+    $filasGuardadas = $importacion->filas;
+    $ruta = tempnam(sys_get_temp_dir(), 'pendientes-test-');
+
+    try {
+        app(ArchivoProductos::class)->pendientes($ruta, $filasGuardadas, $importacion->revision['errores'], $importacion->codigo());
+        $contenido = app(ArchivoProductos::class)->leer($ruta);
+        expect(array_column($contenido, 'sku'))->toBe(['0006206', 'CORREA']);
+        expect($contenido[0])->toMatchArray(['nombre' => 'Producto corregido', 'codigo_barras' => '001234567890', 'cantidad_inicial' => '2', 'costo_unitario' => '20', 'atributos' => '']);
+        expect(json_decode($contenido[0]['_ficha_columnas'], true))->toBe([
+            'ficha_'.$diametro->id => '5.5', 'ficha_'.$ancho->id => '', 'ficha_'.$sello->id => 'ZZ', 'ficha_'.$largo->id => '',
+        ]);
+        expect(json_decode($contenido[1]['_ficha_columnas'], true)['ficha_'.$largo->id])->toBe('12');
+
+        $reader = new Reader;
+        $reader->open($ruta);
+        $hojas = [];
+        try {
+            foreach ($reader->getSheetIterator() as $sheet) {
+                foreach ($sheet->getRowIterator() as $row) {
+                    $hojas[$sheet->getName()][] = $row->toArray();
+                }
+            }
+        } finally {
+            $reader->close();
+        }
+        expect($hojas['Qué completar'][1])->toBe(['2', '2', '0006206', 'Ancho es obligatorio.']);
+        expect($hojas['Qué completar'][2][0])->toBe('3');
+        expect($hojas['Qué completar'][2][1])->toBe('15');
+        expect($hojas['Ficha por categoría'])->toContain(['Rodamientos', 'Ancho [mm] · Rodamientos', 'Obligatorio', 'Decimal', 'mm', 'Solo número; punto o coma decimal. Ejemplo: 5,5.']);
+        $contenido[0]['_ficha_columnas'] = json_encode(['ficha_'.$diametro->id => '5.5', 'ficha_'.$ancho->id => '2', 'ficha_'.$sello->id => 'ZZ']);
+        $contenido[1]['precio_menor'] = '45';
+        expect($servicio->revisar($contenido, $almacen->id, false, $usuario)['errores'])->toBe([]);
+        expect($importacion->refresh()->filas)->toBe($filasGuardadas);
+        expect(ProductoVariante::query()->count())->toBe(0);
+        expect(MovimientoInventario::query()->count())->toBe(0);
+    } finally {
+        unset($sheet, $reader);
+        gc_collect_cycles();
+        unlink($ruta);
+    }
+});
+
+it('conserva el JSON inválido y las columnas de ficha sin correspondencia al descargar pendientes', function () {
+    escenarioImportacion();
+    $ruta = tempnam(sys_get_temp_dir(), 'pendientes-compatibilidad-');
+    $fila = filaImportacion(['categoria' => 'Todavía no existe', 'atributos' => '{json inválido', '_ficha_columnas' => '{"ficha_999999":"005"}']);
+
+    try {
+        app(ArchivoProductos::class)->pendientes($ruta, [$fila], [2 => ['Corregí la categoría.']], 'IMP-000001');
+        $contenido = app(ArchivoProductos::class)->inspeccionar($ruta);
+        expect($contenido['columnas'])->toContain('ficha_999999');
+        expect($contenido['filas'][0]['valores'][11])->toBe('{json inválido');
+        expect($contenido['filas'][0]['valores'][12])->toBe('005');
+    } finally {
+        unlink($ruta);
+    }
+});
+
+it('rechaza una descarga de pendientes vacía o que no puede volver a importarse por tamaño', function (bool $demasiadasColumnas, string $mensaje) {
+    escenarioImportacion();
+    $ruta = tempnam(sys_get_temp_dir(), 'pendientes-limite-');
+    $fila = filaImportacion(['_ficha_columnas' => json_encode(array_fill_keys(array_map(fn (int $numero): string => 'ficha_'.$numero, range(1, 89)), ''))]);
+
+    try {
+        app(ArchivoProductos::class)->pendientes($ruta, [$fila], $demasiadasColumnas ? [2 => ['Pendiente']] : [], 'IMP-000001');
+    } catch (ValidationException $exception) {
+        expect($exception->errors()['archivo'][0])->toContain($mensaje);
+
+        return;
+    } finally {
+        unlink($ruta);
+    }
+    $this->fail('La descarga debía rechazar el archivo.');
+})->with([
+    'sin pendientes' => [false, 'no tiene filas pendientes'],
+    'más de cien columnas' => [true, 'superan las 100 columnas'],
+]);
 
 it('revierte toda la importación si falla un movimiento intermedio', function () {
     ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
