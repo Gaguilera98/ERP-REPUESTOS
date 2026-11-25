@@ -22,6 +22,7 @@ class VariantesProducto
      *     variante_id: int|null,
      *     sku: string|null,
      *     codigo_barras: string|null,
+     *     condicion_producto_id: int|null,
      *     precio_venta: mixed,
      *     precio_mayor: mixed,
      *     ficha: array<string, mixed>,
@@ -40,6 +41,7 @@ class VariantesProducto
             'variante_id' => null,
             'sku' => null,
             'codigo_barras' => null,
+            'condicion_producto_id' => null,
             'precio_venta' => null,
             'precio_mayor' => null,
             'ficha' => [],
@@ -56,6 +58,7 @@ class VariantesProducto
                 'variante_id' => $unica?->id,
                 'sku' => $unica?->sku,
                 'codigo_barras' => $unica?->codigo_barras,
+                'condicion_producto_id' => $unica?->condicion_producto_id,
                 'precio_venta' => $unica?->precio_venta,
                 'precio_mayor' => $unica?->precio_mayor,
                 'precio_venta_dolar' => $unica?->precio_venta_dolar,
@@ -121,6 +124,7 @@ class VariantesProducto
                     'ejes_json' => json_encode($ejes, JSON_THROW_ON_ERROR),
                     'sku' => $variante->sku,
                     'codigo_barras' => $variante->codigo_barras,
+                    'condicion_producto_id' => $variante->condicion_producto_id,
                     'imagen' => $variante->imagen,
                     'precio_venta' => $variante->precio_venta,
                     'precio_mayor' => $variante->precio_mayor,
@@ -147,6 +151,7 @@ class VariantesProducto
         mixed $codigoBarrasSimple = null,
         mixed $menorUsdSimple = null,
         mixed $mayorUsdSimple = null,
+        mixed $condicionSimple = null,
     ): array {
         $ejes = collect($opciones)
             ->filter(fn (mixed $opcion): bool => is_array($opcion) && filled($opcion['clave'] ?? null))
@@ -188,7 +193,7 @@ class VariantesProducto
 
         $habia = $porClave->isNotEmpty();
 
-        return array_map(function (array $ejes, int $indice) use ($porClave, $habia, $skuSimple, $precioSimple, $precioMayorSimple, $codigoBarrasSimple, $menorUsdSimple, $mayorUsdSimple): array {
+        return array_map(function (array $ejes, int $indice) use ($porClave, $habia, $skuSimple, $precioSimple, $precioMayorSimple, $codigoBarrasSimple, $menorUsdSimple, $mayorUsdSimple, $condicionSimple): array {
             $previa = $porClave->get($this->claveEjes($ejes), []);
 
             return [
@@ -196,6 +201,7 @@ class VariantesProducto
                 'ejes_json' => json_encode($ejes, JSON_THROW_ON_ERROR),
                 'sku' => $previa['sku'] ?? ((! $habia && $indice === 0) ? $skuSimple : null),
                 'codigo_barras' => $previa['codigo_barras'] ?? ((! $habia && $indice === 0) ? $codigoBarrasSimple : null),
+                'condicion_producto_id' => array_key_exists('condicion_producto_id', $previa) ? $previa['condicion_producto_id'] : $condicionSimple,
                 'imagen' => $previa['imagen'] ?? null,
                 'precio_venta' => $previa['precio_venta'] ?? $precioSimple,
                 'precio_mayor' => $previa['precio_mayor'] ?? $precioMayorSimple,
@@ -230,6 +236,7 @@ class VariantesProducto
                 'id' => $estado['variante_id'] ?? null,
                 'sku' => $estado['sku'] ?? null,
                 'codigo_barras' => $this->texto($estado['codigo_barras'] ?? null),
+                ...Arr::only($estado, ['condicion_producto_id']),
                 'imagen' => null,
                 'precio_venta' => $estado['precio_venta'] ?? null,
                 'precio_mayor' => $this->texto($estado['precio_mayor'] ?? null),
@@ -250,6 +257,7 @@ class VariantesProducto
                 'id' => $fila['id'] ?? null,
                 'sku' => $fila['sku'] ?? null,
                 'codigo_barras' => $this->texto($fila['codigo_barras'] ?? null),
+                ...Arr::only($fila, ['condicion_producto_id']),
                 'imagen' => $this->archivo($fila['imagen'] ?? null),
                 'precio_venta' => $fila['precio_venta'] ?? null,
                 'precio_mayor' => $this->texto($fila['precio_mayor'] ?? null),

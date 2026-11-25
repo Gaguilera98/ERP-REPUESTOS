@@ -14,6 +14,7 @@ use App\Filament\Negocio\Resources\Categorias\Schemas\CategoriaForm;
 use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
+use App\Models\CondicionProducto;
 use App\Models\InventarioStock;
 use App\Models\Marca;
 use App\Models\NegocioConfiguracion;
@@ -69,6 +70,12 @@ class ProductoMaestroForm
                                         ->placeholder('Ej. Rodamiento rígido de bolas')
                                         ->required()
                                         ->maxLength(255)
+                                        ->columnSpanFull(),
+                                    TextInput::make('codigo_repuesto')
+                                        ->label('Código común del repuesto')
+                                        ->placeholder('Ej. 6206')
+                                        ->maxLength(255)
+                                        ->hintIcon(Heroicon::OutlinedQuestionMarkCircle, tooltip: 'Referencia compartida del producto. Cada variante conserva un SKU único para identificar su stock y precio.')
                                         ->columnSpanFull(),
                                     Select::make('categoria_id')
                                         ->label('Categoría / Rubro')
@@ -147,6 +154,7 @@ class ProductoMaestroForm
                                     Hidden::make('variante_id'),
                                     self::campoSku('sku', 'variante_id'),
                                     self::campoCodigoBarras('codigo_barras', 'variante_id'),
+                                    self::campoCondicion('variante_id')->columnSpanFull(),
                                     self::campoPrecio('precio_venta', 'Precio al por menor', true, $moneda, $conDolar),
                                     self::campoPrecio('precio_mayor', 'Precio al por mayor', false, $moneda, $conDolar),
                                     self::referencia('precio_venta_dolar', 'Referencia Menor en USD', $conDolar, $moneda, $cotizacion),
@@ -216,6 +224,7 @@ class ProductoMaestroForm
                                 $set('variante_id', $primera['id'] ?? $get('variante_id'));
                                 $set('sku', $primera['sku'] ?? $get('sku'));
                                 $set('codigo_barras', $primera['codigo_barras'] ?? $get('codigo_barras'));
+                                $set('condicion_producto_id', $primera['condicion_producto_id'] ?? $get('condicion_producto_id'));
                                 $set('precio_venta', $primera['precio_venta'] ?? $get('precio_venta'));
                                 $set('precio_mayor', $primera['precio_mayor'] ?? $get('precio_mayor'));
                                 if ($primera !== []) {
@@ -266,6 +275,7 @@ class ProductoMaestroForm
                                     $get('codigo_barras'),
                                     $get('precio_venta_dolar'),
                                     $get('precio_mayor_dolar'),
+                                    $get('condicion_producto_id'),
                                 ));
                             })
                             ->schema([
@@ -335,6 +345,7 @@ class ProductoMaestroForm
                                             ->schema([
                                                 self::campoSku('sku', 'id'),
                                                 self::campoCodigoBarras('codigo_barras', 'id'),
+                                                self::campoCondicion('id')->columnSpanFull(),
                                                 self::campoPrecio('precio_venta', 'Precio al por menor', true, $moneda, $conDolar),
                                                 self::campoPrecio('precio_mayor', 'Precio al por mayor', false, $moneda, $conDolar),
                                                 self::referencia('precio_venta_dolar', 'Referencia Menor en USD', $conDolar, $moneda, $cotizacion),
@@ -367,7 +378,7 @@ class ProductoMaestroForm
                     ->placeholder('No hay existencias registradas.')
                     ->state(fn (?ProductoMaestro $record): ?ModelCollection => $record === null ? null
                         : app(AccesoSucursales::class)->filtrarAlmacen($record->stocks()->getQuery(), auth('tenant')->user())
-                            ->with('almacen', 'variante.productoMaestro.unidadBase')->get()->sortBy(['almacen.nombre', 'variante.sku']))
+                            ->with('almacen', 'variante.productoMaestro.unidadBase', 'variante.condicion')->get()->sortBy(['almacen.nombre', 'variante.sku']))
                     ->table([
                         TableColumn::make('Almacén'),
                         TableColumn::make('SKU'),
@@ -377,7 +388,8 @@ class ProductoMaestroForm
                     ])
                     ->schema([
                         TextEntry::make('almacen.nombre')->label('Almacén'),
-                        TextEntry::make('variante.sku')->label('SKU'),
+                        TextEntry::make('variante.sku')->label('SKU')
+                            ->formatStateUsing(fn (string $state, InventarioStock $record): string => $state.' · '.($record->variante?->condicion?->nombre ?? 'Sin condición asignada')),
                         TextEntry::make('cantidad_actual')->label('Físico')->formatStateUsing($cantidad),
                         TextEntry::make('cantidad_reservada')->label('Reservado')->formatStateUsing($cantidad),
                         TextEntry::make('cantidad_disponible')
@@ -459,6 +471,24 @@ class ProductoMaestroForm
                 ignorable: fn (Get $get) => $get($id),
                 ignoreRecord: false,
             );
+    }
+
+    private static function campoCondicion(string $campoId): Select
+    {
+        return Select::make('condicion_producto_id')
+            ->label('Condición del producto')
+            ->options(function (Get $get, ?ProductoMaestro $record) use ($campoId): array {
+                $actual = $record?->variantes()->whereKey($get($campoId))->value('condicion_producto_id');
+
+                return CondicionProducto::query()
+                    ->where(fn ($query) => $query->where('is_active', true)->when($actual !== null, fn ($query) => $query->orWhereKey($actual)))
+                    ->orderBy('orden')->orderBy('nombre')->pluck('nombre', 'id')->all();
+            })
+            ->default(fn (): mixed => CondicionProducto::query()->where('codigo', 'nuevo')->where('is_active', true)->value('id'))
+            ->required()
+            ->native(false)
+            ->validationMessages(['required' => 'Elegí la condición del producto.', 'in' => 'Elegí una condición disponible de este negocio.'])
+            ->hintIcon(Heroicon::OutlinedQuestionMarkCircle, tooltip: 'Indica si esta variante es nueva, usada u otra condición. El stock y los precios corresponden a su SKU.');
     }
 
     private static function campoCodigoBarras(string $nombre, string $id): TextInput

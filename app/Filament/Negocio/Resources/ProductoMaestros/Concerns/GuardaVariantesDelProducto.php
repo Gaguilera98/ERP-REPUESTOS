@@ -70,6 +70,7 @@ trait GuardaVariantesDelProducto
             $data['variante_id'],
             $data['sku'],
             $data['codigo_barras'],
+            $data['condicion_producto_id'],
             $data['precio_venta'],
             $data['precio_mayor'],
             $data['precio_venta_dolar'],

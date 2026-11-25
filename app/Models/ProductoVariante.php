@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'tenant_id',
     'producto_maestro_id',
+    'condicion_producto_id',
     'sku',
     'codigo_barras',
     'imagen',
@@ -79,5 +80,10 @@ class ProductoVariante extends Model
     public function stocks(): HasMany
     {
         return $this->hasMany(InventarioStock::class);
+    }
+
+    public function condicion(): BelongsTo
+    {
+        return $this->belongsTo(CondicionProducto::class, 'condicion_producto_id');
     }
 }

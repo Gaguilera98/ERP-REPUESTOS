@@ -59,6 +59,7 @@ return [
         'trabajadores',
         'inventario_stocks',
         'productos_variantes',
+        'condiciones_producto',
         'producto_unidades',
         'productos_maestros',
         'marcas',

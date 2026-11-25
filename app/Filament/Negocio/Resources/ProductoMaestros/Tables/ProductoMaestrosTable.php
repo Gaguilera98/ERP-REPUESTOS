@@ -60,6 +60,7 @@ class ProductoMaestrosTable
                     ->weight('bold')
                     ->searchable(query: function ($query, string $search) {
                         $query->where('nombre', 'like', "%{$search}%")
+                            ->orWhere('codigo_repuesto', 'like', "%{$search}%")
                             ->orWhereHas('variantes', function ($vQuery) use ($search) {
                                 $vQuery->where('sku', 'like', "%{$search}%")
                                     ->orWhere('codigo_barras', 'like', "%{$search}%");
@@ -81,6 +82,14 @@ class ProductoMaestrosTable
                     ->color('info')
                     ->limitList(2)
                     ->expandableLimitedList(),
+
+                TextColumn::make('variantes.condicion.nombre')
+                    ->label('Condición')
+                    ->badge()
+                    ->color('gray')
+                    ->distinctList()
+                    ->placeholder('Sin asignar')
+                    ->toggleable(),
 
                 TextColumn::make('precio_resumen')
                     ->label('Precio Venta')

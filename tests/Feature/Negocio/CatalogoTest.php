@@ -13,6 +13,7 @@ use App\Filament\Negocio\Resources\ProductoMaestros\Pages\ListProductoMaestros;
 use App\Models\Almacen;
 use App\Models\Categoria;
 use App\Models\CategoriaAtributo;
+use App\Models\CondicionProducto;
 use App\Models\InventarioStock;
 use App\Models\Marca;
 use App\Models\MovimientoInventario;
@@ -894,12 +895,14 @@ it('abre un producto con dos sellos como variantes y no las duplica al guardar',
         'producto_maestro_id' => $producto->id,
         'sku' => '6204-2RS',
         'precio_venta' => 10,
+        'condicion_producto_id' => CondicionProducto::query()->where('codigo', 'nuevo')->value('id'),
         'atributos_json' => ['sello' => '2RS', 'diametro_interno' => 20],
     ]);
     ProductoVariante::factory()->create([
         'producto_maestro_id' => $producto->id,
         'sku' => '6204-ZZ',
         'precio_venta' => 12,
+        'condicion_producto_id' => CondicionProducto::query()->where('codigo', 'nuevo')->value('id'),
         'atributos_json' => ['sello' => 'ZZ', 'diametro_interno' => 20],
     ]);
     $supervisor = TenantUser::factory()->create();

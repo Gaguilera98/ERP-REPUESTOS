@@ -2,6 +2,7 @@
 
 namespace App\Tenancy;
 
+use App\Catalogo\AsegurarCondicionesProducto;
 use App\Enums\ModoMoneda;
 use App\Enums\Moneda;
 use App\Exceptions\Tenancy\TenantPoolNotConfiguredException;
@@ -126,6 +127,7 @@ class SeedNegocioRoles
         app(AsegurarUnidadesDeCantidad::class)->handle();
         app(AsegurarUnidadesDeAtributo::class)->handle();
         app(AsegurarTiposDocumentoIdentidad::class)->handle();
+        app(AsegurarCondicionesProducto::class)->handle();
     }
 
     private static function esPermisoAdministrativo(string $permiso): bool

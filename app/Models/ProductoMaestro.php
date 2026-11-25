@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
-#[Fillable(['tenant_id', 'nombre', 'categoria_id', 'marca_id', 'unidad_base_id', 'imagenes', 'is_active', 'devolucion_comercial'])]
+#[Fillable(['tenant_id', 'codigo_repuesto', 'nombre', 'categoria_id', 'marca_id', 'unidad_base_id', 'imagenes', 'is_active', 'devolucion_comercial'])]
 class ProductoMaestro extends Model
 {
     /** @use HasFactory<ProductoMaestroFactory> */
