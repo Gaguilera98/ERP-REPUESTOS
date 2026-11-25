@@ -2,6 +2,7 @@
 
 namespace App\Filament\Negocio\Resources\Categorias;
 
+use App\Filament\Negocio\Resources\Categorias\Pages\ImportarConfiguracion;
 use App\Filament\Negocio\Resources\Categorias\Pages\ManageCategorias;
 use App\Filament\Negocio\Resources\Categorias\Schemas\CategoriaForm;
 use App\Filament\Negocio\Resources\Categorias\Tables\CategoriasTable;
@@ -46,6 +47,7 @@ class CategoriaResource extends Resource
     {
         return [
             'index' => ManageCategorias::route('/'),
+            'importar' => ImportarConfiguracion::route('/importar'),
         ];
     }
 }
