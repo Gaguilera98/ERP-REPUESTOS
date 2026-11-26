@@ -14,10 +14,12 @@ use App\Models\Categoria;
 use App\Models\CondicionProducto;
 use App\Models\ImportacionProducto;
 use App\Models\Marca;
+use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
 use App\Models\Proveedor;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\Concerns\InteractsWithActions;
@@ -333,7 +335,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             ->validationMessages(['in' => match ($campo) {
                 'categoria' => 'Elegí una categoría activa del negocio o creala con el botón +.',
                 'marca' => 'Elegí una marca del negocio o creala con el botón +.',
-                'condicion' => 'Elegí una condición disponible del negocio.',
+                'condicion' => 'Elegí una condición disponible del negocio o creala con el botón +.',
                 default => 'Elegí una unidad de stock del negocio.',
             }])
             ->afterStateUpdated(function (Set $set) use ($campo): void {
@@ -341,24 +343,32 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                     $set('ficha', []);
                 }
             });
-        if (! in_array($campo, ['marca', 'categoria'], true)) {
+        if (! in_array($campo, ['marca', 'categoria', 'condicion'], true)) {
             return $selector;
         }
-        $modelo = $campo === 'marca' ? Marca::class : Categoria::class;
+        $modelo = match ($campo) {
+            'marca' => Marca::class, 'condicion' => CondicionProducto::class, default => Categoria::class,
+        };
+        $modeloPermiso = $campo === 'condicion' ? ProductoMaestro::class : $modelo;
         if ($campo === 'categoria') {
             $selector->createOptionForm(fn (Schema $schema): Schema => CategoriaForm::configure($schema->model(Categoria::class)));
+        } elseif ($campo === 'condicion') {
+            $selector->createOptionForm([self::nombreCondicion()]);
         } else {
             $selector->createOptionForm([MarcaForm::nombre()]);
         }
 
-        return $selector->createOptionUsing(function (array $data, Schema $schema) use ($campo, $modelo): string {
+        return $selector->createOptionUsing(function (array $data, Schema $schema) use ($campo, $modelo, $modeloPermiso): string {
             $usuario = auth('tenant')->user();
             $importacion = app(ImportarProductos::class)->consultar($this->importacionId, $usuario);
             app(ImportarProductos::class)->autorizar($usuario, $importacion->almacen_id);
             abort_unless(in_array($importacion->estado, ['revision', 'fallida'], true), 403);
-            Gate::forUser($usuario)->authorize('create', $modelo);
+            Gate::forUser($usuario)->authorize('create', $modeloPermiso);
             $registro = DB::transaction(function () use ($campo, $modelo, $data, $schema): Model {
-                $registro = $modelo::query()->create(Arr::only($data, $campo === 'marca' ? ['nombre'] : ['nombre', 'is_active', 'sin_devolucion_comercial']));
+                $datos = $campo === 'condicion'
+                    ? ['nombre' => trim($data['nombre']), 'codigo' => self::codigoCondicion($data['nombre'])]
+                    : Arr::only($data, $campo === 'marca' ? ['nombre'] : ['nombre', 'is_active', 'sin_devolucion_comercial']);
+                $registro = $modelo::query()->create($datos);
                 if ($campo === 'categoria') {
                     $schema->model($registro)->saveRelationships();
                 }
@@ -375,15 +385,40 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
 
             return $registro->nombre;
         })->createOptionAction(fn (Action $action): Action => $action
-            ->authorize(fn (): bool => $this->puedeCorregir() && Gate::forUser(auth('tenant')->user())->allows('create', $modelo))
-            ->visible(fn (): bool => $this->puedeCorregir() && Gate::forUser(auth('tenant')->user())->allows('create', $modelo))
-            ->modalHeading($campo === 'marca' ? 'Nueva marca' : 'Nueva categoría')
+            ->authorize(fn (): bool => $this->puedeCorregir() && Gate::forUser(auth('tenant')->user())->allows('create', $modeloPermiso))
+            ->visible(fn (): bool => $this->puedeCorregir() && Gate::forUser(auth('tenant')->user())->allows('create', $modeloPermiso))
+            ->modalHeading(match ($campo) {
+                'marca' => 'Nueva marca', 'condicion' => 'Nueva condición', default => 'Nueva categoría'
+            })
             ->fillForm(fn (Select $component): array => [
                 'nombre' => $component->getState(),
                 ...($campo === 'categoria' ? ['is_active' => true, 'sin_devolucion_comercial' => false, 'atributos' => []] : []),
             ])
             ->modalDescription('El registro se agrega al catálogo al crearlo. Guardá la fila para aplicar la selección a esta revisión.')
             ->stickyModalHeader()->stickyModalFooter());
+    }
+
+    private static function codigoCondicion(string $nombre): string
+    {
+        return rtrim(Str::substr(Str::slug(trim($nombre)), 0, 50), '-');
+    }
+
+    private static function nombreCondicion(): TextInput
+    {
+        return TextInput::make('nombre')->label('Nombre')->placeholder('Ej. Reacondicionado')
+            ->required()->maxLength(255)->dehydrateStateUsing(fn (string $state): string => trim($state))
+            ->rules([fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                $nombre = trim((string) $value);
+                $codigo = self::codigoCondicion($nombre);
+                if ($codigo === '') {
+                    $fail('Ingresá un nombre con letras o números.');
+
+                    return;
+                }
+                if (CondicionProducto::query()->where(fn ($query) => $query->whereRaw('lower(nombre) = lower(?)', [$nombre])->orWhere('codigo', $codigo))->exists()) {
+                    $fail('Ya existe una condición equivalente. Elegí la existente o usá otro nombre.');
+                }
+            }]);
     }
 
     private function avisoCatalogo(string $campo, mixed $valor): ?string
@@ -406,7 +441,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             'categoria' => $crear ? 'Elegí una categoría del negocio o creala con +.' : 'Elegí una categoría existente del negocio.',
             'marca' => ($crear ? 'Elegí una marca del negocio o creala con +.' : 'Elegí una marca existente del negocio.').' También podés dejarla sin especificar.',
             'proveedor' => 'Elegí un proveedor del negocio o dejalo sin especificar.',
-            'condicion' => 'Elegí Nuevo, Usado u otra condición disponible del negocio.',
+            'condicion' => $crear ? 'Elegí una condición del negocio o creala con +.' : 'Elegí una condición disponible del negocio.',
             default => 'Elegí una unidad de stock del negocio.',
         };
     }
@@ -458,7 +493,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                     ->options(fn (Get $get): array => ! isset(self::CATALOGOS[$get('campo') ?? '']) ? [] : collect($this->importacion->filas)
                         ->pluck($get('campo'))->filter(fn ($valor): bool => filled($valor))->countBy()->map(fn (int $cantidad, string $valor): string => $valor.' · '.$cantidad.' fila(s)')->all()),
                 Toggle::make('crear')->label('Crear en el catálogo con el nombre del archivo')->live()
-                    ->visible(fn (Get $get): bool => $this->puedeCrearCatalogo($get('campo'))),
+                    ->visible(fn (Get $get): bool => $get('campo') !== 'condicion' && $this->puedeCrearCatalogo($get('campo'))),
                 Select::make('destino')->label('Usar este valor del negocio')->options(fn (Get $get): array => $this->opcionesCatalogos[$get('campo')] ?? [])
                     ->placeholder('Sin especificar')->searchable()->native(false)->visible(fn (Get $get): bool => ! $get('crear'))
                     ->required(fn (Get $get): bool => ! $get('crear') && ! in_array($get('campo'), ['marca', 'proveedor'], true)),
@@ -473,7 +508,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
     private function puedeCrearCatalogo(?string $campo): bool
     {
         $modelo = match ($campo) {
-            'marca' => Marca::class, 'categoria' => Categoria::class, 'proveedor' => Proveedor::class, default => null
+            'marca' => Marca::class, 'categoria' => Categoria::class, 'proveedor' => Proveedor::class, 'condicion' => ProductoMaestro::class, default => null
         };
 
         return $modelo !== null && Gate::forUser(auth('tenant')->user())->allows('create', $modelo);

@@ -14,6 +14,7 @@ use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -238,4 +239,71 @@ it('no mueve un SKU entre productos y pide resolver códigos ambiguos para varia
     $movido = $servicio->revisar([filaConCondicion(['codigo_producto' => 'OTRO'])], null, true, $usuario);
     expect(implode(' ', $movido['errores'][2]))->toContain('desde su ficha');
     expect($servicio->revisar([filaConCondicion()], null, true, $usuario)['errores'])->toBe([]);
+});
+
+it('crea una condición desde el selector y la deja seleccionada sin importar productos todavía', function () {
+    ['usuario' => $usuario] = importacionConCondiciones();
+    $importacion = app(ImportarProductos::class)->preparar([filaConCondicion(['condicion' => 'Reacondicionado'])], 'condicion.xlsx', null, null, false, $usuario);
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callAction([
+            TestAction::make('corregirFila')->table('2'),
+            TestAction::make('createOption')->schemaComponent('condicion'),
+        ], ['nombre' => ' Reacondicionado '])->assertHasNoErrors();
+    $condicion = CondicionProducto::query()->where('nombre', 'Reacondicionado')->sole();
+    expect($condicion->codigo)->toBe('reacondicionado');
+    expect($condicion->is_active)->toBeTrue();
+    expect($condicion->tenant_id)->toBe((string) tenant('id'));
+    expect($pagina->get('mountedActions')[0]['data']['condicion'])->toBe('Reacondicionado');
+    expect($importacion->refresh()->revision['errores'])->toBe([]);
+    expect(ProductoMaestro::query()->exists())->toBeFalse();
+    expect(MovimientoInventario::query()->exists())->toBeFalse();
+    $pagina->callMountedAction()->assertHasNoErrors();
+    expect($importacion->refresh()->filas[0]['condicion'])->toBe('Reacondicionado');
+});
+
+it('rechaza nombres equivalentes o sin identificador válido al crear una condición', function (string $nombre, string $mensaje) {
+    ['usuario' => $usuario] = importacionConCondiciones();
+    $importacion = app(ImportarProductos::class)->preparar([filaConCondicion()], 'duplicado.xlsx', null, null, false, $usuario);
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callAction([
+            TestAction::make('corregirFila')->table('2'),
+            TestAction::make('createOption')->schemaComponent('condicion'),
+        ], ['nombre' => $nombre])
+        ->assertHasErrors(['mountedActions.1.data.nombre']);
+    expect($pagina->instance()->getErrorBag()->first('mountedActions.1.data.nombre'))->toContain($mensaje);
+    expect(CondicionProducto::query()->count())->toBe(2);
+})->with([
+    'mayúsculas y espacios' => [' nUeVo ', 'Ya existe una condición equivalente.'],
+    'identificador equivalente' => ['Nuévo', 'Ya existe una condición equivalente.'],
+    'sin letras ni números' => ['!!!', 'Ingresá un nombre con letras o números.'],
+]);
+
+it('oculta y protege la creación de condiciones sin permiso para crear productos', function () {
+    ['usuario' => $usuario] = importacionConCondiciones();
+    $importacion = app(ImportarProductos::class)->preparar([filaConCondicion()], 'sin-permiso.xlsx', null, null, false, $usuario);
+    $usuario->syncRoles([]);
+    $usuario->givePermissionTo(['Importar:Productos', 'ViewAny:ProductoMaestro']);
+    $acciones = [TestAction::make('corregirFila')->table('2'), TestAction::make('createOption')->schemaComponent('condicion')];
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->assertActionHidden($acciones)
+        ->mountAction($acciones)->assertCount('mountedActions', 1);
+    expect(CondicionProducto::query()->count())->toBe(2);
+});
+
+it('permite crear la misma condición en otro negocio sin reutilizar el registro ajeno', function () {
+    ['tenant' => $tenant, 'usuario' => $usuario] = importacionConCondiciones();
+    tenancy()->end();
+    $otro = Tenant::factory()->create();
+    tenancy()->initialize($otro);
+    $ajena = CondicionProducto::factory()->create(['nombre' => 'Reacondicionado', 'codigo' => 'reacondicionado']);
+    tenancy()->end();
+    tenancy()->initialize($tenant);
+    $importacion = app(ImportarProductos::class)->preparar([filaConCondicion(['condicion' => 'Reacondicionado'])], 'propia.xlsx', null, null, false, $usuario);
+    Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
+        ->callAction([
+            TestAction::make('corregirFila')->table('2'), TestAction::make('createOption')->schemaComponent('condicion'),
+        ], ['nombre' => 'Reacondicionado'])->assertHasNoErrors();
+    $propia = CondicionProducto::query()->where('nombre', 'Reacondicionado')->sole();
+    expect($propia->id)->not->toBe($ajena->id);
+    expect($propia->tenant_id)->toBe($tenant->id);
 });
