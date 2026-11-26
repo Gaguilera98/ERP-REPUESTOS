@@ -320,7 +320,10 @@ it('pasa el borrador a solo productos conservando sus correcciones y pide confir
     $versionAnterior = $carga->huellaRevision();
     $pagina = Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
         ->call('verImportacion', $carga->id)->assertSee('Continuar solo con productos')
-        ->callAction('soloProductos')->assertHasNoErrors()->assertSee('Solo catálogo')->assertSee('Confirmar importación');
+        ->mountAction('soloProductos')->call('forceRender')
+        ->assertSee('¿Continuar sin cargar stock?');
+    expect($carga->refresh()->almacen_id)->toBe($almacen->id);
+    $pagina->callMountedAction()->assertHasNoErrors()->assertSee('Solo catálogo')->assertSee('Confirmar importación');
     expect($carga->refresh()->filas)->toBe($filasCorregidas);
     expect($carga->almacen_id)->toBeNull();
     expect($carga->fecha_inventario)->toBeNull();
