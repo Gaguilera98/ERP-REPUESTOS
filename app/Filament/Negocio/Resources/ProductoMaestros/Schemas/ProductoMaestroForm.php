@@ -72,10 +72,10 @@ class ProductoMaestroForm
                                         ->maxLength(255)
                                         ->columnSpanFull(),
                                     TextInput::make('codigo_repuesto')
-                                        ->label('Código común del repuesto')
+                                        ->label('Código del producto')
                                         ->placeholder('Ej. 6206')
                                         ->maxLength(255)
-                                        ->hintIcon(Heroicon::OutlinedQuestionMarkCircle, tooltip: 'Referencia compartida del producto. Cada variante conserva un SKU único para identificar su stock y precio.')
+                                        ->hintIcon(Heroicon::OutlinedQuestionMarkCircle, tooltip: 'Código que usa el cliente para pedir el producto. Es compartido por Nuevo, Usado y las demás variantes. Cada variante tiene además su SKU interno único.')
                                         ->columnSpanFull(),
                                     Select::make('categoria_id')
                                         ->label('Categoría / Rubro')
@@ -196,9 +196,8 @@ class ProductoMaestroForm
                     ]),
 
                 Section::make('Variantes')
-                    ->description('Si tiene color, talla o sello, activalo. Cada combinación lleva su código y su precio.')
+                    ->description('Usá variantes si ofrecés este producto en varias condiciones, colores, tallas o sellos. Cada variante tiene su SKU, precio y stock.')
                     ->icon(Heroicon::OutlinedSquares2x2)
-                    ->visible(fn (Get $get): bool => self::listas($get)->isNotEmpty())
                     ->schema([
                         Toggle::make('con_variantes')
                             ->label('Agregar variantes')
@@ -207,7 +206,7 @@ class ProductoMaestroForm
                             ->live()
                             ->afterStateUpdated(function (bool $state, Set $set, Get $get): void {
                                 if ($state) {
-                                    if (blank($get('opciones'))) {
+                                    if (blank($get('opciones')) && self::listas($get)->isNotEmpty()) {
                                         $set('opciones', [[
                                             'clave' => null,
                                             'valores' => [],
@@ -243,16 +242,30 @@ class ProductoMaestroForm
 
                                 $set('ficha', array_merge($ficha, $ejes));
                                 $set('opciones', []);
+                                $set('condiciones_variantes', []);
                                 $set('variantes', []);
                             }),
+                        CheckboxList::make('condiciones_variantes')
+                            ->label('Condiciones que ofrecés')
+                            ->helperText('Por ejemplo, Nuevo y Usado. Se crea una fila por condición; podés combinarla con las opciones de la categoría.')
+                            ->options(fn (?ProductoMaestro $record): array => CondicionProducto::query()
+                                ->where(fn ($query) => $query->where('is_active', true)
+                                    ->when($record !== null, fn ($query) => $query->orWhereIn('id', $record->variantes()->select('condicion_producto_id'))))
+                                ->orderBy('orden')->orderBy('nombre')->pluck('nombre', 'id')->all())
+                            ->default([])
+                            ->columns(2)
+                            ->visible(fn (Get $get): bool => self::conVariantes($get))
+                            ->live()
+                            ->afterStateUpdated(fn (Set $set, Get $get) => self::regenerarVariantes($set, $get)),
                         Placeholder::make('opciones_ayuda')
                             ->hiddenLabel()
-                            ->visible(fn (Get $get): bool => self::conVariantes($get))
-                            ->content('Cada opción es un campo de la categoría. Los valores son los que este producto realmente tiene.'),
+                            ->content('También podés distinguir variantes por atributos de la categoría. Si solo cambia la condición, no hace falta agregar otras opciones.')
+                            ->visible(fn (Get $get): bool => self::conVariantes($get) && self::listas($get)->isNotEmpty()),
                         Repeater::make('opciones')
-                            ->visible(fn (Get $get): bool => self::conVariantes($get))
+                            ->visible(fn (Get $get): bool => self::conVariantes($get) && self::listas($get)->isNotEmpty())
                             ->hiddenLabel()
-                            ->minItems(1)
+                            ->defaultItems(0)
+                            ->minItems(fn (Get $get): int => filled($get('condiciones_variantes')) ? 0 : 1)
                             ->addActionLabel('Agregar otra opción')
                             ->itemLabel(function (array $state): string {
                                 $clave = $state['clave'] ?? null;
@@ -265,26 +278,14 @@ class ProductoMaestroForm
                                     ?: (string) $clave;
                             })
                             ->live()
-                            ->afterStateUpdated(function (?array $state, Set $set, Get $get): void {
-                                $set('variantes', app(VariantesProducto::class)->combinar(
-                                    $state ?? [],
-                                    is_array($get('variantes')) ? $get('variantes') : [],
-                                    $get('sku'),
-                                    $get('precio_venta'),
-                                    $get('precio_mayor'),
-                                    $get('codigo_barras'),
-                                    $get('precio_venta_dolar'),
-                                    $get('precio_mayor_dolar'),
-                                    $get('condicion_producto_id'),
-                                ));
-                            })
+                            ->afterStateUpdated(fn (Set $set, Get $get) => self::regenerarVariantes($set, $get))
                             ->schema([
                                 Select::make('clave')
                                     ->label('Qué las distingue')
                                     ->options(fn (Get $get): array => self::listas($get)
                                         ->mapWithKeys(fn (CategoriaAtributo $atributo): array => [$atributo->clave => $atributo->etiqueta])
                                         ->all())
-                                    ->required()
+                                    ->required(fn (Get $get): bool => blank($get('data.condiciones_variantes', isAbsolute: true)))
                                     ->native(false)
                                     ->searchable()
                                     ->disableOptionsWhenSelectedInSiblingRepeaterItems()
@@ -302,16 +303,8 @@ class ProductoMaestroForm
                     ]),
 
                 Section::make('Combinaciones')
-                    ->description('Cada fila es una combinación que se vende. Borrá las que no tenés.')
-                    ->visible(function (Get $get): bool {
-                        if (! self::conVariantes($get)) {
-                            return false;
-                        }
-
-                        return collect($get('variantes'))->contains(
-                            fn (mixed $fila): bool => is_array($fila) && filled($fila['ejes_json'] ?? null),
-                        );
-                    })
+                    ->description('Revisá la condición, el SKU único y el precio de cada variante. Cada una controla su propio stock.')
+                    ->visible(fn (Get $get): bool => self::conVariantes($get))
                     ->schema([
                         Repeater::make('variantes')
                             ->hiddenLabel()
@@ -319,6 +312,7 @@ class ProductoMaestroForm
                             ->reorderable(false)
                             ->cloneable(false)
                             ->minItems(2)
+                            ->validationMessages(['min' => 'Elegí al menos dos condiciones o combinaciones. Para una sola, desactivá «Agregar variantes».'])
                             ->collapsible()
                             ->itemLabel(fn (array $state): string => app(VariantesProducto::class)->etiqueta($state))
                             ->schema([
@@ -381,15 +375,15 @@ class ProductoMaestroForm
                             ->with('almacen', 'variante.productoMaestro.unidadBase', 'variante.condicion')->get()->sortBy(['almacen.nombre', 'variante.sku']))
                     ->table([
                         TableColumn::make('Almacén'),
-                        TableColumn::make('SKU'),
+                        TableColumn::make('Variante / SKU interno'),
                         TableColumn::make('Físico'),
                         TableColumn::make('Reservado'),
                         TableColumn::make('Disponible'),
                     ])
                     ->schema([
                         TextEntry::make('almacen.nombre')->label('Almacén'),
-                        TextEntry::make('variante.sku')->label('SKU')
-                            ->formatStateUsing(fn (string $state, InventarioStock $record): string => $state.' · '.($record->variante?->condicion?->nombre ?? 'Sin condición asignada')),
+                        TextEntry::make('variante.sku')->label('Variante / SKU interno')
+                            ->formatStateUsing(fn (string $state, InventarioStock $record): string => ($record->variante?->condicion?->nombre ?? 'Sin condición asignada').' · SKU interno: '.$state),
                         TextEntry::make('cantidad_actual')->label('Físico')->formatStateUsing($cantidad),
                         TextEntry::make('cantidad_reservada')->label('Reservado')->formatStateUsing($cantidad),
                         TextEntry::make('cantidad_disponible')
@@ -462,7 +456,8 @@ class ProductoMaestroForm
     private static function campoSku(string $nombre, string $id): TextInput
     {
         return TextInput::make($nombre)
-            ->label('SKU / Código')
+            ->label($id === 'id' ? 'SKU interno de la variante' : 'SKU interno')
+            ->hintIcon(Heroicon::OutlinedQuestionMarkCircle, tooltip: 'Identificador único de esta variante para controlar su stock. El código del producto es la referencia compartida que se muestra al vender.')
             ->required()
             ->maxLength(255)
             ->distinct()
@@ -477,6 +472,7 @@ class ProductoMaestroForm
     {
         return Select::make('condicion_producto_id')
             ->label('Condición del producto')
+            ->live()
             ->options(function (Get $get, ?ProductoMaestro $record) use ($campoId): array {
                 $actual = $record?->variantes()->whereKey($get($campoId))->value('condicion_producto_id');
 
@@ -489,6 +485,18 @@ class ProductoMaestroForm
             ->native(false)
             ->validationMessages(['required' => 'Elegí la condición del producto.', 'in' => 'Elegí una condición disponible de este negocio.'])
             ->hintIcon(Heroicon::OutlinedQuestionMarkCircle, tooltip: 'Indica si esta variante es nueva, usada u otra condición. El stock y los precios corresponden a su SKU.');
+    }
+
+    private static function regenerarVariantes(Set $set, Get $get): void
+    {
+        $set('variantes', app(VariantesProducto::class)->combinar(
+            is_array($get('opciones')) ? $get('opciones') : [],
+            is_array($get('variantes')) ? $get('variantes') : [],
+            $get('sku'), $get('precio_venta'), $get('precio_mayor'), $get('codigo_barras'),
+            $get('precio_venta_dolar'), $get('precio_mayor_dolar'), $get('condicion_producto_id'),
+            is_array($get('condiciones_variantes')) ? $get('condiciones_variantes') : [],
+            $get('variante_id'), $get('codigo_repuesto'),
+        ));
     }
 
     private static function campoCodigoBarras(string $nombre, string $id): TextInput

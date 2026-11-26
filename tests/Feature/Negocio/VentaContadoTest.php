@@ -1874,6 +1874,7 @@ it('abre el modal avanzado y filtra rodamientos por sello y stock del almacén',
     ['cajero' => $cajero, 'sucursal' => $sucursal, 'almacen' => $almacen, 'ocasional' => $ocasional] = negocioConMostrador('avanzada');
 
     $otroAlmacen = Almacen::factory()->create(['nombre' => 'Fondo']);
+    SucursalAlmacen::query()->create(['sucursal_id' => $sucursal->id, 'almacen_id' => $otroAlmacen->id, 'es_principal' => false]);
     $categoria = Categoria::factory()->create(['nombre' => 'Rodamientos']);
     CategoriaAtributo::factory()->lista(['2RS', 'ZZ'])->create([
         'categoria_id' => $categoria->id,

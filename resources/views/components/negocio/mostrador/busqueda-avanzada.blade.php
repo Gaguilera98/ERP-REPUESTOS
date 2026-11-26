@@ -137,8 +137,16 @@
                     @forelse ($resultadosAvanzados as $resultado)
                         <div wire:key="avanzado-{{ $resultado['id'] }}" class="grid grid-cols-1 items-center gap-2 border-t border-gray-100 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_5.5rem_88px_44px] dark:border-white/5">
                             <div class="min-w-0">
-                                <div class="truncate text-sm font-semibold text-gray-950 dark:text-white">{{ $resultado['sku'] }}</div>
+                                <div class="truncate text-sm font-semibold text-gray-950 dark:text-white">{{ filled($resultado['codigo_repuesto'] ?? null) ? $resultado['codigo_repuesto'] : $resultado['sku'] }}</div>
                                 <div class="truncate text-xs text-gray-500 dark:text-gray-400">{{ $resultado['nombre'] }}</div>
+                                <div class="mt-1 flex flex-wrap items-center gap-2">
+                                    @if (filled($resultado['condicion'] ?? null))
+                                        <x-filament::badge color="gray">{{ $resultado['condicion'] }}</x-filament::badge>
+                                    @endif
+                                    @if (filled($resultado['codigo_repuesto'] ?? null))
+                                        <span class="text-[11px] text-gray-500 dark:text-gray-400">SKU interno: {{ $resultado['sku'] }}</span>
+                                    @endif
+                                </div>
                                 @if (($resultado['ficha'] ?? '') !== '')
                                     <div class="truncate text-[11px] text-gray-400">{{ $resultado['ficha'] }}</div>
                                 @endif

@@ -220,6 +220,15 @@ trait ManejaMostrador
             return;
         }
 
+        if ($this->buscador()->requiereElegirVariante($texto)) {
+            $this->refrescarResultadosBusqueda($texto);
+            Notification::make()->title('Elegí la variante')
+                ->body('Este código tiene varias opciones. Revisá su condición, precio y stock y seleccioná la que vas a vender.')
+                ->info()->send();
+
+            return;
+        }
+
         $exacta = $this->buscador()->exacta($texto);
 
         if ($exacta instanceof ProductoVariante) {
@@ -265,9 +274,10 @@ trait ManejaMostrador
     public function seleccionarResultado(int $varianteId): void
     {
         $variante = ProductoVariante::query()
-            ->with(['productoMaestro.unidadBase'])
+            ->with(['productoMaestro.unidadBase', 'condicion'])
             ->whereKey($varianteId)
             ->where('is_active', true)
+            ->whereHas('productoMaestro', fn ($query) => $query->where('is_active', true))
             ->first();
 
         if (! $variante instanceof ProductoVariante) {
@@ -459,7 +469,7 @@ trait ManejaMostrador
             return;
         }
 
-        $variante->loadMissing('productoMaestro.unidadBase');
+        $variante->loadMissing('productoMaestro.unidadBase', 'condicion');
 
         $precios = $this->preciosDe($variante);
 
@@ -467,6 +477,8 @@ trait ManejaMostrador
             'producto_variante_id' => $variante->id,
             'sku' => $variante->sku,
             'nombre' => $variante->productoMaestro?->nombre,
+            'codigo_repuesto' => $variante->productoMaestro?->codigo_repuesto,
+            'condicion' => $variante->condicion?->nombre,
             'cantidad' => '1',
             'precio_unitario' => $precios['precio_unitario'],
             'nota_precio' => $precios['nota_precio'],

@@ -105,13 +105,14 @@ class BuscarProductosMostrador
     {
         $texto = trim($texto);
 
-        if ($texto === '') {
+        if ($texto === '' || $this->requiereElegirVariante($texto)) {
             return null;
         }
 
         return ProductoVariante::query()
-            ->with(['productoMaestro.unidadBase'])
+            ->with(['productoMaestro.unidadBase', 'condicion'])
             ->where('is_active', true)
+            ->whereHas('productoMaestro', fn (Builder $query) => $query->where('is_active', true))
             ->where(function (Builder $query) use ($texto): void {
                 $this->coincidirTexto($query, 'sku', $texto, true);
                 $query->orWhere(function (Builder $exacta) use ($texto): void {
@@ -121,6 +122,15 @@ class BuscarProductosMostrador
             ->orderBy('sku')
             ->orderBy('id')
             ->first();
+    }
+
+    public function requiereElegirVariante(string $texto): bool
+    {
+        return ProductoVariante::query()->where('is_active', true)
+            ->whereHas('productoMaestro', function (Builder $query) use ($texto): void {
+                $query->where('is_active', true);
+                $this->coincidirTexto($query, 'codigo_repuesto', trim($texto), true);
+            })->limit(2)->get(['id'])->count() > 1;
     }
 
     /**
@@ -147,13 +157,15 @@ class BuscarProductosMostrador
             ->with([
                 'productoMaestro.categoria',
                 'productoMaestro.unidadBase',
+                'condicion',
                 'stocks' => function ($stocks) use ($almacenId): void {
                     if ($almacenId) {
                         $stocks->where('almacen_id', $almacenId);
                     }
                 },
             ])
-            ->where('is_active', true);
+            ->where('is_active', true)
+            ->whereHas('productoMaestro', fn (Builder $query) => $query->where('is_active', true));
 
         if ($texto !== '') {
             $consulta->where(function (Builder $query) use ($texto): void {
@@ -162,6 +174,9 @@ class BuscarProductosMostrador
                     $this->coincidirTexto($barras, 'codigo_barras', $texto);
                 })->orWhereHas('productoMaestro', function (Builder $maestro) use ($texto): void {
                     $this->coincidirTexto($maestro, 'nombre', $texto);
+                    $maestro->orWhere(function (Builder $codigo) use ($texto): void {
+                        $this->coincidirTexto($codigo, 'codigo_repuesto', $texto);
+                    });
                 });
             });
         }
@@ -226,7 +241,7 @@ class BuscarProductosMostrador
     }
 
     /**
-     * @return array{id: int, sku: string, nombre: string, precio: string, nota_precio: string, disponible: string, unidad_simbolo: string, sin_stock: bool, ficha: string}
+     * @return array{id: int, sku: string, condicion: string|null, codigo_repuesto: string|null, nombre: string, precio: string, nota_precio: string, disponible: string, unidad_simbolo: string, sin_stock: bool, ficha: string}
      */
     public function mapear(ProductoVariante $variante, mixed $almacenId, ?TipoPrecioCliente $lista = null): array
     {
@@ -236,6 +251,8 @@ class BuscarProductosMostrador
         return [
             'id' => (int) $variante->id,
             'sku' => (string) $variante->sku,
+            'condicion' => $variante->condicion?->nombre,
+            'codigo_repuesto' => $variante->productoMaestro?->codigo_repuesto,
             'nombre' => (string) ($variante->productoMaestro?->nombre ?? '—'),
             'precio' => $this->precios->de($variante, $lista),
             'nota_precio' => $this->precios->nota($variante, $lista),

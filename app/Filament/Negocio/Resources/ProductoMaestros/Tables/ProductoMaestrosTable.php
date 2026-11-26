@@ -55,6 +55,15 @@ class ProductoMaestrosTable
                     ->limit(1)
                     ->defaultImageUrl(url('/images/placeholder-part.svg')),
 
+                TextColumn::make('codigo_repuesto')
+                    ->label('Código del producto')
+                    ->state(fn (ProductoMaestro $record): ?string => filled($record->codigo_repuesto)
+                        ? $record->codigo_repuesto
+                        : ($record->variantes->count() === 1 ? $record->variantes->first()->sku : null))
+                    ->weight('bold')
+                    ->placeholder('—')
+                    ->sortable(),
+
                 TextColumn::make('nombre')
                     ->label('Producto')
                     ->weight('bold')
@@ -77,11 +86,12 @@ class ProductoMaestrosTable
                     ->toggleable(),
 
                 TextColumn::make('variantes.sku')
-                    ->label('SKUs')
+                    ->label('SKU internos')
                     ->badge()
-                    ->color('info')
+                    ->color('gray')
                     ->limitList(2)
-                    ->expandableLimitedList(),
+                    ->expandableLimitedList()
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('variantes.condicion.nombre')
                     ->label('Condición')

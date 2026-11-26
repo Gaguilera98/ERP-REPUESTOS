@@ -5,7 +5,9 @@ namespace App\Catalogo;
 use App\Compras\Montos;
 use App\Enums\ModoMoneda;
 use App\Enums\TipoAtributoCategoria;
+use App\Models\CondicionProducto;
 use App\Models\InventarioStock;
+use App\Models\MovimientoInventario;
 use App\Models\NegocioConfiguracion;
 use App\Models\ProductoMaestro;
 use App\Models\ProductoVariante;
@@ -27,6 +29,7 @@ class VariantesProducto
      *     precio_mayor: mixed,
      *     ficha: array<string, mixed>,
      *     opciones: list<array{clave: string, valores: list<string>}>,
+     *     condiciones_variantes: list<int>,
      *     variantes: list<array<string, mixed>>,
      *     ubicaciones: list<array{id: int, almacen_id: int, ubicacion: string|null}>
      * }
@@ -46,6 +49,7 @@ class VariantesProducto
             'precio_mayor' => null,
             'ficha' => [],
             'opciones' => [],
+            'condiciones_variantes' => [],
             'variantes' => [],
             'ubicaciones' => [],
         ];
@@ -106,6 +110,8 @@ class VariantesProducto
         return [
             ...$vacio,
             'con_variantes' => true,
+            'condiciones_variantes' => $variantes->pluck('condicion_producto_id')->filter()->unique()->count() > 1
+                ? $variantes->pluck('condicion_producto_id')->filter()->unique()->values()->all() : [],
             'ficha' => $ficha,
             'opciones' => $opciones,
             'variantes' => $variantes->map(function (ProductoVariante $variante) use ($clavesEje): array {
@@ -140,6 +146,7 @@ class VariantesProducto
     /**
      * @param  array<int|string, mixed>  $opciones
      * @param  array<int|string, mixed>  $actuales
+     * @param  list<int|string>  $condiciones
      * @return list<array<string, mixed>>
      */
     public function combinar(
@@ -152,6 +159,9 @@ class VariantesProducto
         mixed $menorUsdSimple = null,
         mixed $mayorUsdSimple = null,
         mixed $condicionSimple = null,
+        array $condiciones = [],
+        mixed $varianteSimpleId = null,
+        ?string $codigoComun = null,
     ): array {
         $ejes = collect($opciones)
             ->filter(fn (mixed $opcion): bool => is_array($opcion) && filled($opcion['clave'] ?? null))
@@ -169,7 +179,7 @@ class VariantesProducto
             ->filter(fn (array $opcion): bool => $opcion['valores'] !== [])
             ->values();
 
-        if ($ejes->isEmpty()) {
+        if ($ejes->isEmpty() && $condiciones === []) {
             return [];
         }
 
@@ -189,28 +199,40 @@ class VariantesProducto
 
         $porClave = collect($actuales)
             ->filter(fn (mixed $fila): bool => is_array($fila))
-            ->keyBy(fn (array $fila): string => $this->claveEjes($this->ejes($fila)));
+            ->keyBy(fn (array $fila): string => $this->claveEjes($this->ejes($fila)).($condiciones !== [] ? '|condicion:'.($fila['condicion_producto_id'] ?? '') : ''));
 
         $habia = $porClave->isNotEmpty();
+        $condicionesCatalogo = $condiciones !== [] ? CondicionProducto::query()->whereIn('id', $condiciones)->get()->keyBy('id') : collect();
+        $filas = [];
+        $simpleUtilizada = false;
 
-        return array_map(function (array $ejes, int $indice) use ($porClave, $habia, $skuSimple, $precioSimple, $precioMayorSimple, $codigoBarrasSimple, $menorUsdSimple, $mayorUsdSimple, $condicionSimple): array {
-            $previa = $porClave->get($this->claveEjes($ejes), []);
+        foreach ($combinaciones as $ejes) {
+            foreach ($condiciones !== [] ? array_values(array_unique($condiciones)) : [null] as $condicionId) {
+                $previa = $porClave->get($this->claveEjes($ejes).($condiciones !== [] ? '|condicion:'.$condicionId : ''), []);
+                $usarSimple = ! $habia && ! $simpleUtilizada && ($condiciones === [] || (string) $condicionId === (string) $condicionSimple);
+                $simpleUtilizada = $simpleUtilizada || $usarSimple;
+                $codigo = $condicionesCatalogo->get($condicionId)?->codigo;
+                $skuSugerido = filled($codigoComun) && $codigo !== null
+                    ? $codigoComun.'-'.str($codigo)->ascii()->upper()->toString().($ejes !== [] ? '-'.str(implode('-', $ejes))->ascii()->upper()->toString() : '') : null;
 
-            return [
-                'id' => $previa['id'] ?? null,
-                'ejes_json' => json_encode($ejes, JSON_THROW_ON_ERROR),
-                'sku' => $previa['sku'] ?? ((! $habia && $indice === 0) ? $skuSimple : null),
-                'codigo_barras' => $previa['codigo_barras'] ?? ((! $habia && $indice === 0) ? $codigoBarrasSimple : null),
-                'condicion_producto_id' => array_key_exists('condicion_producto_id', $previa) ? $previa['condicion_producto_id'] : $condicionSimple,
-                'imagen' => $previa['imagen'] ?? null,
-                'precio_venta' => $previa['precio_venta'] ?? $precioSimple,
-                'precio_mayor' => $previa['precio_mayor'] ?? $precioMayorSimple,
-                'precio_venta_dolar' => $previa === [] ? $menorUsdSimple : ($previa['precio_venta_dolar'] ?? null),
-                'precio_mayor_dolar' => $previa === [] ? $mayorUsdSimple : ($previa['precio_mayor_dolar'] ?? null),
-                'is_active' => $previa['is_active'] ?? true,
-                'ubicaciones' => $previa['ubicaciones'] ?? [],
-            ];
-        }, $combinaciones, array_keys($combinaciones));
+                $filas[] = [
+                    'id' => $previa['id'] ?? ($usarSimple ? $varianteSimpleId : null),
+                    'ejes_json' => json_encode($ejes, JSON_THROW_ON_ERROR),
+                    'sku' => $previa['sku'] ?? (($usarSimple && filled($skuSimple)) ? $skuSimple : $skuSugerido),
+                    'codigo_barras' => $previa['codigo_barras'] ?? ($usarSimple ? $codigoBarrasSimple : null),
+                    'condicion_producto_id' => array_key_exists('condicion_producto_id', $previa) ? $previa['condicion_producto_id'] : ($condicionId ?? $condicionSimple),
+                    'imagen' => $previa['imagen'] ?? null,
+                    'precio_venta' => $previa['precio_venta'] ?? $precioSimple,
+                    'precio_mayor' => $previa['precio_mayor'] ?? $precioMayorSimple,
+                    'precio_venta_dolar' => $previa === [] ? $menorUsdSimple : ($previa['precio_venta_dolar'] ?? null),
+                    'precio_mayor_dolar' => $previa === [] ? $mayorUsdSimple : ($previa['precio_mayor_dolar'] ?? null),
+                    'is_active' => $previa['is_active'] ?? true,
+                    'ubicaciones' => $previa['ubicaciones'] ?? [],
+                ];
+            }
+        }
+
+        return $filas;
     }
 
     /**
@@ -282,6 +304,27 @@ class VariantesProducto
     public function guardar(ProductoMaestro $producto, array $estado): void
     {
         $filas = $this->filas($estado);
+        $conVariantes = filter_var($estado['con_variantes'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if ($conVariantes && count($filas) < 2) {
+            throw ValidationException::withMessages(['data.variantes' => 'Elegí al menos dos condiciones o combinaciones. Para una sola, desactivá «Agregar variantes».']);
+        }
+        $combinaciones = [];
+        foreach ($conVariantes ? ($estado['variantes'] ?? []) : [] as $fila) {
+            if (! is_array($fila) || blank($fila['condicion_producto_id'] ?? null)) {
+                continue;
+            }
+            $clave = $this->claveEjes($this->ejes($fila)).'|condicion:'.$fila['condicion_producto_id'];
+            if (isset($combinaciones[$clave])) {
+                throw ValidationException::withMessages(['data.variantes' => 'Hay dos variantes con la misma condición y opciones. Conservá una sola fila por combinación.']);
+            }
+            $combinaciones[$clave] = true;
+        }
+        $retiradas = $producto->variantes()->whereNotIn('id', array_filter(Arr::pluck($filas, 'id')))->pluck('id');
+        if ($retiradas->isNotEmpty() && (InventarioStock::query()->whereIn('producto_variante_id', $retiradas)
+            ->where(fn ($query) => $query->where('cantidad_actual', '<>', 0)->orWhere('cantidad_reservada', '<>', 0))->exists()
+            || MovimientoInventario::query()->whereIn('producto_variante_id', $retiradas)->exists())) {
+            throw ValidationException::withMessages(['data.variantes' => 'No podés quitar variantes con stock, reservas o movimientos. Conservá la variante y desactivá «Se vende» si ya no la ofrecés.']);
+        }
         $conservados = [];
 
         foreach ($filas as $fila) {
@@ -404,6 +447,13 @@ class VariantesProducto
     public function etiqueta(array $fila): string
     {
         $valores = array_values($this->ejes($fila));
+
+        if (filled($fila['condicion_producto_id'] ?? null)) {
+            $nombre = CondicionProducto::query()->whereKey($fila['condicion_producto_id'])->value('nombre');
+            if ($nombre !== null) {
+                array_unshift($valores, $nombre);
+            }
+        }
 
         return $valores === [] ? 'Variante' : implode(' · ', $valores);
     }

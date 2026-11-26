@@ -46,6 +46,8 @@ trait GuardaVariantesDelProducto
     protected function afterSave(): void
     {
         $this->guardarVariantes();
+        $this->getRecord()->refresh();
+        $this->fillForm();
     }
 
     protected function guardarVariantes(): void
@@ -67,6 +69,7 @@ trait GuardaVariantesDelProducto
     {
         unset(
             $data['con_variantes'],
+            $data['condiciones_variantes'],
             $data['variante_id'],
             $data['sku'],
             $data['codigo_barras'],

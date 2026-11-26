@@ -16,7 +16,7 @@
     <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
             <div class="font-bold text-gray-950 dark:text-white">Buscar productos</div>
-            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">SKU, código o nombre. Enter agrega el resaltado.</div>
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">Buscá por código común, SKU, barras o nombre. Si hay varias opciones del código común, seleccioná la variante.</div>
         </div>
 
     </div>
@@ -43,7 +43,7 @@
                 wire:keydown.arrow-down.prevent="bajarResultado"
                 wire:keydown.arrow-up.prevent="subirResultado"
                 wire:keydown.escape.prevent="limpiarBusqueda"
-                placeholder="SKU, código de barras o nombre"
+                placeholder="Código común, SKU, barras o nombre"
                 autocomplete="off"
                 autofocus
                 class="negocio-field-control"
@@ -82,13 +82,21 @@
                     class="grid grid-cols-1 items-center gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_6rem_5.5rem_6.5rem] {{ $i === $indiceResultado ? 'bg-primary-50 dark:bg-primary-400/10' : '' }}"
                 >
                     <div class="min-w-0">
-                        <div class="truncate text-sm font-semibold text-gray-950 dark:text-white">{{ $resultado['sku'] }}</div>
+                        <div class="truncate text-sm font-semibold text-gray-950 dark:text-white">{{ filled($resultado['codigo_repuesto'] ?? null) ? $resultado['codigo_repuesto'] : $resultado['sku'] }}</div>
                         <div class="truncate text-xs text-gray-500 dark:text-gray-400">{{ $resultado['nombre'] }}</div>
+                        <div class="mt-1 flex flex-wrap items-center gap-2">
+                            @if (filled($resultado['condicion'] ?? null))
+                                <x-filament::badge color="gray">{{ $resultado['condicion'] }}</x-filament::badge>
+                            @endif
+                            @if (filled($resultado['codigo_repuesto'] ?? null))
+                                <span class="text-[11px] text-gray-500 dark:text-gray-400">SKU interno: {{ $resultado['sku'] }}</span>
+                            @endif
+                        </div>
                         @if (($resultado['ficha'] ?? '') !== '')
                             <div class="truncate text-[11px] text-gray-400">{{ $resultado['ficha'] }}</div>
                         @endif
                         @if ($sinStock)
-                            <div class="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300">Sin stock · Enter abre express</div>
+                            <div class="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300">Sin stock · Seleccionar abre express</div>
                         @endif
                     </div>
                     <div class="flex items-center justify-between gap-3 sm:contents">
