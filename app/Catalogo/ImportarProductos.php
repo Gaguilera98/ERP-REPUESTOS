@@ -33,7 +33,14 @@ use Throwable;
 
 class ImportarProductos
 {
-    public const EXISTENCIAS_REQUERIDAS = 'Agregá al menos una fila con cantidad inicial positiva y costo unitario válidos, o volvé a la carga y desactivá Cargar existencias iniciales.';
+    public const EXISTENCIAS_REQUERIDAS = 'No hay cantidades iniciales y costos válidos para cargar stock. Completá las existencias desde Revisar producto o continuá solo con productos conservando tus correcciones.';
+
+    /** @param list<array<string, mixed>> $filas */
+    public static function contieneDatosDeExistencias(array $filas): bool
+    {
+        return collect($filas)->contains(fn (array $fila): bool => filled($fila['cantidad_inicial'] ?? null)
+            || filled($fila['costo_unitario'] ?? null) || filled($fila['proveedor'] ?? null));
+    }
 
     public function __construct(
         private RegistrarMovimiento $movimientos,
@@ -438,6 +445,30 @@ class ImportarProductos
             $importacion->update(['revision' => $revision, 'estado' => 'revision', 'resultado' => null]);
 
             return $importacion;
+        });
+    }
+
+    public function continuarSoloProductos(int $id, TenantUser $usuario): ImportacionProducto
+    {
+        $this->consultar($id, $usuario);
+
+        return DB::transaction(function () use ($id, $usuario): ImportacionProducto {
+            $importacion = ImportacionProducto::query()->where('user_id', $usuario->id)->lockForUpdate()->findOrFail($id);
+            $this->autorizar($usuario, $importacion->almacen_id);
+            if (! in_array($importacion->estado, ['revision', 'fallida'], true) || $importacion->completada_at !== null || $importacion->lotes()->exists()) {
+                throw ValidationException::withMessages(['importacion' => 'Solo podés cambiar una carga pendiente sin resultados aplicados.']);
+            }
+            if (self::contieneDatosDeExistencias($importacion->filas)) {
+                throw ValidationException::withMessages(['importacion' => 'Esta carga ya tiene cantidades, costos o proveedores. Revisalos antes de cambiar a solo productos para no descartar existencias.']);
+            }
+            $destino = $importacion->actualizar_existentes ? 'catalogo-actualizar' : 'catalogo-conservar';
+            if (ImportacionProducto::query()->where('destino', $destino)->where('huella', $importacion->huella)->whereKeyNot($id)->exists()) {
+                throw ValidationException::withMessages(['importacion' => 'Ya existe una carga de solo productos para este archivo. Revisala desde Mis importaciones. Este borrador y sus correcciones se conservan.']);
+            }
+            $revision = $this->revisar($importacion->filas, null, $importacion->actualizar_existentes, $usuario);
+            $importacion->update(['almacen_id' => null, 'fecha_inventario' => null, 'destino' => $destino, 'revision' => $revision, 'estado' => 'revision', 'resultado' => null]);
+
+            return $importacion->refresh();
         });
     }
 

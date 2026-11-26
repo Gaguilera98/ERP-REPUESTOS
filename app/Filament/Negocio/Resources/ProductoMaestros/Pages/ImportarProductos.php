@@ -176,7 +176,7 @@ class ImportarProductos extends Page implements HasTable
             Section::make('Relacionar columnas')->description('Comprobá las sugerencias. Cada campo se puede elegir una vez. Marcá explícitamente las columnas que no querés importar.')
                 ->schema(collect($this->archivoPendiente['columnas'] ?? [])->map(fn (string $columna, int $indice): Select => Select::make('mapa.'.$indice)
                     ->label($columna)->helperText('Ejemplo: '.mb_substr(implode(' · ', array_slice(array_filter(array_column(array_column($this->archivoPendiente['filas'], 'valores'), $indice), fn (string $valor): bool => $valor !== ''), 0, 2)), 0, 160))
-                    ->options($opciones)->required()->searchable()->native(false)
+                    ->options($opciones)->required()->searchable()->native(false)->live()
                     ->validationMessages([
                         'required' => 'Relacioná la columna «'.$columna.'» con un campo del sistema o elegí No importar esta columna.',
                         'in' => 'Elegí un campo disponible del sistema o indicá que esta columna no se importa.',
@@ -234,6 +234,51 @@ class ImportarProductos extends Page implements HasTable
             ->requiresConfirmation()->modalHeading('Confirmar los datos revisados')
             ->modalDescription('Se aplicarán los cambios del catálogo y los lotes iniciales de esta revisión. El ingreso quedará registrado en el Kardex.')
             ->action(fn () => $this->confirmar());
+    }
+
+    public function soloProductosAction(): Action
+    {
+        return Action::make('soloProductos')->label('Continuar solo con productos')->color('gray')
+            ->visible(fn (): bool => $this->importacionId !== null && $this->importacion?->almacen_id !== null
+                && in_array($this->importacion->estado, ['revision', 'fallida'], true)
+                && ! Importador::contieneDatosDeExistencias($this->importacion->filas))
+            ->requiresConfirmation()->modalHeading('¿Continuar sin cargar stock?')
+            ->modalDescription('Se conservan las filas y todas tus correcciones. Esta carga pasará a solo productos y no ingresará existencias. Después podrás revisar y confirmar.')
+            ->modalSubmitActionLabel('Continuar solo con productos')
+            ->action(function (): void {
+                app(Importador::class)->continuarSoloProductos($this->getImportacion()->id, auth('tenant')->user());
+                $this->inventario = false;
+                unset($this->importacion);
+                $this->resetValidation();
+                Notification::make()->title('Continuás solo con productos')->body('Conservamos tus correcciones. Revisá y confirmá cuando esté todo listo.')->success()->send();
+            });
+    }
+
+    public function faltanExistenciasEnArchivo(): bool
+    {
+        if (! ($this->opcionesPendientes['inventario'] ?? false) || $this->archivoPendiente === null) {
+            return false;
+        }
+        $mapa = $this->columnasData['mapa'] ?? [];
+        $cantidad = array_search('cantidad_inicial', $mapa, true);
+        $costo = array_search('costo_unitario', $mapa, true);
+
+        return $cantidad === false || $costo === false || ! collect($this->archivoPendiente['filas'])->contains(function (array $fila) use ($cantidad, $costo): bool {
+            return filled($fila['valores'][$cantidad] ?? null) && filled($fila['valores'][$costo] ?? null);
+        });
+    }
+
+    public function relacionarSoloProductos(): void
+    {
+        abort_unless(static::canAccess() && $this->archivoPendiente !== null, 403);
+        $mapa = $this->columnasForm->getState()['mapa'];
+        $filas = app(MapearColumnasProductos::class)->aplicar($this->archivoPendiente, $mapa);
+        if (Importador::contieneDatosDeExistencias($filas)) {
+            throw ValidationException::withMessages(['archivo' => 'El archivo tiene cantidades, costos o proveedores. Revisalos antes de continuar solo con productos.']);
+        }
+        $this->opcionesPendientes['inventario'] = false;
+        $this->inventario = false;
+        $this->relacionarColumnas();
     }
 
     public function nuevaCarga(): void

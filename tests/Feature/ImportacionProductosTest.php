@@ -1038,3 +1038,26 @@ it('resume los campos pendientes de la tarjeta móvil y conserva la corrección 
         ->assertHasNoErrors()->assertSee('Revisar marca.')->assertDontSee('Revisar categoría y marca.');
     expect(ProductoVariante::query()->count())->toBe(0);
 });
+
+it('avisa que el Excel no tiene existencias desde el mapeo y permite seguir con solo productos', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $archivo = excelImportacion([filaImportacion()], ['sku', 'nombre', 'categoria', 'unidad_stock', 'precio_menor', 'condicion']);
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->fillForm(['archivo' => $archivo, 'inventario' => true, 'almacen_id' => $almacen->id, 'fecha_inventario' => today()->format('Y-m-d')])
+        ->call('revisar')->assertSee('no encontramos cantidades y costos completos')
+        ->call('relacionarSoloProductos')->assertHasNoErrors()->assertSee('Solo catálogo');
+    $carga = ImportacionProducto::query()->findOrFail($pagina->get('importacionId'));
+    expect($carga->almacen_id)->toBeNull();
+    expect($carga->filas[0]['sku'])->toBe('0006206');
+    expect(ProductoVariante::query()->exists())->toBeFalse();
+});
+
+it('no pierde los datos de existencias del Excel si intenta omitir el costo faltante', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = escenarioImportacion();
+    $archivo = excelImportacion([filaImportacion(['cantidad_inicial' => '8'])], ['sku', 'nombre', 'cantidad_inicial']);
+    Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->fillForm(['archivo' => $archivo, 'inventario' => true, 'almacen_id' => $almacen->id, 'fecha_inventario' => today()->format('Y-m-d')])
+        ->call('revisar')->call('relacionarSoloProductos')->assertHasErrors(['archivo'])
+        ->assertSet('opcionesPendientes.inventario', true)->assertSet('archivoPendiente.filas.0.valores.2', '8');
+    expect(ImportacionProducto::query()->exists())->toBeFalse();
+});

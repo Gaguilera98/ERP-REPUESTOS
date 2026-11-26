@@ -30,7 +30,7 @@ class ImportacionProducto extends Model
 
     public function huellaRevision(): string
     {
-        return hash('sha256', json_encode([$this->filas, $this->revision], JSON_THROW_ON_ERROR));
+        return hash('sha256', json_encode([$this->almacen_id, $this->filas, $this->revision], JSON_THROW_ON_ERROR));
     }
 
     public function almacen(): BelongsTo

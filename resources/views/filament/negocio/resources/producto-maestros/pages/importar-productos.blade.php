@@ -10,6 +10,12 @@
     @if ($this->archivoPendiente)
         <form wire:submit="relacionarColumnas" class="space-y-6">
             {{ $this->columnasForm }}
+            @if ($this->faltanExistenciasEnArchivo())
+                <div role="alert" class="space-y-3 rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">
+                    <p>Activaste existencias iniciales, pero no encontramos cantidades y costos completos en el archivo. Podés completarlos en la revisión o continuar solo con productos.</p>
+                    <x-filament::button color="gray" type="button" wire:click="relacionarSoloProductos" wire:loading.attr="disabled">Continuar solo con productos</x-filament::button>
+                </div>
+            @endif
             <div class="flex flex-wrap items-center gap-3">
                 <x-filament::button type="submit" wire:loading.attr="disabled" wire:target="relacionarColumnas">Continuar a revisión</x-filament::button>
                 <x-filament::button color="gray" wire:click="nuevaCarga">Cambiar archivo</x-filament::button>
@@ -66,7 +72,11 @@
             <p role="alert" class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">{{ $carga->resultado['aviso'] }}</p>
         @endif
         @if ($carga->almacen_id !== null && $revision['lotes'] === 0 && in_array($carga->estado, ['revision', 'fallida'], true))
-            <p role="alert" class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">{{ $revision['errores'] === [] ? \App\Catalogo\ImportarProductos::EXISTENCIAS_REQUERIDAS : 'Corregí las filas pendientes para validar las existencias iniciales. No se ingresará stock hasta confirmar una revisión válida.' }}</p>
+            <div role="alert" class="space-y-3 rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">
+                <p>{{ $revision['errores'] === [] || ! \App\Catalogo\ImportarProductos::contieneDatosDeExistencias($carga->filas) ? \App\Catalogo\ImportarProductos::EXISTENCIAS_REQUERIDAS : 'Corregí las filas pendientes para validar las existencias iniciales. No se ingresará stock hasta confirmar una revisión válida.' }}</p>
+                <p>Para completar el stock, abrí Revisar producto en cada fila e ingresá su cantidad inicial y costo unitario.</p>
+                {{ $this->soloProductosAction }}
+            </div>
         @endif
         @if ($revision['actualizados'] > 0 && in_array($carga->estado, ['revision', 'fallida'], true))
             <p class="rounded-xl bg-warning-500/10 p-4 text-sm text-warning-700 dark:text-warning-400">Se actualizarán productos existentes por coincidencia de SKU. Abrí Revisar producto para comparar los valores actuales y propuestos antes de confirmar.</p>
@@ -79,7 +89,7 @@
         @endif
 
         <x-filament::section heading="Revisión de las filas">
-            <livewire:negocio.revision-importacion-productos :importacion-id="$carga->id" :key="'revision-importacion-'.$carga->id.'-'.$carga->estado" />
+            <livewire:negocio.revision-importacion-productos :importacion-id="$carga->id" :key="'revision-importacion-'.$carga->id.'-'.$carga->estado.'-'.($carga->almacen_id ?? 'catalogo')" />
         </x-filament::section>
         <div class="flex flex-wrap items-center justify-between gap-3">
             <x-filament::button color="gray" wire:click="nuevaCarga">Volver a mis importaciones</x-filament::button>

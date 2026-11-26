@@ -3,6 +3,7 @@
 use App\Catalogo\ArchivoProductos;
 use App\Catalogo\ImportarProductos;
 use App\Catalogo\MapearColumnasProductos;
+use App\Filament\Negocio\Resources\ProductoMaestros\Pages\ImportarProductos as ImportarPagina;
 use App\Livewire\Negocio\RevisionImportacionProductos;
 use App\Models\Almacen;
 use App\Models\Categoria;
@@ -17,9 +18,11 @@ use App\Models\TenantUser;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use OpenSpout\Reader\XLSX\Reader;
 
@@ -306,4 +309,64 @@ it('permite crear la misma condición en otro negocio sin reutilizar el registro
     $propia = CondicionProducto::query()->where('nombre', 'Reacondicionado')->sole();
     expect($propia->id)->not->toBe($ajena->id);
     expect($propia->tenant_id)->toBe($tenant->id);
+});
+
+it('pasa el borrador a solo productos conservando sus correcciones y pide confirmar la revisión nueva', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = importacionConCondiciones();
+    $servicio = app(ImportarProductos::class);
+    $carga = $servicio->preparar([filaConCondicion(['nombre' => 'Original'])], 'sin-stock.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    $servicio->corregirFilas($carga->id, [2], ['nombre' => 'Nombre corregido', 'precio_menor' => '125'], $usuario);
+    $filasCorregidas = $carga->refresh()->filas;
+    $versionAnterior = $carga->huellaRevision();
+    $pagina = Livewire::actingAs($usuario, 'tenant')->test(ImportarPagina::class)
+        ->call('verImportacion', $carga->id)->assertSee('Continuar solo con productos')
+        ->callAction('soloProductos')->assertHasNoErrors()->assertSee('Solo catálogo')->assertSee('Confirmar importación');
+    expect($carga->refresh()->filas)->toBe($filasCorregidas);
+    expect($carga->almacen_id)->toBeNull();
+    expect($carga->fecha_inventario)->toBeNull();
+    expect($carga->destino)->toBe('catalogo-conservar');
+    expect($carga->revision['errores'])->toBe([]);
+    expect(fn () => $servicio->confirmar($carga->id, $usuario, $versionAnterior))->toThrow(ValidationException::class, 'revisión cambió');
+    $pagina->call('confirmar')->assertHasNoErrors();
+    expect($carga->refresh()->estado)->toBe('completada');
+    expect(ProductoMaestro::query()->sole()->nombre)->toBe('Nombre corregido');
+    expect(ProductoVariante::query()->sole()->precio_venta)->toBe('125.00');
+    expect(MovimientoInventario::query()->exists())->toBeFalse();
+    expect(InventarioInicialDetalle::query()->exists())->toBeFalse();
+});
+
+it('no descarta cantidades costos ni proveedores al cambiar el tipo de carga', function (array $datos) {
+    ['usuario' => $usuario, 'almacen' => $almacen] = importacionConCondiciones();
+    $servicio = app(ImportarProductos::class);
+    $carga = $servicio->preparar([filaConCondicion($datos)], 'con-datos.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    $filas = $carga->filas;
+    expect(fn () => $servicio->continuarSoloProductos($carga->id, $usuario))->toThrow(ValidationException::class, 'ya tiene cantidades');
+    expect($carga->refresh()->almacen_id)->toBe($almacen->id);
+    expect($carga->filas)->toBe($filas);
+})->with([
+    'cantidad cero' => [['cantidad_inicial' => '0']],
+    'costo cero' => [['costo_unitario' => '0']],
+    'proveedor sin cantidad' => [['proveedor' => 'Pendiente']],
+]);
+
+it('no cambia a solo productos una carga en proceso o completada', function (string $estado) {
+    ['usuario' => $usuario, 'almacen' => $almacen] = importacionConCondiciones();
+    $servicio = app(ImportarProductos::class);
+    $carga = $servicio->preparar([filaConCondicion()], 'bloqueada.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    $carga->update(['estado' => $estado]);
+    expect(fn () => $servicio->continuarSoloProductos($carga->id, $usuario))->toThrow(ValidationException::class, 'pendiente');
+    expect($carga->refresh()->almacen_id)->toBe($almacen->id);
+})->with(['en_cola', 'completada']);
+
+it('protege los borradores ajenos y no pisa otra carga del mismo archivo al cambiar a catálogo', function () {
+    ['usuario' => $usuario, 'almacen' => $almacen] = importacionConCondiciones();
+    $servicio = app(ImportarProductos::class);
+    $carga = $servicio->preparar([filaConCondicion()], 'origen.xlsx', $almacen->id, today()->format('Y-m-d'), false, $usuario);
+    $otro = TenantUser::factory()->create();
+    $otro->assignRole('administrador');
+    expect(fn () => $servicio->continuarSoloProductos($carga->id, $otro))->toThrow(ModelNotFoundException::class);
+    $catalogo = $servicio->preparar([filaConCondicion()], 'origen.xlsx', null, null, false, $usuario);
+    expect(fn () => $servicio->continuarSoloProductos($carga->id, $usuario))->toThrow(ValidationException::class, 'Ya existe una carga');
+    expect($carga->refresh()->almacen_id)->toBe($almacen->id);
+    expect($catalogo->refresh()->almacen_id)->toBeNull();
 });
