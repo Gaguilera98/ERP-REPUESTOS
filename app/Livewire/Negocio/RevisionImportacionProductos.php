@@ -11,8 +11,10 @@ use App\Enums\UsoUnidad;
 use App\Filament\Negocio\Resources\Categorias\Schemas\CategoriaForm;
 use App\Filament\Negocio\Resources\Marcas\Schemas\MarcaForm;
 use App\Models\Categoria;
+use App\Models\CondicionProducto;
 use App\Models\ImportacionProducto;
 use App\Models\Marca;
+use App\Models\ProductoVariante;
 use App\Models\Proveedor;
 use App\Models\TenantUser;
 use App\Models\UnidadMedida;
@@ -58,6 +60,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
     use InteractsWithTable;
 
     public const CATALOGOS = [
+        'condicion' => 'Condición',
         'categoria' => 'Categoría', 'marca' => 'Marca', 'unidad_stock' => 'Unidad de stock', 'proveedor' => 'Proveedor',
     ];
 
@@ -83,6 +86,9 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
     public function opcionesCatalogos(): array
     {
         return [
+            'condicion' => CondicionProducto::query()->where(fn ($query) => $query->where('is_active', true)
+                ->orWhereIn('id', ProductoVariante::query()->whereIn('sku', array_column($this->importacion->filas, 'sku'))->select('condicion_producto_id')))
+                ->orderBy('orden')->orderBy('nombre')->pluck('nombre', 'nombre')->all(),
             'categoria' => Categoria::query()->where('is_active', true)->orderBy('nombre')->pluck('nombre', 'nombre')->all(),
             'marca' => Marca::query()->orderBy('nombre')->pluck('nombre', 'nombre')->all(),
             'unidad_stock' => UnidadMedida::query()->where('uso', UsoUnidad::Cantidad)->orderBy('nombre')->get()
@@ -103,11 +109,14 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
         $resueltas = collect($importacion->revision['filas'])->keyBy('fila');
 
         return collect($importacion->filas)->mapWithKeys(function (array $fila) use ($importacion, $resueltas): array {
+            $fila = ['codigo_producto' => '', 'condicion' => '', ...$fila];
             $resuelta = $resueltas->get($fila['fila']);
             $errores = $importacion->revision['errores'][$fila['fila']] ?? [];
 
             return [$fila['fila'] => [
                 ...$fila,
+                'codigo_producto' => $resuelta['codigo_producto'] ?? $fila['codigo_producto'],
+                'condicion' => $resuelta['condicion'] ?? $fila['condicion'],
                 'accion' => $errores !== [] ? 'corregir' : ($resuelta['accion'] ?? 'conservar'),
                 'errores' => $errores,
                 'cambios' => $resuelta['cambios'] ?? [],
@@ -124,7 +133,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
         $filas = $this->filas();
         $busqueda = mb_strtolower(trim($search ?? ''));
         if ($busqueda !== '') {
-            $filas = $filas->filter(fn (array $fila): bool => str_contains(mb_strtolower(implode(' ', [$fila['sku'], $fila['nombre'], $fila['categoria'], $fila['marca'], $fila['proveedor']])), $busqueda));
+            $filas = $filas->filter(fn (array $fila): bool => str_contains(mb_strtolower(implode(' ', [$fila['codigo_producto'], $fila['condicion'], $fila['sku'], $fila['nombre'], $fila['categoria'], $fila['marca'], $fila['proveedor']])), $busqueda));
         }
         if (filled($estado = $filters['accion']['value'] ?? null)) {
             $filas = $filas->where('accion', $estado);
@@ -153,19 +162,20 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                 TextColumn::make('fila')->label('Fila')->visibleFrom('sm'),
                 TextColumn::make('producto_movil')->label('Producto')->hiddenFrom('sm')
                     ->state(fn (array $record): string => $record['nombre'])->wrap()->lineClamp(3)
-                    ->description(fn (array $record): string => 'Fila '.$record['fila'].' · '.$record['sku']),
+                    ->description(fn (array $record): string => 'Código '.($record['codigo_producto'] ?: $record['sku']).' · '.$record['condicion'].' · Fila '.$record['fila']),
                 TextColumn::make('revision_movil')->label('Revisión')->hiddenFrom('sm')->badge()
                     ->state(fn (array $record): string => $record['errores'] !== [] ? count($record['errores']).' pendiente(s)' : ($record['cambios'] !== [] ? 'Con cambios' : 'Listo'))
                     ->color(fn (array $record): string => $record['errores'] !== [] ? 'warning' : ($record['cambios'] !== [] ? 'info' : 'success'))
                     ->description(fn (array $record): string => $this->resumenMovil($record))->wrap(),
                 TextColumn::make('nombre')->label('Producto')->visibleFrom('sm')->limit(65)->tooltip(fn (array $record): string => $record['nombre'])->wrap()->searchable()
-                    ->description(fn (array $record): string => $record['sku']),
+                    ->description(fn (array $record): string => 'Código '.($record['codigo_producto'] ?: $record['sku']).' · SKU interno: '.$record['sku']),
                 TextColumn::make('accion')->label('Revisión')->visibleFrom('sm')->badge()->formatStateUsing(fn (string $state): string => match ($state) {
                     'corregir' => 'Corregir', 'crear' => 'Crear', 'actualizar' => 'Actualizar', default => 'Conservar',
                 })->color(fn (string $state): string => match ($state) {
                     'corregir' => 'danger', 'crear' => 'success', default => 'gray'
                 })->description(fn (array $record): ?string => $record['errores'] !== [] ? count($record['errores']).' pendiente(s)' : ($record['cambios'] !== [] ? count($record['cambios']).' cambio(s) · Revisar producto' : null))
                     ->tooltip(fn (array $record): ?string => $record['errores'] === [] ? null : implode(' ', $record['errores'])),
+                $this->selector('condicion'),
                 $this->selector('categoria'),
                 $this->selector('marca')->toggleable(isToggledHiddenByDefault: true),
                 $this->selector('unidad_stock')->toggleable(isToggledHiddenByDefault: true),
@@ -178,7 +188,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                 $this->selector('proveedor')->toggleable(isToggledHiddenByDefault: true)->visible(fn (): bool => $this->importacion->almacen_id !== null),
             ])
             ->filters([SelectFilter::make('accion')->label('Revisión')->options([
-                'corregir' => 'Con errores', 'crear' => 'Productos nuevos', 'actualizar' => 'Se actualizarán', 'conservar' => 'Conservar existentes',
+                'corregir' => 'Con errores', 'crear' => 'Variantes nuevas', 'actualizar' => 'Se actualizarán', 'conservar' => 'Conservar existentes',
             ])])->deferFilters(false)
             ->recordActions([$this->editarFila()])
             ->headerActions([
@@ -244,7 +254,8 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             ->modalHeading('Revisar producto')->slideOver()->modalWidth('3xl')
             ->disabledSchema(fn (): bool => ! $this->puedeCorregir())->modalSubmitAction(fn (Action $action): Action => $action->visible(fn (): bool => $this->puedeCorregir()))
             ->fillForm(function (array $record): array {
-                $fila = collect($this->importacion->filas)->firstWhere('fila', $record['fila']);
+                $fila = ['codigo_producto' => '', 'condicion' => '', ...collect($this->importacion->filas)->firstWhere('fila', $record['fila'])];
+                $fila['condicion'] = $record['condicion'];
                 foreach (array_keys(self::CATALOGOS) as $campo) {
                     $valor = (string) $fila[$campo];
                     $coincidencias = array_filter(array_keys($this->opcionesCatalogos[$campo]), fn (string $opcion): bool => $campo === 'unidad_stock'
@@ -287,7 +298,9 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
                             ->filter(fn (string $valor): bool => $valor !== '')
                             ->map(fn (string $valor, string $campo): string => ($opciones[$campo] ?? $campo).': '.$valor)->implode(' · ');
                     })->schema([])->visible(fn (array $record): bool => filled($record['_ficha_columnas'] ?? null)),
-                TextInput::make('sku')->label('SKU')->maxLength(255),
+                TextInput::make('codigo_producto')->label('Código del producto')->maxLength(255)
+                    ->helperText('Compartido por las variantes Nuevo, Usado u otras del mismo producto. Deben conservar el mismo nombre, categoría, marca y unidad.'),
+                TextInput::make('sku')->label('SKU interno de la variante')->maxLength(255),
                 TextInput::make('nombre')->label('Nombre')->maxLength(255),
                 ...collect(self::CATALOGOS)->except('proveedor')->map(fn (string $label, string $campo): Select => $this->selectorFormulario($campo, $label))->values()->all(),
                 TextInput::make('codigo_barras')->label('Código de barras')->maxLength(255),
@@ -320,6 +333,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             ->validationMessages(['in' => match ($campo) {
                 'categoria' => 'Elegí una categoría activa del negocio o creala con el botón +.',
                 'marca' => 'Elegí una marca del negocio o creala con el botón +.',
+                'condicion' => 'Elegí una condición disponible del negocio.',
                 default => 'Elegí una unidad de stock del negocio.',
             }])
             ->afterStateUpdated(function (Set $set) use ($campo): void {
@@ -378,6 +392,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             return match ($campo) {
                 'categoria' => 'Elegí una categoría del negocio para este producto.',
                 'unidad_stock' => 'Elegí la unidad con la que se contará el stock.',
+                'condicion' => 'Elegí Nuevo, Usado u otra condición. En un SKU existente, dejarla vacía conserva su condición.',
                 default => null,
             };
         }
@@ -391,6 +406,7 @@ class RevisionImportacionProductos extends Component implements HasActions, HasS
             'categoria' => $crear ? 'Elegí una categoría del negocio o creala con +.' : 'Elegí una categoría existente del negocio.',
             'marca' => ($crear ? 'Elegí una marca del negocio o creala con +.' : 'Elegí una marca existente del negocio.').' También podés dejarla sin especificar.',
             'proveedor' => 'Elegí un proveedor del negocio o dejalo sin especificar.',
+            'condicion' => 'Elegí Nuevo, Usado u otra condición disponible del negocio.',
             default => 'Elegí una unidad de stock del negocio.',
         };
     }

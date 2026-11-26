@@ -8,6 +8,7 @@ use App\Enums\UsoUnidad;
 use App\Inventario\RegistrarMovimiento;
 use App\Jobs\ProcesarImportacionProductos;
 use App\Models\Categoria;
+use App\Models\CondicionProducto;
 use App\Models\ImportacionProducto;
 use App\Models\InventarioInicialDetalle;
 use App\Models\InventarioStock;
@@ -66,7 +67,11 @@ class ImportarProductos
         $marcas = Marca::query()->get()->groupBy(fn (Marca $modelo): string => mb_strtolower($modelo->nombre));
         $unidades = UnidadMedida::query()->where('uso', UsoUnidad::Cantidad)->get()->keyBy('simbolo');
         $proveedores = Proveedor::query()->get()->groupBy(fn (Proveedor $modelo): string => mb_strtolower($modelo->nombre_empresa));
-        $existentes = ProductoVariante::query()->with(['productoMaestro.variantes', 'productoMaestro.unidadBase', 'productoMaestro.marca'])
+        $condiciones = CondicionProducto::query()->get();
+        $codigos = array_values(array_unique(array_filter(array_map(fn (array $fila): string => mb_strtolower(trim((string) ($fila['codigo_producto'] ?? ''))), $filas), fn (string $codigo): bool => $codigo !== '')));
+        $padres = ProductoMaestro::query()->with('variantes', 'unidadBase', 'marca')
+            ->whereIn(DB::raw('LOWER(codigo_repuesto)'), $codigos)->get()->groupBy(fn (ProductoMaestro $modelo): string => mb_strtolower($modelo->codigo_repuesto));
+        $existentes = ProductoVariante::query()->with(['condicion', 'productoMaestro.variantes', 'productoMaestro.unidadBase', 'productoMaestro.marca'])
             ->whereIn('sku', array_column($filas, 'sku'))->get()->keyBy('sku');
         $conMovimiento = $almacenId === null ? [] : MovimientoInventario::query()->where('almacen_id', $almacenId)
             ->whereIn('producto_variante_id', $existentes->pluck('id'))->pluck('producto_variante_id')->all();
@@ -78,25 +83,48 @@ class ImportarProductos
         $vistas = [];
         $barras = [];
         $cantidades = [];
+        $grupos = [];
+        $combinaciones = [];
         $columnasFicha = app(MapearColumnasProductos::class)->atributos();
         foreach ($filas as $fila) {
+            $fila = ['codigo_producto' => '', 'condicion' => '', ...$fila];
+            $fila['codigo_producto'] = trim((string) $fila['codigo_producto']);
             $numero = (int) $fila['fila'];
             try {
                 Validator::make($fila, ['sku' => ['required', 'string', 'max:255']], [
-                    'sku.required' => 'Ingresá el SKU.', 'sku.string' => 'El SKU debe ser un código de texto.', 'sku.max' => 'El SKU admite hasta 255 caracteres.',
+                    'sku.required' => 'Ingresá el SKU interno de esta variante.', 'sku.string' => 'El SKU debe ser un código de texto.', 'sku.max' => 'El SKU admite hasta 255 caracteres.',
                 ])->validate();
                 $sku = (string) $fila['sku'];
                 $variante = $existentes->get($sku);
                 $accion = $variante ? ($actualizar ? 'actualizar' : 'conservar') : 'crear';
                 $producto = $variante?->productoMaestro;
+                $condicion = $variante?->condicion;
+                $codigoProducto = $accion === 'conservar' ? $producto?->codigo_repuesto : (filled($fila['codigo_producto']) ? $fila['codigo_producto'] : $producto?->codigo_repuesto);
+                $grupo = filled($codigoProducto) ? mb_strtolower($codigoProducto) : null;
+                $asociado = null;
+                if ($grupo !== null && $accion !== 'conservar') {
+                    $coincidencias = $padres->get($grupo);
+                    if (! $variante && $coincidencias?->count() > 1) {
+                        throw ValidationException::withMessages(['codigo_producto' => 'El código del producto coincide con varios productos del negocio. Revisá sus códigos desde Productos antes de importar.']);
+                    }
+                    $asociado = $variante ? $producto : $coincidencias?->first();
+                }
                 $datos = [];
                 $precios = [];
                 if ($accion !== 'conservar') {
+                    if ($variante && filled($fila['codigo_producto']) && $grupo !== mb_strtolower((string) $producto->codigo_repuesto)) {
+                        throw ValidationException::withMessages(['codigo_producto' => 'El código del producto de un SKU existente se cambia desde su ficha. No se puede mover entre productos desde el Excel.']);
+                    }
+                    $producto ??= $asociado;
+                    if ($producto) {
+                        Gate::forUser($usuario)->authorize('update', $producto);
+                    }
                     Gate::forUser($usuario)->authorize($variante ? 'update' : 'create', $producto ?? ProductoMaestro::class);
                     Validator::make($fila, [
                         'nombre' => ['required', 'string', 'max:255'], 'categoria' => ['required', 'string', 'max:255'],
                         'unidad_stock' => ['required', 'string', 'max:255'], 'marca' => ['nullable', 'string', 'max:255'],
                         'codigo_barras' => ['nullable', 'string', 'max:255'], 'atributos' => ['nullable', 'json'],
+                        'codigo_producto' => ['nullable', 'string', 'max:255'], 'condicion' => ['nullable', 'string', 'max:255'],
                     ], [
                         'required' => 'Completá :attribute.', 'json' => 'La ficha de atributos debe ser un objeto JSON.',
                         'max' => ':attribute admite hasta :max caracteres.', 'string' => 'Revisá :attribute. Debe contener texto.',
@@ -108,6 +136,17 @@ class ImportarProductos
                     $marca = filled($fila['marca']) ? $marcas->get(mb_strtolower((string) $fila['marca'])) : null;
                     $unidad = $unidades->get($fila['unidad_stock']);
                     $catalogos = [];
+                    $condicion = blank($fila['condicion']) ? $variante?->condicion
+                        : $condiciones->filter(fn (CondicionProducto $item): bool => ($item->is_active || $item->id === $variante?->condicion_producto_id)
+                            && in_array(mb_strtolower(trim((string) $fila['condicion'])), [mb_strtolower($item->nombre), mb_strtolower($item->codigo)], true));
+                    if ($condicion instanceof Collection) {
+                        $condicion = $condicion->count() === 1 ? $condicion->first() : null;
+                    }
+                    if (! $condicion && (! $variante || filled($fila['condicion']))) {
+                        $catalogos['condicion'] = blank($fila['condicion'])
+                            ? 'Elegí la condición de esta variante: Nuevo, Usado u otra condición del negocio. Podés asignarla en lote durante la revisión.'
+                            : 'La condición «'.$fila['condicion'].'» no coincide con una condición activa y única del negocio. Elegí la condición correcta.';
+                    }
                     if ($categoria?->count() !== 1) {
                         $catalogos['categoria'] = 'La categoría «'.$fila['categoria'].'» no coincide con una categoría activa y única del negocio. Elegí la categoría correcta.';
                     }
@@ -124,11 +163,11 @@ class ImportarProductos
                         throw ValidationException::withMessages($catalogos);
                     }
                     $datos = ['nombre' => $fila['nombre'], 'categoria_id' => $categoria->first()->id, 'unidad_base_id' => $unidad->id,
-                        'marca_id' => $marca?->first()?->id ?? $producto?->marca_id];
+                        'marca_id' => $marca?->first()?->id ?? $producto?->marca_id, 'codigo_repuesto' => $producto?->codigo_repuesto ?? ($grupos[$grupo]['datos']['codigo_repuesto'] ?? $codigoProducto)];
                     if ($producto && ($producto->categoria_id !== $datos['categoria_id'] || $producto->unidad_base_id !== $unidad->id)) {
                         throw ValidationException::withMessages(['catalogo' => 'La categoría y unidad de un SKU existente se modifican desde su ficha.']);
                     }
-                    if ($producto && $producto->variantes->count() > 1 && ($producto->nombre !== $datos['nombre'] || $producto->marca_id !== $datos['marca_id'])) {
+                    if ($producto && (! $variante || $producto->variantes->count() > 1) && ($producto->nombre !== $datos['nombre'] || $producto->marca_id !== $datos['marca_id'])) {
                         throw ValidationException::withMessages(['catalogo' => 'Este SKU tiene variantes. Conservá su nombre y marca compartidos.']);
                     }
                     if ($variante && ($variante->precio_venta_dolar !== null || $variante->precio_mayor_dolar !== null)) {
@@ -153,7 +192,28 @@ class ImportarProductos
                         }
                         $barras[$codigo] = $sku;
                     }
-                    $precios = ['precio_venta' => $menor, 'precio_mayor' => $mayor, 'codigo_barras' => $codigo, 'atributos_json' => $ficha];
+                    $precios = ['precio_venta' => $menor, 'precio_mayor' => $mayor, 'codigo_barras' => $codigo, 'atributos_json' => $ficha, 'condicion_producto_id' => $condicion?->id];
+                    if ($grupo !== null) {
+                        $claveGrupo = $grupo.($producto ? '|producto:'.$producto->id : '');
+                        if (isset($grupos[$claveGrupo]) && $grupos[$claveGrupo]['datos'] !== $datos) {
+                            throw ValidationException::withMessages(['codigo_producto' => 'Las filas con el código '.$codigoProducto.' deben compartir nombre, categoría, marca y unidad. Revisá también la fila '.$grupos[$claveGrupo]['fila'].'.']);
+                        }
+                        $grupos[$claveGrupo] = ['datos' => $datos, 'fila' => $numero];
+                        $atributos = $ficha;
+                        ksort($atributos);
+                        $identidadVariante = json_encode([$claveGrupo, $condicion?->id, $atributos], JSON_THROW_ON_ERROR);
+                        $duplicada = isset($combinaciones[$identidadVariante]) && $combinaciones[$identidadVariante] !== $sku;
+                        $existenteIgual = $producto?->variantes->contains(function (ProductoVariante $item) use ($condicion, $atributos, $sku): bool {
+                            $fichaExistente = $item->atributos_json ?? [];
+                            ksort($fichaExistente);
+
+                            return $item->sku !== $sku && $item->condicion_producto_id === $condicion?->id && $fichaExistente === $atributos;
+                        }) ?? false;
+                        if ($duplicada || $existenteIgual) {
+                            throw ValidationException::withMessages(['condicion' => 'Ya hay otro SKU con esta condición y ficha para el mismo código de producto. Usá el mismo SKU para varios lotes o corregí la condición y los atributos.']);
+                        }
+                        $combinaciones[$identidadVariante] = $sku;
+                    }
                 } else {
                     $unidad = $producto->unidadBase;
                 }
@@ -204,6 +264,8 @@ class ImportarProductos
                 $revision['filas'][] = [
                     'fila' => $numero, 'sku' => $sku, 'nombre' => $datos['nombre'] ?? $producto->nombre, 'accion' => $accion,
                     'variante_id' => $variante?->id, 'producto' => $datos, 'variante' => $precios,
+                    'producto_id' => $producto?->id, 'codigo_producto' => $codigoProducto,
+                    'condicion' => $condicion?->nombre ?? $variante?->condicion?->nombre,
                     'cantidad' => $cantidad, 'costo' => $costo, 'proveedor_id' => $proveedorId, 'proveedor' => $fila['proveedor'],
                     'precio_menor' => $precios['precio_venta'] ?? $variante?->precio_venta,
                     'precio_mayor' => $precios['precio_mayor'] ?? $variante?->precio_mayor,
@@ -239,6 +301,8 @@ class ImportarProductos
     {
         $marca = $marcas->flatten()->firstWhere('id', $datos['marca_id']);
         $campos = [
+            ['Código del producto', $producto->codigo_repuesto, $datos['codigo_repuesto']],
+            ['Condición', $variante->condicion?->nombre, CondicionProducto::query()->find($precios['condicion_producto_id'])?->nombre],
             ['Nombre', $producto->nombre, $datos['nombre']],
             ['Marca', $producto->marca?->nombre, $marca?->nombre],
             ['Precio al por menor', $variante->precio_venta, $precios['precio_venta']],
@@ -415,7 +479,7 @@ class ImportarProductos
     public function resolverCatalogo(int $id, string $campo, string $origen, ?string $destino, bool $crear, TenantUser $usuario): ImportacionProducto
     {
         $this->consultar($id, $usuario);
-        $modelos = ['categoria' => Categoria::class, 'marca' => Marca::class, 'unidad_stock' => UnidadMedida::class, 'proveedor' => Proveedor::class];
+        $modelos = ['categoria' => Categoria::class, 'marca' => Marca::class, 'unidad_stock' => UnidadMedida::class, 'proveedor' => Proveedor::class, 'condicion' => CondicionProducto::class];
         Validator::make(compact('campo', 'origen', 'destino'), [
             'campo' => ['required', 'in:'.implode(',', array_keys($modelos))],
             'origen' => ['required', 'string', 'max:255'], 'destino' => ['nullable', 'string', 'max:255'],
@@ -436,7 +500,7 @@ class ImportarProductos
                 'unidad_stock' => 'simbolo', 'proveedor' => 'nombre_empresa', default => 'nombre'
             };
             if ($crear) {
-                abort_if($campo === 'unidad_stock', 403);
+                abort_if(in_array($campo, ['unidad_stock', 'condicion'], true), 403);
                 Gate::forUser($usuario)->authorize('create', $modelo);
                 $destino = trim($origen);
             }
@@ -444,7 +508,7 @@ class ImportarProductos
                 $query = $modelo::query()->whereRaw('lower('.$columna.') = lower(?)', [trim($destino)]);
                 if ($campo === 'unidad_stock') {
                     $query->where('uso', UsoUnidad::Cantidad);
-                } elseif ($campo === 'categoria') {
+                } elseif (in_array($campo, ['categoria', 'condicion'], true)) {
                     $query->where('is_active', true);
                 }
                 $coincidencias = $query->lockForUpdate()->get();
@@ -477,6 +541,7 @@ class ImportarProductos
             if ($importacion->moneda !== NegocioConfiguracion::codigoMoneda()) {
                 throw ValidationException::withMessages(['moneda' => 'Cambió la moneda del negocio. Volvé a cargar el archivo revisando los importes.']);
             }
+            NegocioConfiguracion::query()->lockForUpdate()->firstOrFail();
             ProductoVariante::query()->whereIn('sku', $skus)->orderBy('id')->lockForUpdate()->get();
             $revision = $this->revisar($importacion->filas, $importacion->almacen_id, $importacion->actualizar_existentes, $usuario);
             if ($revision['errores'] !== [] || ($importacion->almacen_id !== null && $revision['lotes'] === 0)) {
@@ -490,12 +555,19 @@ class ImportarProductos
                 return;
             }
             $variantes = [];
+            $productos = [];
             foreach ($revision['filas'] as $fila) {
                 $sku = $fila['sku'];
                 if (! isset($variantes[$sku])) {
                     $variante = $fila['variante_id'] ? ProductoVariante::query()->findOrFail($fila['variante_id']) : null;
                     if ($fila['accion'] === 'crear') {
-                        $producto = ProductoMaestro::query()->create($fila['producto']);
+                        $grupo = filled($fila['codigo_producto']) ? mb_strtolower($fila['codigo_producto']) : null;
+                        $producto = $fila['producto_id'] ? ProductoMaestro::query()->findOrFail($fila['producto_id'])
+                            : ($grupo !== null ? ($productos[$grupo] ?? null) : null);
+                        $producto ??= ProductoMaestro::query()->create($fila['producto']);
+                        if ($grupo !== null) {
+                            $productos[$grupo] = $producto;
+                        }
                         $variante = $producto->variantes()->create(['sku' => $sku, ...$fila['variante']]);
                     } elseif ($fila['accion'] === 'actualizar') {
                         $variante->productoMaestro->update($fila['producto']);

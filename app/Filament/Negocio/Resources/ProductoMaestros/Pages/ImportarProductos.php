@@ -104,7 +104,7 @@ class ImportarProductos extends Page implements HasTable
                         ])
                         ->maxSize(5120)->columnSpanFull(),
                     Toggle::make('actualizar_existentes')->label('Actualizar productos existentes por SKU')
-                        ->helperText('Activado, puede reemplazar nombre, marca, precios, código de barras y ficha técnica de los SKU encontrados. Revisá los cambios antes de confirmar. Apagado, conservan sus datos. Los SKU nuevos se crean en ambos casos.')
+                        ->helperText('Activado, puede reemplazar nombre, marca, condición, precios, código de barras y ficha técnica de los SKU encontrados. Condición vacía conserva la actual. El código del producto no se cambia por Excel. Revisá los cambios antes de confirmar. Apagado, conservan sus datos.')
                         ->visible(fn (): bool => auth('tenant')->user()->can('Update:ProductoMaestro')),
                     Toggle::make('inventario')->label('Cargar existencias iniciales')->live()
                         ->helperText('Para mercadería que ya tenés. Requiere almacén, fecha y al menos una fila con cantidad y costo válidos. Podés incluir productos sin stock dejando cantidad, costo y proveedor vacíos.')
@@ -135,7 +135,7 @@ class ImportarProductos extends Page implements HasTable
                 CheckboxList::make('campos')->label('Columnas del catálogo y del inventario')->columns(2)
                     ->options(array_diff_key(MapearColumnasProductos::CAMPOS, ['atributos' => true]))
                     ->default(array_values(array_diff(ArchivoProductos::COLUMNAS, ['atributos'])))
-                    ->helperText('El SKU siempre se incluye. Los campos obligatorios que falten se deberán completar durante la revisión.'),
+                    ->helperText('El SKU interno siempre se incluye. Repetí el código del producto para agrupar sus variantes y elegí una condición por fila. Los datos que falten se pueden completar durante la revisión.'),
             ])
             ->action(fn (array $data): StreamedResponse => $this->descargarPlantilla($data['categorias'] ?? [], $data['campos'] ?? []))];
     }

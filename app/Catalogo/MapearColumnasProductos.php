@@ -10,7 +10,8 @@ use Illuminate\Validation\ValidationException;
 class MapearColumnasProductos
 {
     public const CAMPOS = [
-        'sku' => 'SKU / Código', 'nombre' => 'Nombre del producto', 'categoria' => 'Categoría',
+        'codigo_producto' => 'Código del producto', 'condicion' => 'Condición',
+        'sku' => 'SKU interno', 'nombre' => 'Nombre del producto', 'categoria' => 'Categoría',
         'marca' => 'Marca', 'unidad_stock' => 'Unidad de stock', 'codigo_barras' => 'Código de barras',
         'precio_menor' => 'Precio al por menor', 'precio_mayor' => 'Precio al por mayor',
         'cantidad_inicial' => 'Cantidad inicial', 'costo_unitario' => 'Costo unitario',
@@ -51,7 +52,9 @@ class MapearColumnasProductos
     {
         $atributos = $this->atributos();
         $opciones = $this->opciones();
-        $alias = ['codigo' => 'sku', 'producto' => 'nombre', 'nombre' => 'nombre', 'unidad' => 'unidad_stock',
+        $alias = ['codigo' => 'sku', 'sku codigo' => 'sku', 'codigo comun' => 'codigo_producto', 'codigo repuesto' => 'codigo_producto',
+            'codigo del repuesto' => 'codigo_producto', 'codigo comun del repuesto' => 'codigo_producto', 'sku interno de la variante' => 'sku', 'condicion del producto' => 'condicion',
+            'estado' => 'condicion', 'producto' => 'nombre', 'nombre' => 'nombre', 'unidad' => 'unidad_stock',
             'stock' => 'cantidad_inicial', 'cantidad' => 'cantidad_inicial', 'costo' => 'costo_unitario',
             'precio' => 'precio_menor', 'precio minorista' => 'precio_menor', 'precio mayorista' => 'precio_mayor'];
         $usados = [];
@@ -91,7 +94,7 @@ class MapearColumnasProductos
             $usados[$destino] = true;
         }
         if (! isset($usados['sku'])) {
-            throw ValidationException::withMessages(['columnasData.mapa' => 'Relacioná una columna con el SKU / Código.']);
+            throw ValidationException::withMessages(['columnasData.mapa' => 'Relacioná una columna con el SKU interno de cada variante.']);
         }
 
         return array_map(function (array $origen) use ($archivo, $mapa): array {

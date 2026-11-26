@@ -74,7 +74,7 @@ function escenarioImportacion(): array
 function filaImportacion(array $cambios = []): array
 {
     return array_replace(array_fill_keys(ArchivoProductos::COLUMNAS, ''), [
-        'fila' => 2, 'sku' => '0006206', 'nombre' => 'Rodamiento 6206', 'categoria' => 'Rodamientos',
+        'fila' => 2, 'sku' => '0006206', 'condicion' => 'Nuevo', 'nombre' => 'Rodamiento 6206', 'categoria' => 'Rodamientos',
         'unidad_stock' => 'pza', 'codigo_barras' => '001234567890', 'precio_menor' => '45', 'precio_mayor' => '40',
     ], $cambios);
 }
@@ -255,8 +255,9 @@ it('conserva el JSON inválido y las columnas de ficha sin correspondencia al de
         app(ArchivoProductos::class)->pendientes($ruta, [$fila], [2 => ['Corregí la categoría.']], 'IMP-000001');
         $contenido = app(ArchivoProductos::class)->inspeccionar($ruta);
         expect($contenido['columnas'])->toContain('ficha_999999');
-        expect($contenido['filas'][0]['valores'][11])->toBe('{json inválido');
-        expect($contenido['filas'][0]['valores'][12])->toBe('005');
+        $valores = array_combine($contenido['columnas'], $contenido['filas'][0]['valores']);
+        expect($valores['atributos'])->toBe('{json inválido');
+        expect($valores['ficha_999999'])->toBe('005');
     } finally {
         unlink($ruta);
     }
@@ -528,8 +529,8 @@ it('relaciona un Excel propio y confirma atributos decimales y listas sin JSON',
     $writer = new Writer;
     try {
         $writer->openToFile($ruta);
-        $writer->addRow(Row::fromValues(['Producto', 'Código', 'Familia', 'Unidad', 'Precio', 'Diámetro', 'Sellos', 'Nota personal']));
-        $writer->addRow(ArchivoProductos::filaDeTexto(['Rodamiento', '000008', 'Rodamientos', 'pza', '45', '5,5', '2RS|ZZ', 'No importar']));
+        $writer->addRow(Row::fromValues(['Producto', 'Código', 'Familia', 'Unidad', 'Precio', 'Diámetro', 'Sellos', 'Nota personal', 'Condición']));
+        $writer->addRow(ArchivoProductos::filaDeTexto(['Rodamiento', '000008', 'Rodamientos', 'pza', '45', '5,5', '2RS|ZZ', 'No importar', 'Nuevo']));
         $writer->close();
         $archivo = UploadedFile::fake()->createWithContent('mi-catalogo.xlsx', file_get_contents($ruta));
     } finally {
@@ -566,9 +567,9 @@ it('valida atributos por categoría y permite completar la ficha desde el panel 
     $diametro = CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $categoria->id, 'clave' => 'diametro', 'etiqueta' => 'Diámetro', 'obligatorio' => true]);
     $largo = CategoriaAtributo::factory()->decimal()->create(['categoria_id' => $otra->id, 'clave' => 'largo', 'etiqueta' => 'Largo', 'obligatorio' => true]);
     $mapeador = app(MapearColumnasProductos::class);
-    $archivo = ['columnas' => ['sku', 'nombre', 'categoria', 'unidad_stock', 'precio_menor', 'Diámetro', 'Largo'], 'filas' => [
-        ['fila' => 2, 'valores' => ['ROD', 'Rodamiento', 'Rodamientos', 'pza', '45', 'incorrecto', '']],
-        ['fila' => 3, 'valores' => ['COR', 'Correa', 'Correas', 'pza', '40', '', '15']],
+    $archivo = ['columnas' => ['sku', 'nombre', 'categoria', 'unidad_stock', 'precio_menor', 'Diámetro', 'Largo', 'condicion'], 'filas' => [
+        ['fila' => 2, 'valores' => ['ROD', 'Rodamiento', 'Rodamientos', 'pza', '45', 'incorrecto', '', 'Nuevo']],
+        ['fila' => 3, 'valores' => ['COR', 'Correa', 'Correas', 'pza', '40', '', '15', 'Nuevo']],
     ]];
     $filas = $mapeador->aplicar($archivo, $mapeador->sugerir($archivo['columnas']));
     $servicio = app(ImportarProductos::class);
@@ -1032,7 +1033,7 @@ it('resume los campos pendientes de la tarjeta móvil y conserva la corrección 
     ['usuario' => $usuario, 'categoria' => $categoria] = escenarioImportacion();
     $importacion = app(ImportarProductos::class)->preparar([filaImportacion(['categoria' => 'Sin categoría registrada', 'marca' => 'Marca del Excel'])], 'tarjetas.xlsx', null, null, false, $usuario);
     Livewire::actingAs($usuario, 'tenant')->test(RevisionImportacionProductos::class, ['importacionId' => $importacion->id])
-        ->assertSee('Fila 2 · 0006206')->assertSee('Revisar categoría y marca.')
+        ->assertSee('Código 0006206 · Nuevo · Fila 2')->assertSee('Revisar categoría y marca.')
         ->callTableBulkAction('asignarCampo', ['2'], ['campo' => 'categoria', 'valor' => $categoria->nombre])
         ->assertHasNoErrors()->assertSee('Revisar marca.')->assertDontSee('Revisar categoría y marca.');
     expect(ProductoVariante::query()->count())->toBe(0);

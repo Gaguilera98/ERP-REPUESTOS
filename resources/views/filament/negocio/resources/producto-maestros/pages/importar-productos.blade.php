@@ -37,7 +37,7 @@
             <x-slot name="description">{{ $carga->almacen?->nombre ?? 'Solo catálogo' }} @if ($carga->fecha_inventario) · Inventario al {{ $carga->fecha_inventario->format('d/m/Y') }} @endif · {{ $carga->usuario->name }}</x-slot>
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <div class="flex flex-wrap gap-x-8 gap-y-3 text-sm">
-                    <p><span class="block text-gray-500 dark:text-gray-400">Productos nuevos</span><strong class="text-xl">{{ $revision['nuevos'] }}</strong></p>
+                    <p><span class="block text-gray-500 dark:text-gray-400">Variantes nuevas</span><strong class="text-xl">{{ $revision['nuevos'] }}</strong></p>
                     <p><span class="block text-gray-500 dark:text-gray-400">Se actualizarán</span><strong class="text-xl">{{ $revision['actualizados'] }}</strong></p>
                     <p><span class="block text-gray-500 dark:text-gray-400">Conservan sus datos</span><strong class="text-xl">{{ $revision['conservados'] }}</strong></p>
                     @if ($carga->almacen_id)

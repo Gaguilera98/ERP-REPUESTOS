@@ -5,6 +5,7 @@ namespace App\Catalogo;
 use App\Enums\TipoAtributoCategoria;
 use App\Enums\UsoUnidad;
 use App\Models\Categoria;
+use App\Models\CondicionProducto;
 use App\Models\Marca;
 use App\Models\Proveedor;
 use App\Models\UnidadMedida;
@@ -23,6 +24,7 @@ class ArchivoProductos
     public const MAX_FILAS = 1000;
 
     public const COLUMNAS = [
+        'codigo_producto', 'condicion',
         'sku', 'nombre', 'categoria', 'marca', 'unidad_stock', 'codigo_barras',
         'precio_menor', 'precio_mayor', 'cantidad_inicial', 'costo_unitario', 'proveedor', 'atributos',
     ];
@@ -119,7 +121,7 @@ class ArchivoProductos
     {
         $atributos = array_filter(app(MapearColumnasProductos::class)->atributos(), fn (array $campo): bool => array_intersect(array_keys($campo['categorias']), $categorias) !== []);
         $base = array_values(array_diff(self::COLUMNAS, ['atributos']));
-        $columnas = [...($campos === null ? $base : array_values(array_unique(['sku', ...array_intersect($base, $campos)]))), ...array_column($atributos, 'label')];
+        $columnas = [...($campos === null ? $base : array_values(array_filter($base, fn (string $campo): bool => $campo === 'sku' || in_array($campo, $campos, true)))), ...array_column($atributos, 'label')];
         if (count($columnas) > 100) {
             throw ValidationException::withMessages(['categorias' => 'Elegí menos categorías para mantener la plantilla dentro de 100 columnas.']);
         }
@@ -131,16 +133,19 @@ class ArchivoProductos
             $sheet->setColumnWidth(24, ...range(1, count($columnas)));
             $writer->addRow(self::filaDeTexto($columnas));
             $texto = (new Style)->setFormat('@');
-            $estilos = array_fill_keys(array_keys(array_filter($columnas, fn (string $columna): bool => in_array($columna, ['sku', 'codigo_barras'], true))), $texto);
+            $estilos = array_fill_keys(array_keys(array_filter($columnas, fn (string $columna): bool => in_array($columna, ['codigo_producto', 'sku', 'codigo_barras'], true))), $texto);
             for ($fila = 0; $fila < self::MAX_FILAS; $fila++) {
                 $writer->addRow(Row::fromValuesWithStyles(array_fill(0, count($columnas), ''), columnStyles: $estilos));
             }
             $writer->addNewSheetAndMakeItCurrent()->setName('Instrucciones y ejemplo');
-            $ejemplo = array_combine(self::COLUMNAS, ['0006206', 'Rodamiento 6206', 'Rodamientos', '', 'pza', '001234567890', '45', '40', '20', '28', '', '']);
+            $ejemplo = array_combine(self::COLUMNAS, ['0006206', 'Nuevo', '0006206-N', 'Rodamiento 6206', 'Rodamientos', '', 'pza', '001234567890', '45', '40', '20', '28', '', '']);
             foreach ([
                 ['Completá la primera hoja. El ejemplo de esta hoja no se importa.'],
                 ['Hasta '.self::MAX_FILAS.' filas. Podés usar otro orden o relacionar columnas de tu propio archivo en la pantalla.'],
                 ['SKU y código de barras', 'Usá formato Texto antes de escribir para conservar ceros iniciales.'],
+                ['Código del producto', 'Opcional. Repetí este código en las variantes del mismo producto. Conservá iguales nombre, categoría, marca y unidad. Si está vacío, cada SKU nuevo crea un producto independiente.'],
+                ['Condición', 'Obligatoria para variantes nuevas. Copiá un nombre de Catálogos del negocio: Nuevo, Usado u otra condición activa. Si falta, podés asignarla a varias filas durante la revisión.'],
+                ['SKU interno', 'Obligatorio y único para cada variante. Ejemplo: código 0006206 con SKU 0006206-N para Nuevo y 0006206-U para Usado.'],
                 ['Precios y costos', 'Importes en '.$moneda.'. Usá punto o coma decimal, sin separador de miles.'],
                 ['Catálogo', 'Nombre, categoría, unidad_stock y precio_menor son obligatorios para un SKU nuevo.'],
                 ['Existentes', 'Para actualizar, marcá la opción en la pantalla. Las celdas opcionales vacías conservan sus valores.'],
@@ -154,6 +159,7 @@ class ArchivoProductos
                 ['Solo catálogo', 'Dejá vacías cantidad_inicial, costo_unitario y proveedor.'],
                 $columnas,
                 array_map(fn (string $columna): string => $ejemplo[$columna] ?? '', $columnas),
+                array_map(fn (string $columna): string => array_replace($ejemplo, ['condicion' => 'Usado', 'sku' => '0006206-U', 'codigo_barras' => '', 'precio_menor' => '30', 'precio_mayor' => '25', 'cantidad_inicial' => '3', 'costo_unitario' => '18'])[$columna] ?? '', $columnas),
             ] as $valores) {
                 $writer->addRow(self::filaDeTexto($valores));
             }
@@ -162,6 +168,7 @@ class ArchivoProductos
             $writer->addRow(Row::fromValues(['Tipo', 'Valor para copiar']));
             foreach ([
                 'Categoría' => Categoria::query()->where('is_active', true)->orderBy('nombre')->pluck('nombre'),
+                'Condición' => CondicionProducto::query()->where('is_active', true)->orderBy('orden')->pluck('nombre'),
                 'Marca' => Marca::query()->orderBy('nombre')->pluck('nombre'),
                 'Unidad de stock' => UnidadMedida::query()->where('uso', UsoUnidad::Cantidad)->orderBy('simbolo')->pluck('simbolo'),
                 'Proveedor' => Proveedor::query()->orderBy('nombre_empresa')->pluck('nombre_empresa'),
