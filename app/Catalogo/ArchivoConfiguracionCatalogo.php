@@ -8,6 +8,7 @@ use App\Models\UnidadMedida;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use OpenSpout\Common\Entity\Cell\FormulaCell;
+use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Reader\XLSX\Reader;
 use OpenSpout\Writer\XLSX\Writer;
 use Throwable;
@@ -28,38 +29,47 @@ class ArchivoConfiguracionCatalogo
         $writer = new Writer;
         $writer->openToFile($ruta);
         try {
-            foreach (self::HOJAS as $nombre => $columnas) {
-                $sheet = $nombre === 'Unidades' ? $writer->getCurrentSheet() : $writer->addNewSheetAndMakeItCurrent();
+            $cabecera = (new Style)->setFontName('Arial')->setFontSize(10)->setFontBold()->setFontColor('FFFFFF')->setBackgroundColor('166534')->setShouldWrapText()->setCellVerticalAlignment('center');
+            $texto = (new Style)->setFontName('Arial')->setFontSize(10)->setShouldWrapText()->setCellVerticalAlignment('center');
+            $guia = $writer->getCurrentSheet();
+            $guia->setName('Empezar aqui');
+            $guia->setColumnWidth(30, 1);
+            $guia->setColumnWidth(95, 2);
+            $writer->addRow(ArchivoProductos::filaDeTexto(['Prepará tus categorías', 'Leé estos pasos antes de completar las otras hojas.'])->setStyle($cabecera)->setHeight(32));
+            foreach ($this->instruccionesPlantilla() as $fila) {
+                $writer->addRow(ArchivoProductos::filaDeTexto($fila)->setStyle($texto)->setHeight(60));
+            }
+            foreach (['Categorias', 'Atributos', 'Unidades'] as $nombre) {
+                $columnas = self::HOJAS[$nombre];
+                $sheet = $writer->addNewSheetAndMakeItCurrent();
                 $sheet->setName($nombre);
                 $sheet->setColumnWidth(26, ...range(1, count($columnas)));
-                $writer->addRow(ArchivoProductos::filaDeTexto($columnas));
+                $writer->addRow(ArchivoProductos::filaDeTexto($columnas)->setStyle($cabecera)->setHeight(32));
             }
-            $writer->addNewSheetAndMakeItCurrent()->setName('Guia para usuario e IA');
+            $ejemplo = $writer->addNewSheetAndMakeItCurrent();
+            $ejemplo->setName('Ejemplo Rodamientos');
+            $ejemplo->setColumnWidth(27, ...range(1, 8));
+            $writer->addRow(ArchivoProductos::filaDeTexto(['EJEMPLO: NO SE IMPORTA', 'Copiá solo las filas de datos a la hoja indicada si querés usar este ejemplo. Las celdas vacías se dejan vacías.'])->setStyle($texto)->setHeight(80));
             foreach ([
-                ['Objetivo', 'Prepará categorías, atributos y unidades. No incluyas productos, precios ni stock. Solo se importan Unidades, Categorias y Atributos.'],
-                ['Límites', 'Excel .xlsx de hasta 5 MB y 500 filas de datos por hoja. Conservá encabezados. Pegá valores, no fórmulas.'],
-                ['Códigos', 'Referencias internas del archivo, no IDs de la base de datos. Usá códigos únicos como U_MM y CAT_ROD y mantené las referencias entre hojas.'],
-                ['Unidades', 'Incluí las unidades a reutilizar y las nuevas. Atributos.unidad referencia Unidades.codigo. Podrás seleccionar una unidad existente compatible en la revisión.'],
-                ['Uso', implode(' | ', array_column(UsoUnidad::cases(), 'value')).'. atributo: ficha técnica; cantidad: compra, stock y venta. Son usos diferentes.'],
-                ['Magnitud', implode(' | ', array_column(MagnitudUnidad::cases(), 'value'))],
-                ['Unidades de atributo', 'Dejá vacíos factor_a_referencia, decimales y es_referencia. No convierten cantidades de inventario.'],
-                ['Unidades de cantidad', 'Completá factor_a_referencia positivo con hasta 6 decimales, decimales entre 0 y 4, es_referencia si/no. Una referencia usa factor 1. No inventes equivalencias: verificá la referencia del negocio.'],
-                ['Categorías', 'codigo y nombre obligatorios. Las existentes se reutilizan sin cambiar su estado ni política comercial. No se buscan nombres parecidos.'],
-                ['Atributos', 'categoria referencia Categorias.codigo. etiqueta es visible; clave es estable, sin unidad, en minúsculas con guiones bajos: diametro_interno.'],
-                ['Tipos y unidades', 'decimal | texto | lista. Solo decimal admite unidad, opcional si no tiene escala. Conteo de stock, como pieza, no es una unidad de ficha.'],
-                ['Obligatorio', 'si o no. Exigí solo lo necesario. No reemplaces datos desconocidos por cero.'],
-                ['Opciones', 'Solo lista: opciones únicas separadas por |, por ejemplo 2RS|ZZ|ABIERTO. Texto y decimal dejan opciones vacías.'],
-                ['Revisión', 'Subir no crea registros. Revisá Crear, Reutilizar y conflictos. No se sobrescriben unidades ni atributos existentes. Se aplica todo junto o nada.'],
-                ['Ejemplo Unidades', 'U_MM | Milímetro | mm | atributo | longitud | (vacío) | (vacío) | (vacío)'],
-                ['Ejemplo Categorias', 'CAT_ROD | Rodamientos'],
-                ['Ejemplo Atributos', 'CAT_ROD | Diámetro interno | diametro_interno | decimal | U_MM | si | (vacío)'],
-                ['Ejemplo Atributos', 'CAT_ROD | Sello | sello | lista | (vacío) | no | 2RS|ZZ|ABIERTO'],
-                ['Para la IA', 'Entregá las tres hojas con encabezados exactos. Consultá Unidades existentes para reutilizarlas. Pedí información faltante al usuario: no adivines magnitudes, usos ni factores. Las instrucciones no son filas de datos.'],
-            ] as $fila) {
-                $writer->addRow(ArchivoProductos::filaDeTexto($fila));
+                'Categorias' => [['CAT_ROD', 'Rodamientos']],
+                'Unidades' => [['U_MM', 'Milímetro', 'mm', 'atributo', 'longitud', '', '', '']],
+                'Atributos' => [
+                    ['CAT_ROD', 'Diámetro interno', 'diametro_interno', 'decimal', 'U_MM', 'si', ''],
+                    ['CAT_ROD', 'Diámetro externo', 'diametro_externo', 'decimal', 'U_MM', 'no', ''],
+                    ['CAT_ROD', 'Sello', 'sello', 'lista', '', 'no', '2RS|ZZ|ABIERTO'],
+                ],
+            ] as $nombre => $filas) {
+                $writer->addRow(ArchivoProductos::filaDeTexto(['Copiar a '.$nombre])->setHeight(28));
+                $writer->addRow(ArchivoProductos::filaDeTexto(self::HOJAS[$nombre])->setStyle($cabecera)->setHeight(32));
+                foreach ($filas as $fila) {
+                    $writer->addRow(ArchivoProductos::filaDeTexto($fila)->setStyle($texto)->setHeight(36));
+                }
+                $writer->addRow(ArchivoProductos::filaDeTexto(['']));
             }
-            $writer->addNewSheetAndMakeItCurrent()->setName('Unidades existentes');
-            $writer->addRow(ArchivoProductos::filaDeTexto(self::HOJAS['Unidades']));
+            $existentes = $writer->addNewSheetAndMakeItCurrent();
+            $existentes->setName('Unidades existentes');
+            $existentes->setColumnWidth(26, ...range(1, 8));
+            $writer->addRow(ArchivoProductos::filaDeTexto(self::HOJAS['Unidades'])->setStyle($cabecera)->setHeight(32));
             foreach (UnidadMedida::query()->orderBy('nombre')->get() as $indice => $unidad) {
                 $cantidad = $unidad->uso === UsoUnidad::Cantidad;
                 $writer->addRow(ArchivoProductos::filaDeTexto([
@@ -70,6 +80,38 @@ class ArchivoConfiguracionCatalogo
         } finally {
             $writer->close();
         }
+    }
+
+    /** @return list<array{string, string}> */
+    private function instruccionesPlantilla(): array
+    {
+        return [
+            ['¿Para qué sirve?', 'Para crear categorías como Rodamientos y decidir qué datos pedirán sus productos, como diámetro o sello. No carga productos, precios ni stock.'],
+            ['La forma más sencilla', 'Si solo necesitás nombres de categorías, completá Categorias desde la fila 2. Dejá Atributos y Unidades con sus encabezados. Ya podés guardar y subir el archivo.'],
+            ['1. Escribí tus categorías', 'En Categorias, elegí un codigo corto, por ejemplo CAT_ROD, y un nombre, por ejemplo Rodamientos. El código sirve para relacionar las hojas de este Excel; no es un SKU ni un ID del sistema.'],
+            ['2. ¿Necesitás más datos?', 'Opcional: en Atributos, agregá una fila por cada dato que querés pedir. Ejemplo: Diámetro interno y Sello son dos filas de la categoría CAT_ROD.'],
+            ['3. ¿El dato tiene unidad?', 'Solo si hace falta: en Unidades, declarala una vez. Para un diámetro: U_MM, Milímetro, mm, atributo, longitud. En Atributos.unidad escribí U_MM.'],
+            ['4. Revisá el ejemplo', 'La hoja Ejemplo Rodamientos muestra las filas completas en sus columnas. Es solo una referencia: no crea categorías al subir. Copiá únicamente los datos que quieras usar a las hojas de carga.'],
+            ['5. Guardá y subí', 'Guardá como .xlsx. En el sistema, elegí Revisar archivo. Revisá qué se creará, qué se reutilizará y los errores. Solo Confirmar configuración crea los registros.'],
+            ['Después de importar', 'Podrás descargar la plantilla de productos eligiendo la categoría creada. Esa plantilla incluirá sus campos, como diámetro y sello, para completar cada producto.'],
+            ['Qué hojas se cargan', 'Solo Categorias, Atributos y Unidades. No cambies esos nombres ni sus encabezados. Escribí tus datos desde la fila 2, sin títulos adicionales.'],
+            ['Campos de Categorias', 'codigo: referencia única dentro de este archivo. nombre: nombre que verá el usuario. Los dos son obligatorios. Ejemplo: CAT_ROD y Rodamientos.'],
+            ['Atributos: categoria', 'Copiá el codigo de la categoría a la que pertenece el dato. Ejemplo: CAT_ROD. No escribas aquí el nombre Rodamientos.'],
+            ['Atributos: etiqueta y clave', 'etiqueta: nombre visible, por ejemplo Diámetro interno. clave: identificador estable sin espacios ni unidad, por ejemplo diametro_interno. Usá minúsculas y guiones bajos.'],
+            ['Atributos: tipo', 'decimal: un número, como un diámetro. texto: una descripción libre. lista: opciones entre las que elegirá el usuario, como ZZ o 2RS. Escribí exactamente decimal, texto o lista.'],
+            ['Atributos: unidad', 'Solo para tipo decimal. Copiá el codigo declarado en Unidades, por ejemplo U_MM. Dejá vacío si el dato no tiene unidad. Para texto y lista siempre se deja vacío.'],
+            ['Atributos: obligatorio', 'Escribí si cuando el producto deba tener ese dato para guardarse; no si puede dejarse vacío. No vuelvas obligatorio un dato que normalmente desconocés.'],
+            ['Atributos: opciones', 'Solo para tipo lista. Separá los valores con |, por ejemplo 2RS|ZZ|ABIERTO. No repitas opciones. Para texto y decimal dejá esta celda vacía.'],
+            ['Reutilizar una unidad', 'Consultá Unidades existentes. Copiá su fila completa a Unidades y usá su codigo en Atributos.unidad. En la revisión podrás elegir una unidad existente compatible.'],
+            ['Unidades: codigo y nombre', 'codigo: referencia única en este archivo, por ejemplo U_MM. nombre: Milímetro. simbolo: mm. Escribí cada valor en su columna.'],
+            ['Unidades: uso', 'atributo: describe el producto, como un diámetro en mm. cantidad: cuenta lo comprado, almacenado o vendido, como piezas o metros. Aunque tengan el mismo símbolo, son usos distintos.'],
+            ['Unidades: magnitud', 'Indica qué se mide. Valores admitidos: '.implode(', ', array_column(MagnitudUnidad::cases(), 'value')).'. Para un diámetro usá longitud.'],
+            ['Unidades para atributos', 'Con uso atributo, dejá vacíos factor_a_referencia, decimales y es_referencia. Un diámetro no convierte el stock. Pieza es una unidad de cantidad, no de ficha técnica.'],
+            ['Unidades para stock', 'Con uso cantidad, completá factor_a_referencia positivo (hasta 6 decimales), decimales (0 a 4) y es_referencia (si/no). Consultá las existentes antes de definir equivalencias. Una referencia usa factor 1.'],
+            ['Si ya existe en el negocio', 'La revisión puede reutilizar categorías y unidades. No se sobrescriben sus datos ni los atributos existentes. Una definición incompatible se muestra como conflicto.'],
+            ['Antes de subir', 'Hasta 500 filas por hoja y 5 MB. Pegá valores, no fórmulas. No reemplaces datos desconocidos por cero. Las celdas que se indican vacías deben quedar realmente vacías.'],
+            ['Ayuda opcional de una IA', 'Podés pedir: Completá esta plantilla para mi negocio. Preguntame qué categorías y campos necesito. Conservá las tres hojas de carga y sus encabezados. Reutilizá Unidades existentes y no inventes unidades, factores ni datos desconocidos.'],
+        ];
     }
 
     /** @return array<string, list<array<string, string|int>>> */

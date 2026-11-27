@@ -293,7 +293,7 @@ it('revierte unidades y categorías si falla la creación de un atributo', funct
     expect(CategoriaAtributo::query()->count())->toBe(0);
 });
 
-it('descarga una plantilla con guía para IA y catálogo real de unidades', function () {
+it('descarga una plantilla con pasos y ejemplos separados de las hojas que se importan', function () {
     $usuario = usuarioConfiguracionCatalogo();
     Livewire::actingAs($usuario, 'tenant')->test(ImportarConfiguracion::class)->call('descargarPlantilla')->assertFileDownloaded('plantilla-categorias-unidades.xlsx');
     $ruta = tempnam(sys_get_temp_dir(), 'plantilla-config-test-');
@@ -303,10 +303,35 @@ it('descarga una plantilla con guía para IA y catálogo real de unidades', func
         $reader->open($ruta);
         $hojas = [];
         foreach ($reader->getSheetIterator() as $sheet) {
-            $hojas[] = $sheet->getName();
+            $hojas[$sheet->getName()] = [];
+            foreach ($sheet->getRowIterator() as $row) {
+                $hojas[$sheet->getName()][] = $row->toArray();
+            }
         }
         $reader->close();
-        expect($hojas)->toBe(['Unidades', 'Categorias', 'Atributos', 'Guia para usuario e IA', 'Unidades existentes']);
+        expect(array_keys($hojas))->toBe(['Empezar aqui', 'Categorias', 'Atributos', 'Unidades', 'Ejemplo Rodamientos', 'Unidades existentes']);
+        foreach (ArchivoConfiguracionCatalogo::HOJAS as $nombre => $columnas) {
+            expect($hojas[$nombre])->toBe([$columnas]);
+        }
+        expect($hojas['Unidades existentes'])->toHaveCount(UnidadMedida::query()->count() + 1);
+
+        $writer = new Writer;
+        $writer->openToFile($ruta);
+        foreach ($hojas as $nombre => $filas) {
+            $sheet = $nombre === 'Empezar aqui' ? $writer->getCurrentSheet() : $writer->addNewSheetAndMakeItCurrent();
+            $sheet->setName($nombre);
+            foreach ($filas as $fila) {
+                $writer->addRow(ArchivoProductos::filaDeTexto($fila));
+            }
+            if ($nombre === 'Categorias') {
+                $writer->addRow(ArchivoProductos::filaDeTexto(['CAT_PROPIA', 'Mi categoría']));
+            }
+        }
+        $writer->close();
+        $datos = app(ArchivoConfiguracionCatalogo::class)->leer($ruta);
+        expect($datos['Categorias'])->toBe([['_fila' => 2, 'codigo' => 'CAT_PROPIA', 'nombre' => 'Mi categoría']]);
+        expect($datos['Atributos'])->toBe([]);
+        expect($datos['Unidades'])->toBe([]);
     } finally {
         unset($reader, $sheet);
         gc_collect_cycles();

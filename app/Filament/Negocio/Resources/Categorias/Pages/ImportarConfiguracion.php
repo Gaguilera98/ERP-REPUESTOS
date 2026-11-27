@@ -67,7 +67,7 @@ class ImportarConfiguracion extends Page
     public function form(Schema $schema): Schema
     {
         return $schema->statePath('data')->components([
-            Section::make('Subir configuración')->description('Un Excel con las hojas Unidades, Categorias y Atributos. La plantilla incluye instrucciones para completarlo con ayuda de una IA. Subir no crea registros.')
+            Section::make('Subir configuración')->description('Descargá la plantilla y abrí Empezar aqui. Podés cargar solo los nombres de tus categorías o agregar sus campos y unidades. Incluye un ejemplo de Rodamientos. Subir el archivo no crea registros.')
                 ->schema([FileUpload::make('archivo')->label('Archivo Excel')->required()->storeFiles(false)->maxSize(5120)
                     ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])
                     ->validationMessages(['required' => 'Seleccioná el Excel de configuración.', 'mimetypes' => 'Subí un Excel con extensión .xlsx.', 'max' => 'El archivo admite hasta 5 MB.', 'uploaded' => 'No se pudo subir el archivo. Volvé a seleccionarlo.'])]),
