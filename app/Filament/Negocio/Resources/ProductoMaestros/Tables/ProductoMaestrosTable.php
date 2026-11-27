@@ -22,6 +22,7 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Js;
 
 class ProductoMaestrosTable
 {
@@ -50,10 +51,15 @@ class ProductoMaestrosTable
                 ImageColumn::make('imagenes')
                     ->label('Foto')
                     ->disk('public')
-                    ->circular()
-                    ->stacked()
+                    ->square()
+                    ->imageSize(40)
                     ->limit(1)
-                    ->defaultImageUrl(url('/images/placeholder-part.svg')),
+                    ->defaultImageUrl(asset('images/placeholder-part.svg'))
+                    ->extraImgAttributes([
+                        'alt' => 'Foto del producto',
+                        'class' => 'rounded-lg',
+                        'onerror' => 'this.onerror = null; this.src = '.Js::from(asset('images/placeholder-part.svg')).';',
+                    ]),
 
                 TextColumn::make('codigo_repuesto')
                     ->label('Código del producto')
